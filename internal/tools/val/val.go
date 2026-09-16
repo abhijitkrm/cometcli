@@ -369,7 +369,7 @@ func coins(cs []*basev1beta1.DecCoin) string {
 	}
 	var parts []string
 	for _, c := range cs {
-		parts = append(parts, c.Amount+c.Denom)
+		parts = append(parts, common.DecFrac(string(c.Amount))+c.Denom)
 	}
 	return strings.Join(parts, ", ")
 }
