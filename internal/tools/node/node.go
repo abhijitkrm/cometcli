@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/abhijitkrm/cometcli/internal/client/host"
-	"github.com/abhijitkrm/cometcli/internal/tools/common"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
+	"github.com/abhijitkrm/cometcli/internal/tools/common"
 )
 
 // Register adds all node.* tools to the registry.
@@ -96,9 +96,9 @@ func (logsTool) Desc() string {
 }
 func (logsTool) Schema() map[string]any {
 	return toolkit.ObjSchema(map[string]any{
-		"lines":  toolkit.Int("number of lines (default 80)"),
-		"grep":   toolkit.Str("substring filter"),
-		"level":  toolkit.Enum("log level filter", "error", "info", "debug"),
+		"lines": toolkit.Int("number of lines (default 80)"),
+		"grep":  toolkit.Str("substring filter"),
+		"level": toolkit.Enum("log level filter", "error", "info", "debug"),
 	})
 }
 func (logsTool) Tier() toolkit.Tier { return toolkit.TierDiagnose }

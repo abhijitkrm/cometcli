@@ -10,14 +10,15 @@ package keys
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/99designs/keyring"
-	"github.com/cosmos/go-bip39"
 	"github.com/cosmos/btcutil/bech32"
+	"github.com/cosmos/go-bip39"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	bip32 "github.com/tyler-smith/go-bip32"
@@ -180,6 +181,23 @@ func (r *Ring) Generate(name, mnemonic string, algo Algo, coinType, account, ind
 	return k, mnemonic, err
 }
 
+// ImportHex stores a raw secp256k1 private key (64 hex chars, no 0x).
+// Recorded as "algo|hex:<hex>|0|0|0" — no derivation needed on load.
+func (r *Ring) ImportHex(name, hexkey string, algo Algo) (*Key, error) {
+	raw, err := hex.DecodeString(strings.TrimPrefix(strings.TrimSpace(hexkey), "0x"))
+	if err != nil || len(raw) != 32 {
+		return nil, fmt.Errorf("invalid secp256k1 private key hex")
+	}
+	rec := fmt.Sprintf("%s|hex:%s|%d|%d|%d", algo, hex.EncodeToString(raw), 0, 0, 0)
+	if err := r.put(name, rec); err != nil {
+		return nil, err
+	}
+	priv := secp256k1.PrivKeyFromBytes(raw)
+	k := &Key{Name: name, Algo: algo, priv: priv, PubKey: priv.PubKey().SerializeCompressed()}
+	k.Address = AddressFor(algo, priv.PubKey())
+	return k, nil
+}
+
 // Get loads and derives a stored key.
 func (r *Ring) Get(name string) (*Key, error) {
 	item, err := r.kr.Get(name)
@@ -201,7 +219,19 @@ func (r *Ring) derive(name, rec, mnemonic string) (*Key, error) {
 	fmt.Sscanf(parts[2], "%d", &coin)
 	fmt.Sscanf(parts[3], "%d", &account)
 	fmt.Sscanf(parts[4], "%d", &index)
-	priv, err := Derive(mnemonic, algo, coin, account, index)
+	var priv *secp256k1.PrivateKey
+	var err error
+	if hexPart, ok := strings.CutPrefix(parts[1], "hex:"); ok {
+		var raw []byte
+		raw, err = hex.DecodeString(hexPart)
+		if err == nil && len(raw) == 32 {
+			priv = secp256k1.PrivKeyFromBytes(raw)
+		} else {
+			err = fmt.Errorf("key %q has corrupt privhex record", name)
+		}
+	} else {
+		priv, err = Derive(mnemonic, algo, coin, account, index)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -251,10 +281,18 @@ func AddressFor(algo Algo, pub *secp256k1.PublicKey) []byte {
 	}
 }
 
-// Sign produces a 64-byte r||s secp256k1 signature over sha256(msg),
-// matching cosmos-sdk semantics exactly (low-S normalized via RFC6979).
+// Sign produces a 64-byte r||s secp256k1 signature, matching cosmos-sdk
+// semantics per key type: eth_secp256k1 signs keccak256(msg), the cosmos
+// default secp256k1 signs sha256(msg).
 func (k *Key) Sign(msg []byte) []byte {
-	h := sha256.Sum256(msg)
+	var h [32]byte
+	if k.Algo == AlgoEthSecp256k1 {
+		kh := sha3.NewLegacyKeccak256()
+		kh.Write(msg)
+		copy(h[:], kh.Sum(nil))
+	} else {
+		h = sha256.Sum256(msg)
+	}
 	sig := ecdsa.Sign(k.priv, h[:])
 	r, s := sig.R(), sig.S()
 	rb, sb := r.Bytes(), s.Bytes()

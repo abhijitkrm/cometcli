@@ -11,8 +11,8 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/abhijitkrm/cometcli/internal/keys"
-	"github.com/abhijitkrm/cometcli/internal/tools/common"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
+	"github.com/abhijitkrm/cometcli/internal/tools/common"
 	"github.com/abhijitkrm/cometcli/internal/tx"
 )
 
@@ -26,7 +26,7 @@ func (createTool) Desc() string {
 	return "Create a validator: MsgCreateValidator with a consensus pubkey"
 }
 func (createTool) Schema() map[string]any {
-	return toolkit.ObjSchema(map[string]any{
+	return toolkit.ObjSchema(common.WithTx(map[string]any{
 		"amount":                toolkit.Str("self-delegation, e.g. 1000000atest"),
 		"pubkey":                toolkit.Str(`consensus pubkey JSON, e.g. {"@type":"/cosmos.crypto.ed25519.PubKey","key":"..."}`),
 		"moniker":               toolkit.Str("validator name"),
@@ -35,7 +35,7 @@ func (createTool) Schema() map[string]any {
 		"commission-max-change": toolkit.Str("max daily change, e.g. 0.01"),
 		"min-self-delegation":   toolkit.Str("min self delegation (default 1)"),
 		"memo":                  toolkit.Str("tx memo"),
-	}, "amount", "pubkey", "moniker")
+	}), "amount", "pubkey", "moniker")
 }
 func (createTool) Tier() toolkit.Tier { return toolkit.TierOnChain }
 
@@ -66,7 +66,7 @@ func (t createTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, er
 		MinSelfDelegation: defStr(a.String("min-self-delegation", ""), "1"),
 	}
 	return common.BroadcastMsgs(c, tx.Msgs{msg}, a.String("memo", ""),
-		map[string]string{"action": "create-validator", "moniker": a.String("moniker", "")})
+		map[string]string{"action": "create-validator", "moniker": a.String("moniker", "")}, common.TxOpts(a))
 }
 
 // parsePubkeyJSON accepts `{"@type":"/cosmos.crypto.ed25519.PubKey","key":"<b64>"}`.

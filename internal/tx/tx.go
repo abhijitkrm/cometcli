@@ -150,11 +150,16 @@ func (b *Builder) Build(ctx context.Context, msgs Msgs, opt Options) (*Built, er
 func (b *Builder) body(msgs Msgs, memo string) ([]byte, error) {
 	tb := &txv1beta1.TxBody{Memo: memo}
 	for _, m := range msgs {
-		a, err := anypb.New(m)
+		v, err := proto.Marshal(m)
 		if err != nil {
 			return nil, fmt.Errorf("packing msg %T: %w", m, err)
 		}
-		tb.Messages = append(tb.Messages, a)
+		// Cosmos chains expect "/full.name" type URLs — anypb.New would
+		// emit "type.googleapis.com/full.name" which evmd's decoder rejects.
+		tb.Messages = append(tb.Messages, &anypb.Any{
+			TypeUrl: "/" + string(m.ProtoReflect().Descriptor().FullName()),
+			Value:   v,
+		})
 	}
 	return proto.Marshal(tb)
 }
@@ -221,9 +226,13 @@ func (b *Builder) pubKeyAny() (*anypb.Any, error) {
 		var v []byte
 		v = protowire.AppendTag(v, 1, protowire.BytesType)
 		v = protowire.AppendBytes(v, b.key.PubKey)
-		return &anypb.Any{TypeUrl: "/ethermint.crypto.v1.ethsecp256k1.PubKey", Value: v}, nil
+		return &anypb.Any{TypeUrl: "/cosmos.evm.crypto.v1.ethsecp256k1.PubKey", Value: v}, nil
 	default:
-		return anypb.New(&secp256k1api.PubKey{Key: b.key.PubKey})
+		v, err := proto.Marshal(&secp256k1api.PubKey{Key: b.key.PubKey})
+		if err != nil {
+			return nil, err
+		}
+		return &anypb.Any{TypeUrl: "/cosmos.crypto.secp256k1.PubKey", Value: v}, nil
 	}
 }
 

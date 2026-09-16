@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"github.com/abhijitkrm/cometcli/internal/toolkit"
 	"github.com/abhijitkrm/cometcli/internal/tools/chain"
 	"github.com/abhijitkrm/cometcli/internal/tools/evmtool"
 	"github.com/abhijitkrm/cometcli/internal/tools/fleet"
@@ -14,7 +15,6 @@ import (
 	"github.com/abhijitkrm/cometcli/internal/tools/txtool"
 	"github.com/abhijitkrm/cometcli/internal/tools/upgradetool"
 	"github.com/abhijitkrm/cometcli/internal/tools/val"
-	"github.com/abhijitkrm/cometcli/internal/toolkit"
 )
 
 // RegisterAll registers every tool in the catalog.

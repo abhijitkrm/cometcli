@@ -3,10 +3,9 @@ package chain
 
 import (
 	"fmt"
-	"math/big"
-	"strconv"
 	"strings"
 
+	bankv1beta1 "cosmossdk.io/api/cosmos/bank/v1beta1"
 	query "cosmossdk.io/api/cosmos/base/query/v1beta1"
 	govv1 "cosmossdk.io/api/cosmos/gov/v1"
 	mintv1beta1 "cosmossdk.io/api/cosmos/mint/v1beta1"
@@ -15,6 +14,7 @@ import (
 	upgradev1beta1 "cosmossdk.io/api/cosmos/upgrade/v1beta1"
 
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
+	"github.com/abhijitkrm/cometcli/internal/tools/common"
 )
 
 // Register adds all chain.* tools.
@@ -24,6 +24,53 @@ func Register(r *toolkit.Registry) {
 	r.Register(upgradePlanTool{})
 	r.Register(paramsTool{})
 	r.Register(poolTool{})
+	r.Register(balanceTool{})
+}
+
+// balanceTool queries bank balances for an account (default: signer key).
+type balanceTool struct{}
+
+func (balanceTool) Name() string { return "chain.balance" }
+func (balanceTool) Desc() string {
+	return "Bank balances for an account (default: signer key)"
+}
+func (balanceTool) Schema() map[string]any {
+	return toolkit.ObjSchema(map[string]any{
+		"address": toolkit.Str("bech32 account address (default: signer key)"),
+	})
+}
+func (balanceTool) Tier() toolkit.Tier { return toolkit.TierObserve }
+
+func (balanceTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
+	addr := a.String("address", "")
+	if addr == "" {
+		var err error
+		addr, err = common.Account(c)
+		if err != nil {
+			return nil, err
+		}
+	}
+	g, err := c.GRPC()
+	if err != nil {
+		return nil, err
+	}
+	res, err := g.Bank.AllBalances(c, &bankv1beta1.QueryAllBalancesRequest{Address: addr})
+	if err != nil {
+		return nil, err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "address: %s\n", addr)
+	bals := make([]string, 0, len(res.Balances))
+	for _, c := range res.Balances {
+		fmt.Fprintf(&b, "  %s%s\n", c.Amount, c.Denom)
+		bals = append(bals, c.Amount+c.Denom)
+	}
+	if len(bals) == 0 {
+		fmt.Fprintln(&b, "  (no balances)")
+	}
+	return &toolkit.Result{Text: b.String(), Data: map[string]any{
+		"address": addr, "balances": bals,
+	}}, nil
 }
 
 type validatorsTool struct{}
@@ -53,7 +100,7 @@ func (validatorsTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, 
 	key := []byte{}
 	for {
 		res, err := g.Staking.Validators(c, &stakingv1beta1.QueryValidatorsRequest{
-			Status: status,
+			Status:     status,
 			Pagination: &query.PageRequest{Key: key, Limit: 200},
 		})
 		if err != nil {
@@ -96,11 +143,11 @@ func (govTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) 
 		return nil, err
 	}
 	st := map[string]govv1.ProposalStatus{
-		"voting": govv1.ProposalStatus_PROPOSAL_STATUS_VOTING_PERIOD,
-		"deposit": govv1.ProposalStatus_PROPOSAL_STATUS_DEPOSIT_PERIOD,
-		"passed": govv1.ProposalStatus_PROPOSAL_STATUS_PASSED,
+		"voting":   govv1.ProposalStatus_PROPOSAL_STATUS_VOTING_PERIOD,
+		"deposit":  govv1.ProposalStatus_PROPOSAL_STATUS_DEPOSIT_PERIOD,
+		"passed":   govv1.ProposalStatus_PROPOSAL_STATUS_PASSED,
 		"rejected": govv1.ProposalStatus_PROPOSAL_STATUS_REJECTED,
-		"all": govv1.ProposalStatus_PROPOSAL_STATUS_UNSPECIFIED,
+		"all":      govv1.ProposalStatus_PROPOSAL_STATUS_UNSPECIFIED,
 	}[a.String("status", "voting")]
 	res, err := g.GovV1.Proposals(c, &govv1.QueryProposalsRequest{ProposalStatus: st})
 	if err != nil {
@@ -167,10 +214,10 @@ func (paramsTool) Run(c *toolkit.Context, _ toolkit.Args) (*toolkit.Result, erro
 	data := map[string]any{}
 	if p, err := g.Slashing.Params(c, &slashingv1beta1.QueryParamsRequest{}); err == nil {
 		fmt.Fprintf(&b, "slashing: window=%d  min_signed=%s%%  downtime_jail=%s  slash_frac_downtime=%s  slash_frac_doublesign=%s\n",
-			p.Params.SignedBlocksWindow, decPct(string(p.Params.MinSignedPerWindow)),
-			p.Params.DowntimeJailDuration.AsDuration(), decFrac(string(p.Params.SlashFractionDowntime)), decFrac(string(p.Params.SlashFractionDoubleSign)))
+			p.Params.SignedBlocksWindow, common.DecPct(string(p.Params.MinSignedPerWindow)),
+			p.Params.DowntimeJailDuration.AsDuration(), common.DecFrac(string(p.Params.SlashFractionDowntime)), common.DecFrac(string(p.Params.SlashFractionDoubleSign)))
 		data["slashing"] = map[string]any{
-			"window": p.Params.SignedBlocksWindow, "min_signed_pct": decPct(string(p.Params.MinSignedPerWindow)),
+			"window": p.Params.SignedBlocksWindow, "min_signed_pct": common.DecPct(string(p.Params.MinSignedPerWindow)),
 		}
 	}
 	if p, err := g.Staking.Params(c, &stakingv1beta1.QueryParamsRequest{}); err == nil {
@@ -179,7 +226,7 @@ func (paramsTool) Run(c *toolkit.Context, _ toolkit.Args) (*toolkit.Result, erro
 		data["staking"] = map[string]any{"bond_denom": p.Params.BondDenom, "max_validators": p.Params.MaxValidators}
 	}
 	if p, err := g.Mint.Params(c, &mintv1beta1.QueryParamsRequest{}); err == nil {
-		fmt.Fprintf(&b, "mint:     inflation min=%s max=%s\n", decFrac(string(p.Params.InflationMin)), decFrac(string(p.Params.InflationMax)))
+		fmt.Fprintf(&b, "mint:     inflation min=%s max=%s\n", common.DecFrac(string(p.Params.InflationMin)), common.DecFrac(string(p.Params.InflationMax)))
 	}
 	return &toolkit.Result{Text: b.String(), Data: data}, nil
 }
@@ -213,33 +260,4 @@ func trunc(s string, n int) string {
 		return s[:n-1] + "…"
 	}
 	return s
-}
-
-// decRat parses a legacy-dec string (fixed 18 decimal places) into a big.Rat.
-func decRat(s string) (*big.Rat, bool) {
-	i, ok := new(big.Int).SetString(s, 10)
-	if !ok {
-		return nil, false
-	}
-	return new(big.Rat).SetFrac(i, big.NewInt(1000000000000000000)), true
-}
-
-// decFrac renders a legacy dec as a plain fraction, e.g. "0.01".
-func decFrac(s string) string {
-	r, ok := decRat(s)
-	if !ok {
-		return s
-	}
-	f, _ := r.Float64()
-	return strconv.FormatFloat(f, 'f', -1, 64)
-}
-
-// decPct renders a legacy dec as a percentage number, e.g. 50 for 0.5.
-func decPct(s string) string {
-	r, ok := decRat(s)
-	if !ok {
-		return s
-	}
-	f, _ := new(big.Rat).Mul(r, big.NewRat(100, 1)).Float64()
-	return strconv.FormatFloat(f, 'f', -1, 64)
 }

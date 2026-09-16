@@ -88,6 +88,76 @@ func profileAddCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Merge onto the existing profile when present: only flags
+			// actually passed override stored values.
+			if existing, ok := cfg.Profiles[a[0]]; ok {
+				np := *existing
+				fl := cmd.Flags()
+				if fl.Changed("chain-id") {
+					np.ChainID = p.ChainID
+				}
+				if fl.Changed("evm-chain-id") {
+					np.EVMChainID = p.EVMChainID
+				}
+				if fl.Changed("bech32-prefix") {
+					np.Bech32Prefix = p.Bech32Prefix
+				}
+				if fl.Changed("role") {
+					np.Role = p.Role
+				}
+				if fl.Changed("home") {
+					np.Home = p.Home
+				}
+				if fl.Changed("binary") {
+					np.Binary = p.Binary
+				}
+				if fl.Changed("comet") {
+					np.Endpoints.Comet = p.Endpoints.Comet
+				}
+				if fl.Changed("grpc") {
+					np.Endpoints.GRPC = p.Endpoints.GRPC
+				}
+				if fl.Changed("lcd") {
+					np.Endpoints.LCD = p.Endpoints.LCD
+				}
+				if fl.Changed("evm") {
+					np.Endpoints.EVM = p.Endpoints.EVM
+				}
+				if fl.Changed("transport") {
+					np.Transport.Type = p.Transport.Type
+				}
+				if fl.Changed("ssh-host") {
+					np.Transport.Host = p.Transport.Host
+				}
+				if fl.Changed("ssh-user") {
+					np.Transport.User = p.Transport.User
+				}
+				if fl.Changed("ssh-port") {
+					np.Transport.Port = p.Transport.Port
+				}
+				if fl.Changed("ssh-key") {
+					np.Transport.KeyFile = p.Transport.KeyFile
+				}
+				if fl.Changed("service") {
+					np.Service.Type = p.Service.Type
+				}
+				if fl.Changed("unit") {
+					np.Service.Unit = p.Service.Unit
+				}
+				if fl.Changed("signer-backend") {
+					np.Signer.Backend = p.Signer.Backend
+				}
+				if fl.Changed("agent-provider") {
+					np.Agent.Provider = p.Agent.Provider
+				}
+				if fl.Changed("agent-model") {
+					np.Agent.Model = p.Agent.Model
+				}
+				if fl.Changed("agent-base-url") {
+					np.Agent.BaseURL = p.Agent.BaseURL
+				}
+				p = np
+			}
 			p.Name = a[0]
 			if p.Role == "" {
 				p.Role = "validator"

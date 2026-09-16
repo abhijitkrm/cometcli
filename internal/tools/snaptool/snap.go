@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/abhijitkrm/cometcli/internal/tools/common"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
+	"github.com/abhijitkrm/cometcli/internal/tools/common"
 )
 
 // Register adds all snap.* tools.
@@ -26,10 +26,10 @@ func (stateSyncTool) Desc() string {
 }
 func (stateSyncTool) Schema() map[string]any {
 	return toolkit.ObjSchema(map[string]any{
-		"rpc":       toolkit.Str("trusted RPC endpoint for trust height/hash (repeat via metadata.statesync_rpcs)"),
-		"height":    toolkit.Int("trust height (default: latest - 2000)"),
+		"rpc":          toolkit.Str("trusted RPC endpoint for trust height/hash (repeat via metadata.statesync_rpcs)"),
+		"height":       toolkit.Int("trust height (default: latest - 2000)"),
 		"trust-period": toolkit.Str("trust period (default 168h)"),
-		"apply":     toolkit.Bool("write to config.toml on the host (else print only)"),
+		"apply":        toolkit.Bool("write to config.toml on the host (else print only)"),
 	})
 }
 func (stateSyncTool) Tier() toolkit.Tier { return toolkit.TierLocalChange }

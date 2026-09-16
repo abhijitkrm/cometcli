@@ -92,8 +92,17 @@ func toolCmd(t toolkit.Tool) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   verb,
 		Short: fmt.Sprintf("[%s] %s", t.Tier(), t.Desc()),
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return RunTool(cmd, t, argsFromFlags(cmd))
+		RunE: func(cmd *cobra.Command, pos []string) error {
+			args := argsFromFlags(cmd)
+			// Positional args bind to required schema fields in order —
+			// `cometcli tx get <hash>` works like `evmd q tx <hash>`.
+			req, _ := t.Schema()["required"].([]string)
+			for i, name := range req {
+				if i < len(pos) && args[name] == nil {
+					args[name] = pos[i]
+				}
+			}
+			return RunTool(cmd, t, args)
 		},
 	}
 	props, _ := t.Schema()["properties"].(map[string]any)

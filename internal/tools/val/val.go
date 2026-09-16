@@ -13,8 +13,8 @@ import (
 	slashingv1beta1 "cosmossdk.io/api/cosmos/slashing/v1beta1"
 	stakingv1beta1 "cosmossdk.io/api/cosmos/staking/v1beta1"
 
-	"github.com/abhijitkrm/cometcli/internal/tools/common"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
+	"github.com/abhijitkrm/cometcli/internal/tools/common"
 	"github.com/abhijitkrm/cometcli/internal/tx"
 )
 
@@ -64,7 +64,9 @@ func (statusTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, erro
 	fmt.Fprintf(&b, "status:    %s   jailed: %v\n", bondStatus(v.Status), v.Jailed)
 	fmt.Fprintf(&b, "tokens:    %s\n", v.Tokens)
 	fmt.Fprintf(&b, "commission: %s%% (max %s%%, max change %s%%)\n",
-		v.Commission.CommissionRates.Rate, v.Commission.CommissionRates.MaxRate, v.Commission.CommissionRates.MaxChangeRate)
+		common.DecPct(string(v.Commission.CommissionRates.Rate)),
+		common.DecPct(string(v.Commission.CommissionRates.MaxRate)),
+		common.DecPct(string(v.Commission.CommissionRates.MaxChangeRate)))
 	if cons, err := common.ConsAddress(c, valoper); err == nil {
 		fmt.Fprintf(&b, "valcons:   %s\n", cons)
 		if si, err := g.Slashing.SigningInfo(c, &slashingv1beta1.QuerySigningInfoRequest{ConsAddress: cons}); err == nil {
@@ -235,10 +237,10 @@ func (unjailTool) Desc() string {
 	return "Broadcast MsgUnjail to release the validator from jail"
 }
 func (unjailTool) Schema() map[string]any {
-	return toolkit.ObjSchema(map[string]any{
+	return toolkit.ObjSchema(common.WithTx(map[string]any{
 		"validator": toolkit.Str("valoper address (default: signer key)"),
 		"memo":      toolkit.Str("tx memo"),
-	})
+	}))
 }
 func (unjailTool) Tier() toolkit.Tier { return toolkit.TierOnChain }
 
@@ -249,7 +251,7 @@ func (unjailTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, erro
 	}
 	return common.BroadcastMsgs(c, tx.Msgs{
 		&slashingv1beta1.MsgUnjail{ValidatorAddr: valoper},
-	}, a.String("memo", ""), map[string]string{"action": "unjail", "validator": valoper})
+	}, a.String("memo", ""), map[string]string{"action": "unjail", "validator": valoper}, common.TxOpts(a))
 }
 
 type withdrawTool struct{}
@@ -259,11 +261,11 @@ func (withdrawTool) Desc() string {
 	return "Withdraw delegation rewards and/or validator commission"
 }
 func (withdrawTool) Schema() map[string]any {
-	return toolkit.ObjSchema(map[string]any{
+	return toolkit.ObjSchema(common.WithTx(map[string]any{
 		"validator":  toolkit.Str("valoper address (default: signer key)"),
 		"commission": toolkit.Bool("also withdraw accrued commission"),
 		"memo":       toolkit.Str("tx memo"),
-	})
+	}))
 }
 func (withdrawTool) Tier() toolkit.Tier { return toolkit.TierOnChain }
 
@@ -282,7 +284,7 @@ func (withdrawTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, er
 	if a.Bool("commission", false) {
 		msgs = append(msgs, &distv1beta1.MsgWithdrawValidatorCommission{ValidatorAddress: valoper})
 	}
-	return common.BroadcastMsgs(c, msgs, a.String("memo", ""), map[string]string{"action": "withdraw", "validator": valoper})
+	return common.BroadcastMsgs(c, msgs, a.String("memo", ""), map[string]string{"action": "withdraw", "validator": valoper}, common.TxOpts(a))
 }
 
 type editTool struct{}
@@ -292,13 +294,13 @@ func (editTool) Desc() string {
 	return "Edit validator: commission rate, moniker, min-self-delegation"
 }
 func (editTool) Schema() map[string]any {
-	return toolkit.ObjSchema(map[string]any{
-		"validator":            toolkit.Str("valoper address (default: signer key)"),
-		"commission-rate":      toolkit.Str("new commission rate, e.g. 0.05"),
-		"min-self-delegation":  toolkit.Str("new min self delegation"),
-		"moniker":              toolkit.Str("new moniker"),
-		"memo":                 toolkit.Str("tx memo"),
-	})
+	return toolkit.ObjSchema(common.WithTx(map[string]any{
+		"validator":           toolkit.Str("valoper address (default: signer key)"),
+		"commission-rate":     toolkit.Str("new commission rate, e.g. 0.05"),
+		"min-self-delegation": toolkit.Str("new min self delegation"),
+		"moniker":             toolkit.Str("new moniker"),
+		"memo":                toolkit.Str("tx memo"),
+	}))
 }
 func (editTool) Tier() toolkit.Tier { return toolkit.TierOnChain }
 
@@ -317,7 +319,7 @@ func (editTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error)
 	if m := a.String("min-self-delegation", ""); m != "" {
 		msg.MinSelfDelegation = m
 	}
-	return common.BroadcastMsgs(c, tx.Msgs{msg}, a.String("memo", ""), map[string]string{"action": "edit-validator", "validator": valoper})
+	return common.BroadcastMsgs(c, tx.Msgs{msg}, a.String("memo", ""), map[string]string{"action": "edit-validator", "validator": valoper}, common.TxOpts(a))
 }
 
 type voteTool struct{}
@@ -327,11 +329,11 @@ func (voteTool) Desc() string {
 	return "Vote on a governance proposal (yes|no|abstain|no_with_veto)"
 }
 func (voteTool) Schema() map[string]any {
-	return toolkit.ObjSchema(map[string]any{
+	return toolkit.ObjSchema(common.WithTx(map[string]any{
 		"proposal": toolkit.Int("proposal id"),
 		"option":   toolkit.Enum("vote option", "yes", "no", "abstain", "no_with_veto"),
 		"memo":     toolkit.Str("tx memo"),
-	}, "proposal", "option")
+	}), "proposal", "option")
 }
 func (voteTool) Tier() toolkit.Tier { return toolkit.TierOnChain }
 
@@ -341,9 +343,9 @@ func (voteTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error)
 		return nil, err
 	}
 	opt := map[string]govv1.VoteOption{
-		"yes": govv1.VoteOption_VOTE_OPTION_YES,
-		"no": govv1.VoteOption_VOTE_OPTION_NO,
-		"abstain": govv1.VoteOption_VOTE_OPTION_ABSTAIN,
+		"yes":          govv1.VoteOption_VOTE_OPTION_YES,
+		"no":           govv1.VoteOption_VOTE_OPTION_NO,
+		"abstain":      govv1.VoteOption_VOTE_OPTION_ABSTAIN,
 		"no_with_veto": govv1.VoteOption_VOTE_OPTION_NO_WITH_VETO,
 	}[a.String("option", "yes")]
 	msg := &govv1.MsgVote{
@@ -352,7 +354,7 @@ func (voteTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error)
 		Option:     opt,
 	}
 	return common.BroadcastMsgs(c, tx.Msgs{msg}, a.String("memo", ""),
-		map[string]string{"action": "gov-vote", "proposal": fmt.Sprint(msg.ProposalId), "option": a.String("option", "yes")})
+		map[string]string{"action": "gov-vote", "proposal": fmt.Sprint(msg.ProposalId), "option": a.String("option", "yes")}, common.TxOpts(a))
 }
 
 // ---- helpers ----

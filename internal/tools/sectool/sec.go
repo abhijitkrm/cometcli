@@ -163,11 +163,11 @@ func (doubleSignTool) Run(c *toolkit.Context, _ toolkit.Args) (*toolkit.Result, 
 		return nil, fmt.Errorf("read priv_validator_state: %w", err)
 	}
 	var st struct {
-		Height string `json:"height"`
-		Round  int    `json:"round"`
-		Step   int    `json:"step"`
-		Signature   string `json:"signature"`
-		SignBytes   string `json:"signbytes"`
+		Height    string `json:"height"`
+		Round     int    `json:"round"`
+		Step      int    `json:"step"`
+		Signature string `json:"signature"`
+		SignBytes string `json:"signbytes"`
 	}
 	if err := json.Unmarshal(raw, &st); err != nil {
 		return nil, fmt.Errorf("parse priv_validator_state: %w", err)

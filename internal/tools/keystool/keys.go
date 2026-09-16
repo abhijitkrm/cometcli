@@ -34,16 +34,17 @@ type addTool struct{}
 
 func (addTool) Name() string { return "keys.add" }
 func (addTool) Desc() string {
-	return "Add an ops key: --recover to import a mnemonic, else generates one"
+	return "Add an ops key: --recover (mnemonic), --privkey-hex, or generate"
 }
 func (addTool) Schema() map[string]any {
 	return toolkit.ObjSchema(map[string]any{
-		"name":       toolkit.Str("key name"),
-		"recover":    toolkit.Bool("prompt for an existing mnemonic instead of generating"),
-		"algo":       toolkit.Enum("key algorithm", "eth_secp256k1", "secp256k1"),
-		"coin-type":  toolkit.Int("HD coin type (default 60)"),
-		"account":    toolkit.Int("HD account (default 0)"),
-		"index":      toolkit.Int("HD index (default 0)"),
+		"name":          toolkit.Str("key name"),
+		"recover":       toolkit.Bool("prompt for an existing mnemonic instead of generating"),
+		"privkey-hex":   toolkit.Str("import a raw secp256k1 private key (hex)"),
+		"algo":          toolkit.Enum("key algorithm", "eth_secp256k1", "secp256k1"),
+		"coin-type":     toolkit.Int("HD coin type (default 60)"),
+		"account":       toolkit.Int("HD account (default 0)"),
+		"index":         toolkit.Int("HD index (default 0)"),
 		"show-mnemonic": toolkit.Bool("print the generated mnemonic (write it down!)"),
 	}, "name")
 }
@@ -55,18 +56,24 @@ func (addTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) 
 	if err != nil {
 		return nil, err
 	}
-	var mnemonic string
-	if a.Bool("recover", false) {
-		fmt.Fprint(c.Out, "Enter BIP-39 mnemonic: ")
-		reader := bufio.NewReader(os.Stdin)
-		mnemonic, _ = reader.ReadString('\n')
-		mnemonic = strings.TrimSpace(mnemonic)
-	}
 	algo := keys.Algo(a.String("algo", string(keys.AlgoEthSecp256k1)))
-	recovered := mnemonic != ""
-	k, mnemonic, err := ring.Generate(name, mnemonic, algo,
-		uint32(a.Int("coin-type", int64(keys.DefaultCoinType))),
-		uint32(a.Int("account", 0)), uint32(a.Int("index", 0)))
+	var k *keys.Key
+	var mnemonic string
+	recovered := false
+	if hexkey := a.String("privkey-hex", ""); hexkey != "" {
+		k, err = ring.ImportHex(name, hexkey, algo)
+	} else {
+		if a.Bool("recover", false) {
+			fmt.Fprint(c.Out, "Enter BIP-39 mnemonic: ")
+			reader := bufio.NewReader(os.Stdin)
+			mnemonic, _ = reader.ReadString('\n')
+			mnemonic = strings.TrimSpace(mnemonic)
+		}
+		recovered = mnemonic != ""
+		k, mnemonic, err = ring.Generate(name, mnemonic, algo,
+			uint32(a.Int("coin-type", int64(keys.DefaultCoinType))),
+			uint32(a.Int("account", 0)), uint32(a.Int("index", 0)))
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +87,7 @@ func (addTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) 
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "key:     %s\nalgo:    %s\naddress: %s\nhex:     %s\n", name, algo, addr, k.Hex())
-	if !recovered {
+	if !recovered && mnemonic != "" {
 		fmt.Fprintf(&b, "\nWRITE THIS DOWN — mnemonic (never stored anywhere but the keyring):\n%s\n", mnemonic)
 	}
 	return &toolkit.Result{Text: b.String(), Data: map[string]any{

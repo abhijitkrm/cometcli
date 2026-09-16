@@ -6,7 +6,9 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net/http"
+	"strconv"
 	"strings"
 
 	stakingv1beta1 "cosmossdk.io/api/cosmos/staking/v1beta1"
@@ -86,15 +88,42 @@ func ShellQ(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
+// TxSchema returns the optional gas/fee flags every tx tool accepts.
+func TxSchema() map[string]any {
+	return map[string]any{
+		"gas-price": toolkit.Str("gas price in fee denom (e.g. 1125000000)"),
+		"gas-limit": toolkit.Int("explicit gas limit (default: simulate)"),
+		"fee-denom": toolkit.Str("override profile fee denom"),
+	}
+}
+
+// WithTx merges the shared gas/fee flags into a schema property map.
+func WithTx(props map[string]any) map[string]any {
+	for k, v := range TxSchema() {
+		props[k] = v
+	}
+	return props
+}
+
+// TxOpts extracts the optional gas/fee args into tx.Options.
+func TxOpts(a toolkit.Args) tx.Options {
+	return tx.Options{
+		GasPrice: a.String("gas-price", ""),
+		GasLimit: uint64(a.Int("gas-limit", 0)),
+		FeeDenom: a.String("fee-denom", ""),
+	}
+}
+
 // BroadcastMsgs is the shared on-chain flow every tx tool uses:
 // build (with gas simulation) → human approval gate → broadcast → report.
 // The tx Doc (decoded messages, fee, gas) is always shown before approval.
-func BroadcastMsgs(c *toolkit.Context, msgs tx.Msgs, memo string, meta map[string]string) (*toolkit.Result, error) {
+func BroadcastMsgs(c *toolkit.Context, msgs tx.Msgs, memo string, meta map[string]string, opt tx.Options) (*toolkit.Result, error) {
+	opt.Memo = memo
 	tb, err := c.Tx()
 	if err != nil {
 		return nil, err
 	}
-	built, err := tb.Build(c, msgs, tx.Options{Memo: memo})
+	built, err := tb.Build(c, msgs, opt)
 	if err != nil {
 		return nil, err
 	}
@@ -170,4 +199,33 @@ func protowireFieldBytes(b []byte, num protowire.Number) []byte {
 		}
 	}
 	return nil
+}
+
+// DecRat parses a legacy-dec value (string or []byte, fixed 18 decimals).
+func DecRat(s string) (*big.Rat, bool) {
+	i, ok := new(big.Int).SetString(s, 10)
+	if !ok {
+		return nil, false
+	}
+	return new(big.Rat).SetFrac(i, big.NewInt(1000000000000000000)), true
+}
+
+// DecFrac renders a legacy dec as a plain fraction, e.g. "0.01".
+func DecFrac(s string) string {
+	r, ok := DecRat(s)
+	if !ok {
+		return s
+	}
+	f, _ := r.Float64()
+	return strconv.FormatFloat(f, 'f', -1, 64)
+}
+
+// DecPct renders a legacy dec as a percentage number, e.g. 50 for 0.5.
+func DecPct(s string) string {
+	r, ok := DecRat(s)
+	if !ok {
+		return s
+	}
+	f, _ := new(big.Rat).Mul(r, big.NewRat(100, 1)).Float64()
+	return strconv.FormatFloat(f, 'f', -1, 64)
 }

@@ -10,8 +10,8 @@ import (
 
 	upgradev1beta1 "cosmossdk.io/api/cosmos/upgrade/v1beta1"
 
-	"github.com/abhijitkrm/cometcli/internal/tools/common"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
+	"github.com/abhijitkrm/cometcli/internal/tools/common"
 )
 
 // Register adds all upgrade.* tools.
@@ -72,11 +72,11 @@ func (prepareTool) Desc() string {
 }
 func (prepareTool) Schema() map[string]any {
 	return toolkit.ObjSchema(map[string]any{
-		"name":       toolkit.Str("upgrade name (from the plan), e.g. v3"),
-		"url":        toolkit.Str("release asset URL (default: repo release for this platform)"),
-		"repo":       toolkit.Str("github repo (default: metadata.repo)"),
-		"tag":        toolkit.Str("release tag (default: latest)"),
-		"checksum":   toolkit.Str("expected sha256 hex — verify before staging"),
+		"name":     toolkit.Str("upgrade name (from the plan), e.g. v3"),
+		"url":      toolkit.Str("release asset URL (default: repo release for this platform)"),
+		"repo":     toolkit.Str("github repo (default: metadata.repo)"),
+		"tag":      toolkit.Str("release tag (default: latest)"),
+		"checksum": toolkit.Str("expected sha256 hex — verify before staging"),
 	}, "name")
 }
 func (prepareTool) Tier() toolkit.Tier { return toolkit.TierLocalChange }
@@ -160,8 +160,8 @@ func (watchTool) Schema() map[string]any {
 		"interval": toolkit.Int("poll seconds (default 10)"),
 	})
 }
-func (watchTool) Tier() toolkit.Tier       { return toolkit.TierObserve }
-func (watchTool) LongRunning() bool        { return true }
+func (watchTool) Tier() toolkit.Tier { return toolkit.TierObserve }
+func (watchTool) LongRunning() bool  { return true }
 
 func (watchTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
 	var target int64 = a.Int("height", 0)
@@ -200,4 +200,3 @@ func (watchTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error
 		}
 	}
 }
-
