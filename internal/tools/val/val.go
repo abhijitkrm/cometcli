@@ -28,6 +28,7 @@ func Register(r *toolkit.Registry) {
 	r.Register(withdrawTool{})
 	r.Register(editTool{})
 	r.Register(voteTool{})
+	r.Register(createTool{})
 }
 
 type statusTool struct{}

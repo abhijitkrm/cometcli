@@ -1,7 +1,10 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -135,9 +138,10 @@ func profileAddCmd() *cobra.Command {
 }
 
 func auditCmd() *cobra.Command {
-	return &cobra.Command{
+	var tail int
+	cmd := &cobra.Command{
 		Use:   "audit",
-		Short: "Show recent audit log events",
+		Short: "Show audit log events (today by default)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			files, err := audit.List()
 			if err != nil {
@@ -147,10 +151,32 @@ func auditCmd() *cobra.Command {
 				fmt.Fprintln(cmd.OutOrStdout(), "no audit events")
 				return nil
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), files[0])
-			return nil
+			raw, err := os.ReadFile(files[0])
+			if err != nil {
+				return err
+			}
+			lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+			if tail > 0 && len(lines) > tail {
+				lines = lines[len(lines)-tail:]
+			}
+			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
+			for _, ln := range lines {
+				var e audit.Event
+				if json.Unmarshal([]byte(ln), &e) != nil {
+					continue
+				}
+				d, _ := json.Marshal(e.Detail)
+				if len(d) > 160 {
+					d = append(d[:160], []byte("…")...)
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+					e.TS.Format("15:04:05"), e.Kind, e.Profile, d)
+			}
+			return w.Flush()
 		},
 	}
+	cmd.Flags().IntVar(&tail, "tail", 30, "show last N events")
+	return cmd
 }
 
 func versionCmd() *cobra.Command {

@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -15,6 +16,21 @@ type Check struct {
 	OK     bool
 	Warn   bool
 	Detail string
+}
+
+// num coerces any numeric Data value to int64.
+func num(v any) int64 {
+	switch n := v.(type) {
+	case int:
+		return int64(n)
+	case int32:
+		return int64(n)
+	case int64:
+		return n
+	case float64:
+		return int64(n)
+	}
+	return 0
 }
 
 // DoctorCmd runs the full node health checklist.
@@ -36,7 +52,10 @@ func DoctorCmd(reg *toolkit.Registry) *cobra.Command {
 					checks = append(checks, Check{name, false, false, "tool not registered"})
 					return
 				}
-				res, err := t.Run(c, args)
+				sub, cancel := toolkit.WithDeadline(c, 30*time.Second)
+				res, err := t.Run(sub, args)
+				sub.Close()
+				cancel()
 				chk := eval(res, err)
 				chk.Name = name
 				checks = append(checks, chk)
@@ -60,7 +79,7 @@ func DoctorCmd(reg *toolkit.Registry) *cobra.Command {
 				if err != nil {
 					return Check{OK: false, Detail: err.Error()}
 				}
-				n, _ := r.Data["count"].(int32)
+				n := num(r.Data["count"])
 				if n == 0 {
 					return Check{OK: false, Detail: "0 peers"}
 				}
@@ -70,7 +89,7 @@ func DoctorCmd(reg *toolkit.Registry) *cobra.Command {
 				if err != nil {
 					return Check{Warn: true, Detail: err.Error()}
 				}
-				crits, _ := r.Data["critical"].(int)
+				crits := num(r.Data["critical"])
 				if crits > 0 {
 					return Check{OK: false, Detail: fmt.Sprintf("%d critical exposures", crits)}
 				}
@@ -80,15 +99,15 @@ func DoctorCmd(reg *toolkit.Registry) *cobra.Command {
 				if err != nil {
 					return Check{Warn: true, Detail: err.Error()}
 				}
-				bad, _ := r.Data["bad"].(int)
+				bad := num(r.Data["bad"])
 				return Check{OK: bad == 0, Detail: fmt.Sprintf("%d problems", bad)}
 			})
 			run("signing health", "val.signing", nil, func(r *toolkit.Result, err error) Check {
 				if err != nil {
 					return Check{Warn: true, Detail: "skipped: " + err.Error()}
 				}
-				missed, _ := r.Data["missed"].(int64)
-				window, _ := r.Data["window"].(int64)
+				missed := num(r.Data["missed"])
+				window := num(r.Data["window"])
 				tomb, _ := r.Data["tombstoned"].(bool)
 				if tomb {
 					return Check{OK: false, Detail: "TOMBSTONED — double-sign slashed"}
@@ -132,7 +151,7 @@ func DoctorCmd(reg *toolkit.Registry) *cobra.Command {
 					if err != nil {
 						return Check{Warn: true, Detail: err.Error()}
 					}
-					d, _ := r.Data["drift"].(int64)
+					d := num(r.Data["drift"])
 					if d > 10 {
 						return Check{OK: false, Detail: fmt.Sprintf("JSON-RPC lagging %d blocks", d)}
 					}

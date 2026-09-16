@@ -9,6 +9,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -35,7 +36,8 @@ Every capability is a deterministic subcommand (cometcli val status,
 cometcli doctor, cometcli tx unjail) AND a tool the agent can call.
 Run 'cometcli agent' for the AI SRE, or 'cometcli ask "..."' for
 one-shot questions.`,
-		SilenceUsage: true,
+		SilenceUsage:  true,
+		SilenceErrors: true,
 	}
 	pf := root.PersistentFlags()
 	pf.StringVar(&flagProfile, "profile", "", "profile to use (env COMETCLI_PROFILE)")
@@ -141,6 +143,12 @@ func RunTool(cmd *cobra.Command, t toolkit.Tool, args toolkit.Args) error {
 		return err
 	}
 	defer c.Close()
+	if !toolkit.IsLongRunning(t) {
+		sub, cancel := toolkit.WithDeadline(c, 90*time.Second)
+		defer cancel()
+		defer sub.Close()
+		c = sub
+	}
 	res, err := t.Run(c, args)
 	profile := ""
 	if c.Profile != nil {

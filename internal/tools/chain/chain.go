@@ -3,6 +3,8 @@ package chain
 
 import (
 	"fmt"
+	"math/big"
+	"strconv"
 	"strings"
 
 	query "cosmossdk.io/api/cosmos/base/query/v1beta1"
@@ -165,19 +167,19 @@ func (paramsTool) Run(c *toolkit.Context, _ toolkit.Args) (*toolkit.Result, erro
 	data := map[string]any{}
 	if p, err := g.Slashing.Params(c, &slashingv1beta1.QueryParamsRequest{}); err == nil {
 		fmt.Fprintf(&b, "slashing: window=%d  min_signed=%s%%  downtime_jail=%s  slash_frac_downtime=%s  slash_frac_doublesign=%s\n",
-			p.Params.SignedBlocksWindow, p.Params.MinSignedPerWindow,
-			p.Params.DowntimeJailDuration, p.Params.SlashFractionDowntime, p.Params.SlashFractionDoubleSign)
+			p.Params.SignedBlocksWindow, decPct(string(p.Params.MinSignedPerWindow)),
+			p.Params.DowntimeJailDuration.AsDuration(), decFrac(string(p.Params.SlashFractionDowntime)), decFrac(string(p.Params.SlashFractionDoubleSign)))
 		data["slashing"] = map[string]any{
-			"window": p.Params.SignedBlocksWindow, "min_signed_pct": p.Params.MinSignedPerWindow,
+			"window": p.Params.SignedBlocksWindow, "min_signed_pct": decPct(string(p.Params.MinSignedPerWindow)),
 		}
 	}
 	if p, err := g.Staking.Params(c, &stakingv1beta1.QueryParamsRequest{}); err == nil {
 		fmt.Fprintf(&b, "staking:  unbonding=%s  max_validators=%d  bond_denom=%s\n",
-			p.Params.UnbondingTime, p.Params.MaxValidators, p.Params.BondDenom)
+			p.Params.UnbondingTime.AsDuration(), p.Params.MaxValidators, p.Params.BondDenom)
 		data["staking"] = map[string]any{"bond_denom": p.Params.BondDenom, "max_validators": p.Params.MaxValidators}
 	}
 	if p, err := g.Mint.Params(c, &mintv1beta1.QueryParamsRequest{}); err == nil {
-		fmt.Fprintf(&b, "mint:     inflation min=%s max=%s\n", p.Params.InflationMin, p.Params.InflationMax)
+		fmt.Fprintf(&b, "mint:     inflation min=%s max=%s\n", decFrac(string(p.Params.InflationMin)), decFrac(string(p.Params.InflationMax)))
 	}
 	return &toolkit.Result{Text: b.String(), Data: data}, nil
 }
@@ -211,4 +213,33 @@ func trunc(s string, n int) string {
 		return s[:n-1] + "…"
 	}
 	return s
+}
+
+// decRat parses a legacy-dec string (fixed 18 decimal places) into a big.Rat.
+func decRat(s string) (*big.Rat, bool) {
+	i, ok := new(big.Int).SetString(s, 10)
+	if !ok {
+		return nil, false
+	}
+	return new(big.Rat).SetFrac(i, big.NewInt(1000000000000000000)), true
+}
+
+// decFrac renders a legacy dec as a plain fraction, e.g. "0.01".
+func decFrac(s string) string {
+	r, ok := decRat(s)
+	if !ok {
+		return s
+	}
+	f, _ := r.Float64()
+	return strconv.FormatFloat(f, 'f', -1, 64)
+}
+
+// decPct renders a legacy dec as a percentage number, e.g. 50 for 0.5.
+func decPct(s string) string {
+	r, ok := decRat(s)
+	if !ok {
+		return s
+	}
+	f, _ := new(big.Rat).Mul(r, big.NewRat(100, 1)).Float64()
+	return strconv.FormatFloat(f, 'f', -1, 64)
 }

@@ -58,6 +58,7 @@ func Dial(ctx context.Context, endpoint string) (*Conn, error) {
 	defer cancel()
 	cc, err := grpc.DialContext(dctx, endpoint,
 		grpc.WithTransportCredentials(creds),
+		grpc.WithBlock(), // fail fast when the endpoint is dead
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(32 << 20)),
 	)
 	if err != nil {

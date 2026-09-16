@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/abhijitkrm/cometcli/internal/audit"
 	"github.com/abhijitkrm/cometcli/internal/redact"
@@ -121,7 +122,16 @@ func (a *Agent) execCall(ctx context.Context, call Call) Msg {
 		return Msg{Role: "tool", CallID: call.ID, ToolName: name,
 			Text: "no such tool: " + name, IsError: true}
 	}
-	res, err := t.Run(a.Ctx, args)
+	runCtx := a.Ctx
+	var cancel context.CancelFunc
+	if !toolkit.IsLongRunning(t) {
+		runCtx, cancel = toolkit.WithDeadline(a.Ctx, 90*time.Second)
+	}
+	res, err := t.Run(runCtx, args)
+	if cancel != nil {
+		runCtx.Close()
+		cancel()
+	}
 	profile := a.Ctx.Profile.Name
 	if a.Audit() != nil {
 		var data map[string]any

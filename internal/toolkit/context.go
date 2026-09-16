@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/abhijitkrm/cometcli/internal/audit"
 	"github.com/abhijitkrm/cometcli/internal/client/comet"
@@ -111,17 +112,38 @@ func (c *Context) Host() (host.Host, error) {
 
 // Tx lazily builds the transaction pipeline (keyring + grpc).
 func (c *Context) Tx() (*tx.Builder, error) {
+	// Fail fast before any dialing — Profile is immutable post-NewCtx.
+	if c.Profile == nil {
+		return nil, errNoProfile
+	}
+	if c.Profile.Signer.Key == "" {
+		return nil, fmt.Errorf("profile %q has no signer.key — run `cometcli keys add` and set it", c.Profile.Name)
+	}
+	// GRPC() manages its own locking — call it before taking c.mu or we
+	// self-deadlock on the non-reentrant mutex.
+	g, err := c.GRPC()
+	if err != nil {
+		return nil, err
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.txb == nil && c.txErr == nil {
-		g, err := c.GRPC()
-		if err != nil {
-			c.txErr = err
-		} else {
-			c.txb, c.txErr = tx.NewBuilder(c.Context, g, c.Profile, c.Audit)
-		}
+		c.txb, c.txErr = tx.NewBuilder(c.Context, g, c.Profile, c.Audit)
 	}
 	return c.txb, c.txErr
+}
+
+// WithDeadline returns a fresh Context sharing c's fields but with a derived
+// ctx carrying the given timeout. The parent is c's embedded std ctx — never
+// c itself, or Value() would recurse through a child that points back to its
+// parent. A fresh Context also avoids copying the mutex (go vet copylocks).
+// The caller must invoke cancel and close the sub-context's own lazy clients.
+func WithDeadline(c *Context, timeout time.Duration) (*Context, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(c.Context, timeout)
+	return &Context{
+		Context: ctx, Profile: c.Profile, Cfg: c.Cfg, Out: c.Out,
+		Audit: c.Audit, Approver: c.Approver, AutoApproveBelow: c.AutoApproveBelow,
+	}, cancel
 }
 
 // LogShell records a host command in the audit log.

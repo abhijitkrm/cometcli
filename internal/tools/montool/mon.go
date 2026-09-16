@@ -29,7 +29,8 @@ func (watchTool) Schema() map[string]any {
 		"interval": toolkit.Int("poll interval seconds (default 5)"),
 	})
 }
-func (watchTool) Tier() toolkit.Tier { return toolkit.TierObserve }
+func (watchTool) Tier() toolkit.Tier       { return toolkit.TierObserve }
+func (watchTool) LongRunning() bool        { return true }
 
 func (watchTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
 	iv := time.Duration(a.Int("interval", 5)) * time.Second
@@ -74,7 +75,8 @@ func (alertsTool) Schema() map[string]any {
 		"stall-secs":       toolkit.Int("alert when height stalls > N secs (default 120)"),
 	})
 }
-func (alertsTool) Tier() toolkit.Tier { return toolkit.TierDiagnose }
+func (alertsTool) Tier() toolkit.Tier       { return toolkit.TierDiagnose }
+func (alertsTool) LongRunning() bool        { return true }
 
 func (alertsTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
 	iv := time.Duration(a.Int("interval", 10)) * time.Second

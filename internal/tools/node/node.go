@@ -20,6 +20,7 @@ func Register(r *toolkit.Registry) {
 	r.Register(serviceTool{})
 	r.Register(configShowTool{})
 	r.Register(versionCheckTool{})
+	r.Register(consensusTool{})
 }
 
 type statusTool struct{}

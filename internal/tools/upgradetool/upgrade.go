@@ -160,7 +160,8 @@ func (watchTool) Schema() map[string]any {
 		"interval": toolkit.Int("poll seconds (default 10)"),
 	})
 }
-func (watchTool) Tier() toolkit.Tier { return toolkit.TierObserve }
+func (watchTool) Tier() toolkit.Tier       { return toolkit.TierObserve }
+func (watchTool) LongRunning() bool        { return true }
 
 func (watchTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
 	var target int64 = a.Int("height", 0)

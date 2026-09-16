@@ -100,6 +100,18 @@ func (r *Result) JSON() string {
 	return string(b)
 }
 
+// LongRunner is implemented by tools that run indefinitely by design
+// (watchers, dashboards) — they are exempt from the per-tool deadline.
+type LongRunner interface {
+	LongRunning() bool
+}
+
+// IsLongRunning reports whether a tool should not get a deadline.
+func IsLongRunning(t Tool) bool {
+	lr, ok := t.(LongRunner)
+	return ok && lr.LongRunning()
+}
+
 // Tool is a single capability.
 type Tool interface {
 	// Name is the dotted identifier, e.g. "node.status".
