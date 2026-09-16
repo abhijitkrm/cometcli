@@ -252,8 +252,14 @@ func AddressFor(algo Algo, pub *secp256k1.PublicKey) []byte {
 }
 
 // Sign produces a 64-byte r||s secp256k1 signature over sha256(msg),
-// matching cosmos-sdk semantics exactly.
+// matching cosmos-sdk semantics exactly (low-S normalized via RFC6979).
 func (k *Key) Sign(msg []byte) []byte {
 	h := sha256.Sum256(msg)
-	return ecdsa.Sign(k.priv, h[:]).Serialize()
+	sig := ecdsa.Sign(k.priv, h[:])
+	r, s := sig.R(), sig.S()
+	rb, sb := r.Bytes(), s.Bytes()
+	out := make([]byte, 64)
+	copy(out[:32], rb[:])
+	copy(out[32:], sb[:])
+	return out
 }
