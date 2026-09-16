@@ -116,6 +116,10 @@ func (logsTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error)
 	out, code, err := h.Run(c, cmd)
 	c.LogShell(cmd, code)
 	if err != nil && out == "" {
+		// grep exit 1 = no matches — report cleanly, don't error the step.
+		if a.String("grep", "") != "" && code == 1 {
+			return &toolkit.Result{Text: "(no matches)", Data: map[string]any{"lines": ""}}, nil
+		}
 		return nil, err
 	}
 	return &toolkit.Result{Text: out, Data: map[string]any{"lines": out}}, nil

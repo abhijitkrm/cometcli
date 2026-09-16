@@ -49,8 +49,13 @@ func lintConfig(c *toolkit.Context, file, raw string) *toolkit.Result {
 		return h
 	}
 	public := func(v any) bool {
+		s, _ := v.(string)
+		if s == "" {
+			return false // unset/disabled
+		}
 		h := bind(v)
-		return h != "127.0.0.1" && h != "localhost" && h != "::1" && h != ""
+		// ":port" parses to an empty host — that is a wildcard bind, i.e. public.
+		return h != "127.0.0.1" && h != "localhost" && h != "::1"
 	}
 	boolOf := func(v any) bool { b, _ := v.(bool); return b }
 	check := func(level, name, msg string, bad bool) {
@@ -84,23 +89,30 @@ func lintConfig(c *toolkit.Context, file, raw string) *toolkit.Result {
 		check("warn", "pruning", fmt.Sprintf("pruning strategy=%v", prune), prune == "nothing")
 
 	case "config.toml":
-		laddr := get("laddr")
+		pvl := get("priv_validator_laddr")
+		check("critical", "priv_validator_laddr",
+			fmt.Sprintf("priv_validator_laddr=%v — empty or localhost only; this is the signing endpoint", pvl),
+			public(pvl))
+		laddr := get("rpc", "laddr")
 		check("warn", "rpc.laddr",
 			fmt.Sprintf("comet RPC laddr=%v — keep private; sentries serve public traffic", laddr),
 			isVal && public(laddr))
-		pprof := get("pprof_laddr")
+		pprof := get("rpc", "pprof_laddr")
 		check("critical", "pprof_laddr",
 			fmt.Sprintf("pprof laddr=%v — must be localhost (exposes internals)", pprof),
 			public(pprof))
-		dsc := get("double_sign_check_height")
+		dsc := get("consensus", "double_sign_check_height")
 		check("warn", "double_sign_check_height",
 			fmt.Sprintf("double_sign_check_height=%v", dsc),
 			isVal && fmt.Sprint(dsc) == "0")
-		pex := get("pex")
+		pex := get("p2p", "pex")
 		check("warn", "pex",
 			fmt.Sprintf("pex=%v — validators often disable and use persistent_peers", pex), false)
 		prom := get("instrumentation", "prometheus")
-		check("ok", "prometheus", fmt.Sprintf("prometheus metrics=%v", prom), false)
+		promAddr := get("instrumentation", "prometheus_listen_addr")
+		check("warn", "prometheus",
+			fmt.Sprintf("prometheus metrics=%v listen=%v — public metrics leak chain internals", prom, promAddr),
+			boolOf(prom) && public(promAddr))
 	}
 
 	var b strings.Builder
