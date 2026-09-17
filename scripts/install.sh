@@ -51,8 +51,13 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 say "downloading ${asset}"
-curl -fsSL "${base}/${asset}"       -o "${tmp}/${asset}"       || die "download failed — does ${COMETCLI_VERSION} have a ${os}/${arch} asset?"
-curl -fsSL "${base}/checksums.txt"  -o "${tmp}/checksums.txt"  || die "checksums.txt missing for ${COMETCLI_VERSION}"
+# --progress-bar keeps piped installs honest; timeouts+retries catch a stuck CDN
+curl -fL --progress-bar --connect-timeout 15 --retry 3 --retry-delay 2 \
+  "${base}/${asset}" -o "${tmp}/${asset}" \
+  || die "download failed — check your connection, or does ${COMETCLI_VERSION} have a ${os}/${arch} asset?"
+curl -fsSL --connect-timeout 15 --retry 3 \
+  "${base}/checksums.txt" -o "${tmp}/checksums.txt" \
+  || die "checksums.txt missing for ${COMETCLI_VERSION}"
 
 # --- verify ----------------------------------------------------------------------
 if [ "${COMETCLI_NO_VERIFY:-0}" != "1" ]; then
