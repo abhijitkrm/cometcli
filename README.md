@@ -23,14 +23,21 @@
 
 <br/>
 
-cometcli is a local-first operations terminal for validator companies and
-independent operators running [Cosmos-EVM](https://github.com/cosmos/evm)
-chains. It answers "is my node healthy?" — and acts on it — in one terminal:
-CometBFT RPC, Cosmos gRPC, and Ethereum JSON-RPC observability; transaction
-construction, simulation, signing, and broadcast; service control, upgrades,
-state-sync, runbooks, and a live monitoring dashboard. No dashboards to wire
-up, no context-switching between `evmd`, `systemctl`, `curl`, and explorer
-tabs.
+cometcli is a local-first operations terminal for validators running
+[Cosmos-EVM](https://github.com/cosmos/evm) chains. It answers
+*"is my node healthy?"* — and lets you act on the answer — from one place.
+
+- **Observe** — CometBFT RPC, Cosmos gRPC, and EVM JSON-RPC in one view:
+  signing health, peers, drift, gov, upgrade plans
+- **Operate** — transactions (simulate → decode → approve → broadcast),
+  service control, upgrades, state-sync, security audits
+- **Watch** — live TUI dashboard and an alert engine that pages you on
+  Slack, Discord, or Telegram
+- **Automate** — runbooks for jail recovery, halts, migrations; the same
+  tools drive an optional AI agent
+
+No dashboards to wire up. No context-switching between `evmd`, `systemctl`,
+`curl`, and explorer tabs.
 
 Every capability is a deterministic subcommand **and** a tool the optional AI
 agent can call — one registry, two front-ends. The deterministic layer is
