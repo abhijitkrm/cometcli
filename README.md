@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="cometcli.jpg" alt="cometcli" width="400" />
+  <img src="cometcli.jpg" alt="cometcli" width="600" />
   <h1>cometcli</h1>
   <p><b>An agentic SRE terminal for Cosmos-EVM validators</b></p>
 </div>
