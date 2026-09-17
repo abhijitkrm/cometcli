@@ -310,11 +310,28 @@ func (editTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error)
 		return nil, err
 	}
 	msg := &stakingv1beta1.MsgEditValidator{ValidatorAddress: valoper}
+	// SDK requires a non-empty Description on every edit — carry the current
+	// one through so changing commission alone doesn't wipe it.
+	if g, err := c.GRPC(); err == nil {
+		if res, err := g.Staking.Validator(c, &stakingv1beta1.QueryValidatorRequest{ValidatorAddr: valoper}); err == nil && res.Validator != nil {
+			msg.Description = res.Validator.Description
+		}
+	}
 	if m := a.String("moniker", ""); m != "" {
-		msg.Description = &stakingv1beta1.Description{Moniker: m}
+		if msg.Description == nil {
+			msg.Description = &stakingv1beta1.Description{}
+		}
+		msg.Description.Moniker = m
+	}
+	if msg.Description == nil {
+		msg.Description = &stakingv1beta1.Description{}
 	}
 	if r := a.String("commission-rate", ""); r != "" {
-		msg.CommissionRate = r // legacy dec string
+		scaled, err := common.DecScaled(r)
+		if err != nil {
+			return nil, fmt.Errorf("commission-rate: %w", err)
+		}
+		msg.CommissionRate = scaled
 	}
 	if m := a.String("min-self-delegation", ""); m != "" {
 		msg.MinSelfDelegation = m

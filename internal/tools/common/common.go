@@ -277,6 +277,24 @@ func protowireFieldBytes(b []byte, num protowire.Number) []byte {
 	return nil
 }
 
+// DecScaled converts a human decimal ("0.10") to the fixed-18 integer string
+// ("100000000000000000") SDK Dec fields expect on the wire. Values already in
+// scaled form (integers > 2) pass through untouched.
+func DecScaled(s string) (string, error) {
+	r, ok := new(big.Rat).SetString(s)
+	if !ok {
+		return "", fmt.Errorf("invalid decimal %q", s)
+	}
+	if !strings.Contains(s, ".") && !strings.ContainsAny(s, "/eE") && r.IsInt() && r.Num().Cmp(big.NewInt(2)) > 0 {
+		return s, nil // already scaled
+	}
+	scaled := new(big.Rat).Mul(r, big.NewRat(1000000000000000000, 1))
+	if !scaled.IsInt() {
+		return "", fmt.Errorf("%q exceeds 18 decimal places", s)
+	}
+	return scaled.Num().String(), nil
+}
+
 // DecRat parses a legacy-dec value (string or []byte, fixed 18 decimals).
 func DecRat(s string) (*big.Rat, bool) {
 	i, ok := new(big.Int).SetString(s, 10)

@@ -52,6 +52,18 @@ func (t createTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, er
 	if err != nil {
 		return nil, err
 	}
+	rate, err := common.DecScaled(defStr(a.String("commission-rate", ""), "0.05"))
+	if err != nil {
+		return nil, fmt.Errorf("commission-rate: %w", err)
+	}
+	maxRate, err := common.DecScaled(defStr(a.String("commission-max-rate", ""), "0.20"))
+	if err != nil {
+		return nil, fmt.Errorf("commission-max-rate: %w", err)
+	}
+	maxChange, err := common.DecScaled(defStr(a.String("commission-max-change", ""), "0.01"))
+	if err != nil {
+		return nil, fmt.Errorf("commission-max-change: %w", err)
+	}
 	msg := &stakingv1beta1.MsgCreateValidator{
 		ValidatorAddress: mustValoper(acct),
 		DelegatorAddress: acct,
@@ -59,9 +71,9 @@ func (t createTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, er
 		Value:            coin,
 		Description:      &stakingv1beta1.Description{Moniker: a.String("moniker", "")},
 		Commission: &stakingv1beta1.CommissionRates{
-			Rate:          defStr(a.String("commission-rate", ""), "0.05"),
-			MaxRate:       defStr(a.String("commission-max-rate", ""), "0.20"),
-			MaxChangeRate: defStr(a.String("commission-max-change", ""), "0.01"),
+			Rate:          rate,
+			MaxRate:       maxRate,
+			MaxChangeRate: maxChange,
 		},
 		MinSelfDelegation: defStr(a.String("min-self-delegation", ""), "1"),
 	}

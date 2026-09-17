@@ -84,7 +84,7 @@ func editPeers(c *toolkit.Context, peer string, add bool) (*toolkit.Result, erro
 			clean = append(clean, p)
 		}
 	}
-	verb := "add"
+	verb, done := "add", "added"
 	if add {
 		for _, p := range clean {
 			if p == peer {
@@ -93,7 +93,7 @@ func editPeers(c *toolkit.Context, peer string, add bool) (*toolkit.Result, erro
 		}
 		clean = append(clean, peer)
 	} else {
-		verb = "remove"
+		verb, done = "remove", "removed"
 		var keep []string
 		for _, p := range clean {
 			if p != peer {
@@ -111,6 +111,6 @@ func editPeers(c *toolkit.Context, peer string, add bool) (*toolkit.Result, erro
 	if err := h.WriteFile(c, path, []byte(cfg), 0o644); err != nil {
 		return nil, err
 	}
-	return &toolkit.Result{Text: fmt.Sprintf("%sed %s — %d persistent peer(s)", verb, peer, len(clean)),
+	return &toolkit.Result{Text: fmt.Sprintf("%s %s — %d persistent peer(s)", done, peer, len(clean)),
 		Data: map[string]any{"peers": clean}}, nil
 }

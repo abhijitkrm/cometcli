@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -236,6 +237,17 @@ func runInit(ctx context.Context, in io.Reader, out io.Writer) error {
 	note("the node's data dir as seen from THIS host — for docker, the mounted host path")
 	p.Home = ask(r, out, "node home dir", def(d.home, filepath.Join("~", "."+p.Binary)))
 
+	// the node's own app.toml tells us what fee the mempool will accept
+	if p.Transport.Type != "ssh" {
+		if gp := minGasPrice(expandHome(p.Home)); gp != "" {
+			if p.Metadata == nil {
+				p.Metadata = map[string]string{}
+			}
+			p.Metadata["gas_price"] = gp
+			say("  ✓ gas price from app.toml: %s", gp)
+		}
+	}
+
 	// --- signer key ---
 	note("an ops key signs transactions (send/delegate/unjail) — skip for read-only monitoring")
 	if askYN(r, out, "create an ops signing key now?", true) {
@@ -452,6 +464,38 @@ func inspectLocal() (d discovered) {
 		d.evm = "http://127.0.0.1:8545"
 	}
 	return d
+}
+
+func expandHome(path string) string {
+	if strings.HasPrefix(path, "~/") {
+		if h, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(h, path[2:])
+		}
+	}
+	return path
+}
+
+// minGasPrice reads app.toml's minimum-gas-prices ("1000000000adex") and
+// returns the numeric price, so txs default to what the mempool accepts.
+func minGasPrice(home string) string {
+	b, err := os.ReadFile(filepath.Join(home, "config", "app.toml"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "minimum-gas-prices") {
+			continue
+		}
+		_, v, _ := strings.Cut(line, "=")
+		v = strings.Trim(strings.TrimSpace(v), `",`)
+		i := 0
+		for i < len(v) && (v[i] >= '0' && v[i] <= '9' || v[i] == '.') {
+			i++
+		}
+		return v[:i]
+	}
+	return ""
 }
 
 // homeFromArgs extracts `--home /path` or `--home=/path` from a cmdline.
