@@ -6,7 +6,8 @@
 #
 # Options (env vars):
 #   COMETCLI_VERSION   pin a tag (default: latest release)
-#   COMETCLI_BIN_DIR   install dir (default: /usr/local/bin, fallback ~/.local/bin)
+#   COMETCLI_BIN_DIR   install dir (default: first writable of /opt/homebrew/bin,
+#                      /usr/local/bin; fallback ~/.local/bin — auto-added to PATH)
 #   COMETCLI_NO_VERIFY set to 1 to skip sha256 verification (not recommended)
 set -euo pipefail
 
@@ -75,21 +76,47 @@ if [ -n "${COMETCLI_BIN_DIR:-}" ]; then
   mkdir -p "$dest"
   install -m 0755 "${tmp}/${BIN}" "${dest}/${BIN}"
 else
-  dest="/usr/local/bin"
-  if [ -w "$dest" ]; then
+  # prefer a dir already on PATH: homebrew on macOS, then /usr/local/bin
+  dest=""
+  for cand in /opt/homebrew/bin /usr/local/bin; do
+    if [ -d "$cand" ] && [ -w "$cand" ]; then dest="$cand"; break; fi
+  done
+  if [ -n "$dest" ]; then
     install -m 0755 "${tmp}/${BIN}" "${dest}/${BIN}"
   elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    dest="/usr/local/bin"
     sudo install -m 0755 "${tmp}/${BIN}" "${dest}/${BIN}"
   else
     dest="${HOME}/.local/bin"
     mkdir -p "$dest"
     install -m 0755 "${tmp}/${BIN}" "${dest}/${BIN}"
-    info "installed to ${dest} — add it to your PATH"
   fi
 fi
 
+# --- PATH fixup: if dest isn't on PATH, append it to the user's shell rc ----------
+path_hint=""
+case ":${PATH}:" in
+  *":${dest}:"*) ;;
+  *)
+    rc=""
+    case "${SHELL:-}" in
+      */zsh)  rc="${HOME}/.zshrc" ;;
+      */bash) rc="${HOME}/.bashrc" ;;
+      *)      rc="${HOME}/.profile" ;;
+    esac
+    line="export PATH=\"${dest}:\$PATH\"  # cometcli"
+    if [ -n "$rc" ] && ! grep -qF "$dest" "$rc" 2>/dev/null; then
+      printf '\n%s\n' "$line" >> "$rc"
+      info "added ${dest} to PATH in ${rc}"
+      path_hint="run:  source ${rc}    # or open a new terminal"
+    else
+      path_hint="add ${dest} to your PATH"
+    fi ;;
+esac
+
 say ""
 say "cometcli ${COMETCLI_VERSION} installed → ${dest}/${BIN}"
+[ -n "$path_hint" ] && info "$path_hint"
 say ""
 say "get running in 60 seconds:"
 cat <<EOF
