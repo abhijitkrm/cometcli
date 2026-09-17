@@ -98,9 +98,14 @@ type AppModel struct {
 func NewApp(c *toolkit.Context, reg *toolkit.Registry, interval time.Duration) *AppModel {
 	var tools []toolkit.Tool
 	for _, t := range reg.All() {
-		if t.Tier() <= toolkit.TierDiagnose {
-			tools = append(tools, t)
+		if t.Tier() > toolkit.TierDiagnose {
+			continue // never mutating tools in the runner
 		}
+		// only tools runnable with zero args — the UI can't fill schemas yet
+		if req, _ := t.Schema()["required"].([]string); len(req) > 0 {
+			continue
+		}
+		tools = append(tools, t)
 	}
 	sort.Slice(tools, func(i, j int) bool { return tools[i].Name() < tools[j].Name() })
 	vp := viewport.New(80, 20)
@@ -147,13 +152,26 @@ func (m *AppModel) collectFleet() tea.Cmd {
 	}
 }
 
+// subCtx builds a fresh Context for in-app tool runs. Read-only tiers are
+// auto-approved (the Tools pane only lists observe/diagnose anyway); any
+// explicit Approve call still routes through the modal instead of stdin,
+// which bubbletea owns in raw mode.
+func (m *AppModel) subCtx() *toolkit.Context {
+	return &toolkit.Context{
+		Context: m.c.Context, Profile: m.c.Profile, Cfg: m.c.Cfg,
+		Out: m.c.Out, Audit: m.c.Audit,
+		Approver:         m.approver.approve,
+		AutoApproveBelow: toolkit.TierLocalChange,
+	}
+}
+
 func (m *AppModel) collectLogs() tea.Cmd {
 	t, ok := m.reg.Get("node.logs")
 	if !ok {
 		return func() tea.Msg { return logsMsg("node.logs tool not registered") }
 	}
 	return func() tea.Msg {
-		res, err := t.Run(m.c, toolkit.Args{"lines": 60})
+		res, err := t.Run(m.subCtx(), toolkit.Args{"lines": 60})
 		if err != nil {
 			return logsMsg("error: " + err.Error())
 		}
@@ -163,7 +181,7 @@ func (m *AppModel) collectLogs() tea.Cmd {
 
 func (m *AppModel) runTool(t toolkit.Tool) tea.Cmd {
 	return func() tea.Msg {
-		res, err := t.Run(m.c, toolkit.Args{})
+		res, err := t.Run(m.subCtx(), toolkit.Args{})
 		if err != nil {
 			return toolResultMsg{name: t.Name(), err: err}
 		}
@@ -182,13 +200,8 @@ func (m *AppModel) runSend() tea.Cmd {
 		"gas-price": m.txGas,
 	}
 	return func() tea.Msg {
-		// fresh Context (not a copy — Context carries a mutex); approvals
-		// route through the modal and nothing auto-approves inside the UI
-		sub := &toolkit.Context{
-			Context: m.c.Context, Profile: m.c.Profile, Cfg: m.c.Cfg,
-			Out: m.c.Out, Audit: m.c.Audit,
-			Approver: m.approver.approve, AutoApproveBelow: 0,
-		}
+		sub := m.subCtx()
+		sub.AutoApproveBelow = 0 // txs always prompt — never auto-approve in the UI
 		res, err := t.Run(sub, args)
 		if err != nil {
 			return toolResultMsg{name: "tx.send", err: err}
