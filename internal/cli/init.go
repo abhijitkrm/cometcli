@@ -77,15 +77,19 @@ func endpointHost(ep string) string {
 func runInit(ctx context.Context, in io.Reader, out io.Writer) error {
 	r := bufio.NewReader(in)
 	say := func(format string, a ...any) { fmt.Fprintf(out, format+"\n", a...) }
+	// note prints a one-line explanation above the next prompt.
+	note := func(s string) { fmt.Fprintf(out, "  %s\n", s) }
 
 	say("cometcli init — profile setup wizard\n")
 
+	note("a short name for this node — used with --profile and in fleet views")
 	name := ask(r, out, "profile name", "myval")
 	var p config.Profile
 	p.Name = name
 	p.Role = "validator"
 
 	// --- comet rpc: probe for chain-id + moniker ---
+	note("the node's CometBFT RPC — for docker use the published host port (see `docker ps`)")
 	cometEP := ask(r, out, "CometBFT RPC endpoint", "tcp://127.0.0.1:26657")
 	p.Endpoints.Comet = cometEP
 	host := endpointHost(cometEP)
@@ -103,14 +107,17 @@ func runInit(ctx context.Context, in io.Reader, out io.Writer) error {
 			}
 		} else {
 			say("  ! RPC probe failed: %v", err)
+			note("the chain's network id, e.g. mychain-1 — from genesis or your chain's docs")
 			p.ChainID = ask(r, out, "chain-id", "")
 		}
 	} else {
 		p.ChainID = ask(r, out, "chain-id", "")
 	}
+	note("account address prefix — e.g. cosmos produces cosmos1... addresses")
 	p.Bech32Prefix = ask(r, out, "bech32 prefix", "cosmos")
 
 	// --- grpc: probe for bond denom + validator prefix ---
+	note("Cosmos SDK gRPC port (default 9090) — powers staking/gov/bank queries")
 	grpcEP := ask(r, out, "gRPC endpoint", net.JoinHostPort(host, "9090"))
 	if grpcEP != "" {
 		p.Endpoints.GRPC = grpcEP
@@ -150,6 +157,7 @@ func runInit(ctx context.Context, in io.Reader, out io.Writer) error {
 	}
 
 	// --- evm json-rpc: probe chain id ---
+	note("Ethereum JSON-RPC port (default 8545) — enables evm commands; blank disables them")
 	evmEP := ask(r, out, "EVM JSON-RPC endpoint (blank to skip)", fmt.Sprintf("http://%s:8545", host))
 	if evmEP != "" {
 		p.Endpoints.EVM = evmEP
@@ -164,8 +172,11 @@ func runInit(ctx context.Context, in io.Reader, out io.Writer) error {
 	}
 
 	// --- host-plane ---
+	note("the node daemon binary — usually evmd; for docker, the binary inside the container")
 	p.Binary = ask(r, out, "node binary name", "evmd")
+	note("the node's data dir as seen from THIS host — for docker, the mounted host path")
 	p.Home = ask(r, out, "node home dir", filepath.Join("~", "."+p.Binary))
+	note("local = node runs on this machine; ssh = manage a remote host")
 	transport := ask(r, out, "host transport (local|ssh)", "local")
 	p.Transport.Type = transport
 	if transport == "ssh" {
@@ -174,20 +185,23 @@ func runInit(ctx context.Context, in io.Reader, out io.Writer) error {
 		if port := ask(r, out, "ssh port", "22"); port != "" {
 			fmt.Sscanf(port, "%d", &p.Transport.Port)
 		}
+		note("private key for ssh auth — password-protected keys need ssh-agent")
 		p.Transport.KeyFile = ask(r, out, "ssh key file", filepath.Join("~", ".ssh", "id_ed25519"))
 	}
 
 	// --- service supervision: detect best guess ---
 	guess := detectService(&p)
+	note("how the node process is supervised — picks the backend for start/stop/restart/logs")
 	p.Service.Type = ask(r, out, "service manager (systemd|docker|launchd|none)", guess)
 	switch p.Service.Type {
 	case "docker":
 		// the unit is the *container* name, not the binary — offer a picker
 		if names := dockerContainers(&p); len(names) > 0 {
-			say("  running containers:")
+			say("  running containers (validator-looking ones first):")
 			for i, n := range names {
 				say("    %d) %s", i+1, n)
 			}
+			note("pick the container running THIS validator — not sidecars like autoheal")
 			choice := ask(r, out, "container (number or name)", names[0])
 			if n, err := strconv.Atoi(choice); err == nil && n >= 1 && n <= len(names) {
 				p.Service.Unit = names[n-1]
@@ -198,15 +212,19 @@ func runInit(ctx context.Context, in io.Reader, out io.Writer) error {
 			p.Service.Unit = ask(r, out, "container name", p.Binary)
 		}
 	case "systemd":
+		note("the systemd unit managing the node, e.g. evmd.service")
 		p.Service.Unit = ask(r, out, "service unit", p.Binary+".service")
 	case "launchd":
+		note("the launchd label, e.g. com.example.evmd — see `launchctl list`")
 		p.Service.Unit = ask(r, out, "launchd label", p.Binary)
 	}
 
 	// --- signer key ---
+	note("an ops key signs transactions (send/delegate/unjail) — skip for read-only monitoring")
 	if askYN(r, out, "create an ops signing key now?", true) {
 		keyName := ask(r, out, "key name", "ops")
 		p.Signer.Key = keyName
+		note("file = password-encrypted file · os = OS keychain · test = plaintext, testnets only")
 		p.Signer.Backend = ask(r, out, "keyring backend (file|os|test)", "file")
 		ring, err := keys.Open(&p)
 		if err != nil {
