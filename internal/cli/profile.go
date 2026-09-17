@@ -78,7 +78,7 @@ func profileCmd() *cobra.Command {
 
 func profileAddCmd() *cobra.Command {
 	var p config.Profile
-	var signerKey, feeDenom string
+	var signerKey, feeDenom, valoper string
 	cmd := &cobra.Command{
 		Use:   "add <name>",
 		Short: "Add or update a node profile",
@@ -177,6 +177,12 @@ func profileAddCmd() *cobra.Command {
 				}
 				p.Metadata["fee_denom"] = feeDenom
 			}
+			if valoper != "" {
+				if p.Metadata == nil {
+					p.Metadata = map[string]string{}
+				}
+				p.Metadata["valoper"] = valoper
+			}
 			return cfg.UpsertProfile(&p)
 		},
 	}
@@ -201,6 +207,7 @@ func profileAddCmd() *cobra.Command {
 	f.StringVar(&signerKey, "signer", "", "ops key name in keyring")
 	f.StringVar(&p.Signer.Backend, "signer-backend", "", "os | file | test")
 	f.StringVar(&feeDenom, "fee-denom", "", "fee denom (e.g. atest)")
+	f.StringVar(&valoper, "valoper", "", "validator operator address (read-only signing/jail views without a signer)")
 	f.StringVar(&p.Agent.Provider, "agent-provider", "", "anthropic | openai | openai-compat | off")
 	f.StringVar(&p.Agent.Model, "agent-model", "", "model name")
 	f.StringVar(&p.Agent.BaseURL, "agent-base-url", "", "custom provider base URL")

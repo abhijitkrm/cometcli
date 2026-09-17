@@ -27,6 +27,10 @@ func Valoper(c *toolkit.Context, args toolkit.Args) (string, error) {
 	if v := args.String("validator", ""); v != "" {
 		return v, nil
 	}
+	// a profile may pin its valoper for read-only views (no signer needed)
+	if c.Profile != nil && c.Profile.Metadata["valoper"] != "" {
+		return c.Profile.Metadata["valoper"], nil
+	}
 	tb, err := c.Tx()
 	if err != nil {
 		return "", fmt.Errorf("pass --validator <valoper> or configure signer.key: %w", err)
