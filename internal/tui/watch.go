@@ -76,7 +76,15 @@ func (m *WatchModel) View() string {
 		title.Render("cometcli watch"),
 		m.c.Profile.Name,
 		dim.Render(s.TS.Format("15:04:05")))
+	b.WriteString(snapshotRows(s))
+	fmt.Fprintf(&b, "\n%s\n", dim.Render("q to quit"))
+	return b.String()
+}
 
+// snapshotRows renders the health rows shared by `mon watch` and the
+// overview pane of `cometcli ui`.
+func snapshotRows(s *monitor.Snapshot) string {
+	var b strings.Builder
 	row := func(k, v string, st lipgloss.Style) {
 		fmt.Fprintf(&b, "%s %s\n", rowKey.Render(k), st.Render(v))
 	}
@@ -131,7 +139,6 @@ func (m *WatchModel) View() string {
 	for _, e := range s.Errors {
 		fmt.Fprintf(&b, "%s %s\n", rowKey.Render("warn"), dim.Render(e))
 	}
-	fmt.Fprintf(&b, "\n%s\n", dim.Render("q to quit"))
 	return b.String()
 }
 

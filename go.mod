@@ -6,6 +6,7 @@ require (
 	cosmossdk.io/api v0.8.0
 	github.com/99designs/keyring v1.2.2
 	github.com/BurntSushi/toml v1.6.0
+	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/glamour v1.0.0
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
