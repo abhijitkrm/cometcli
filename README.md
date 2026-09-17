@@ -67,12 +67,12 @@ cometcli init
 
 # (or declaratively — `profile add` merges, re-run to update one field)
 cometcli profile add myval \
-  --chain-id primium-1 --evm-chain-id 123457 --bech32-prefix cosmos \
+  --chain-id mychain-1 --evm-chain-id 9000 --bech32-prefix cosmos \
   --role validator --home /var/lib/evmd --binary evmd \
   --comet tcp://127.0.0.1:26657 --grpc 127.0.0.1:9090 \
   --evm http://127.0.0.1:8545 \
   --service systemd --unit evmd.service \
-  --signer ops --signer-backend file --fee-denom adex
+  --signer ops --signer-backend file --fee-denom uatom
 
 # 2. Add an ops key (transaction signing only — consensus keys are never touched)
 cometcli keys add --name ops                       # generate
@@ -131,11 +131,11 @@ broadcast → confirm**:
 ```
 ⚠  [on-chain] broadcast transaction
 {
-  "chain_id": "primium-1",
+  "chain_id": "mychain-1",
   "account": "cosmos10pmprk9…",
   "sequence": 1,
   "messages": ["/cosmos.bank.v1beta1.MsgSend {…}"],
-  "fee": "155401875000000adex",
+  "fee": "155401875000000uatom",
   "gas_limit": 138135
 }
 Proceed? [y/N]
@@ -227,6 +227,11 @@ Built for the Cosmos stack — chains running
 [Cosmos EVM](https://github.com/cosmos/evm) module (`evmd` and derivatives).
 If your chain exposes a CometBFT RPC, Cosmos gRPC, and Ethereum JSON-RPC,
 cometcli speaks to all three.
+
+**Nothing is chain-specific.** Chain-id, bech32 prefix, fee denom, EVM
+chain-id, ports, binary name — all live in the profile, and `cometcli init`
+auto-detects most of them by probing the node. Point it at any evmd-based
+chain and it just works.
 
 ## Contributing
 

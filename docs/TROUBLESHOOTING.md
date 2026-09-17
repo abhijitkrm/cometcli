@@ -44,7 +44,7 @@ cometcli rebuilds+retries once automatically; if it still fails, wait a block
 or pass `--seq <n> --acc-num <n>` explicitly.
 
 **`insufficient fee`** — pass `--gas-price <min>` matching the chain's
-`minimum-gas-prices` (e.g. `--gas-price 1250000000adex`).
+`minimum-gas-prices` (e.g. `--gas-price 25000000000uatom`).
 
 **`tx already seen`** — you re-broadcast byte-identical txs; harmless dedup.
 
