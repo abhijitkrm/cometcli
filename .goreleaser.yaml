@@ -58,6 +58,39 @@ signs:
     artifacts: checksum
     output: true
 
+release:
+  name_template: "v{{ .Version }}"
+  header: |
+    ## cometcli v{{ .Version }}
+
+    An agentic SRE terminal for Cosmos-EVM validators — deterministic CLI,
+    live TUI, optional AI agent, fleet ops, runbooks, and alerting.
+
+    Install:
+      curl -fsSL https://raw.githubusercontent.com/abhijitkrm/cometcli/main/scripts/install.sh | bash
+
+    Verify: docs/INSTALL.md (checksums + cosign keyless signature).
+
 changelog:
-  use: github
+  use: git
   sort: asc
+  filters:
+    exclude:
+      - "^Merge"
+      - "^\\["
+      - "Generated with"
+      - "Co-Authored-By"
+      - "^chore"
+      - "add image"
+  groups:
+    - title: "Bug fixes"
+      regexp: "(?i)(fix|repair|correct|broke|broken)"
+      order: 0
+    - title: "Documentation"
+      regexp: "^(docs|readme|install-doc)[^:]*:"
+      order: 1
+    - title: "Features"
+      regexp: "^[^:]+:"
+      order: 2
+    - title: "Other"
+      order: 999
