@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -179,21 +180,37 @@ func DoctorCmd(reg *toolkit.Registry) *cobra.Command {
 			}
 			wg.Wait()
 
-			// render
-			var b strings.Builder
 			fails, warns := 0, 0
+			for _, ch := range checks {
+				if ch.Warn {
+					warns++
+				} else if !ch.OK {
+					fails++
+				}
+			}
+			if flagJSON {
+				out := map[string]any{"failures": fails, "warnings": warns}
+				var list []map[string]any
+				for _, ch := range checks {
+					list = append(list, map[string]any{
+						"name": ch.Name, "ok": ch.OK, "warn": ch.Warn, "detail": ch.Detail,
+					})
+				}
+				out["checks"] = list
+				jb, _ := json.MarshalIndent(out, "", "  ")
+				fmt.Fprintln(c.Out, string(jb))
+				return nil
+			}
+			var b strings.Builder
 			for _, ch := range checks {
 				icon := "✓"
 				switch {
 				case !ch.OK && ch.Detail != "":
 					icon = "✗"
-					fails++
 				case ch.Warn:
 					icon = "!"
-					warns++
 				case !ch.OK:
 					icon = "✗"
-					fails++
 				}
 				fmt.Fprintf(&b, "%s  %-18s %s\n", icon, ch.Name, ch.Detail)
 			}

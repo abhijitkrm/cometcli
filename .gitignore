@@ -4,3 +4,18 @@
 *.out
 .DS_Store
 /tmp/
+
+# macOS app / SwiftPM
+macos/.build/
+macos/build/
+macos/.swiftpm/
+*.app
+*.xcarchive
+xcuserdata/
+DerivedData/
+*.dSYM/
+
+# editor/OS noise
+*.swp
+.idea/
+.vscode/

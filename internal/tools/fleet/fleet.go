@@ -64,6 +64,7 @@ func (statusTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, erro
 	wg.Wait()
 
 	var b strings.Builder
+	var jrows []map[string]any
 	fmt.Fprintf(&b, "%-18s %-6s %-8s %-6s %-14s %-6s %s\n",
 		"PROFILE", "ROLE", "HEIGHT", "PEERS", "SIGNING", "DISK", "STATUS")
 	for _, r := range rows {
@@ -91,8 +92,14 @@ func (statusTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, erro
 		}
 		fmt.Fprintf(&b, "%-18s %-6s %-8d %-6d %-14s %-5.0f%% %s\n",
 			r.name, role, s.Height, s.Peers, signing, s.DiskUsedPct, status)
+		jrows = append(jrows, map[string]any{
+			"name": r.name, "role": role, "height": s.Height, "peers": s.Peers,
+			"signing": signing, "disk_pct": s.DiskUsedPct, "status": status,
+		})
 	}
-	return &toolkit.Result{Text: b.String(), Data: map[string]any{"count": len(rows)}}, nil
+	return &toolkit.Result{Text: b.String(), Data: map[string]any{
+		"count": len(rows), "nodes": jrows,
+	}}, nil
 }
 
 // profilesSelected returns the subset of configured profiles matching the
