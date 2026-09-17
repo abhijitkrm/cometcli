@@ -25,6 +25,8 @@ SBOMs, `checksums.txt`, and cosign keyless-signs the checksum.
 
 ## Verify the release
 
+- [ ] Release notes read well — the grouped auto-changelog covers commits;
+      hand-edit the body for highlights on notable releases
 - [ ] Release page shows 4 archives + `checksums.txt` + `checksums.txt.sig`
       + 4 `*.sbom.json`
 - [ ] `cosign verify-blob` passes (see docs/INSTALL.md)
