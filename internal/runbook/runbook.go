@@ -14,11 +14,11 @@ import (
 // Step is one runbook action.
 type Step struct {
 	Name     string
-	Tool     string         // registry tool name; "" = note only
-	Args     toolkit.Args   // args passed to the tool
-	Note     string         // printed before running
-	Optional bool           // failure doesn't abort
-	Manual   string         // human instruction (no tool) — pauses for approval
+	Tool     string       // registry tool name; "" = note only
+	Args     toolkit.Args // args passed to the tool
+	Note     string       // printed before running
+	Optional bool         // failure doesn't abort
+	Manual   string       // human instruction (no tool) — pauses for approval
 }
 
 // Runbook is an ordered procedure.

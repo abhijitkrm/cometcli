@@ -12,6 +12,7 @@ import (
 // Register adds runbook.* tools.
 func Register(r *toolkit.Registry) {
 	r.Register(listTool{})
+	r.Register(showTool{})
 	r.Register(runTool{reg: r})
 }
 
@@ -32,6 +33,48 @@ func (listTool) Run(c *toolkit.Context, _ toolkit.Args) (*toolkit.Result, error)
 		out = append(out, map[string]string{"name": rb.Name, "desc": rb.Desc})
 	}
 	return &toolkit.Result{Text: b.String(), Data: map[string]any{"runbooks": out}}, nil
+}
+
+type showTool struct{}
+
+func (showTool) Name() string { return "runbook.show" }
+func (showTool) Desc() string {
+	return "Print a runbook's steps without executing"
+}
+func (showTool) Schema() map[string]any {
+	return toolkit.ObjSchema(map[string]any{
+		"name": toolkit.Enum("runbook name", runbook.AllNames()...),
+	}, "name")
+}
+func (showTool) Tier() toolkit.Tier { return toolkit.TierObserve }
+
+func (showTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
+	rb, err := runbook.GetAll(a.String("name", ""))
+	if err != nil {
+		return nil, err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s — %s\n\n", rb.Name, rb.Desc)
+	for i, s := range rb.Steps {
+		fmt.Fprintf(&b, "%2d. %s\n", i+1, s.Name)
+		switch {
+		case s.Manual != "":
+			fmt.Fprintf(&b, "    manual: %s\n", s.Manual)
+		case s.Tool != "":
+			fmt.Fprintf(&b, "    tool: %s", s.Tool)
+			if len(s.Args) > 0 {
+				fmt.Fprintf(&b, " %v", s.Args)
+			}
+			if s.Optional {
+				b.WriteString("  (optional)")
+			}
+			b.WriteString("\n")
+		}
+		if s.Note != "" {
+			fmt.Fprintf(&b, "    note: %s\n", s.Note)
+		}
+	}
+	return &toolkit.Result{Text: b.String(), Data: map[string]any{"runbook": rb.Name, "steps": len(rb.Steps)}}, nil
 }
 
 type runTool struct{ reg *toolkit.Registry }

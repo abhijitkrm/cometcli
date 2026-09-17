@@ -3,9 +3,9 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
-	"os"
 
 	"github.com/abhijitkrm/cometcli/internal/audit"
 	"github.com/abhijitkrm/cometcli/internal/config"
@@ -40,8 +40,8 @@ type stubTool struct {
 	run  func(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error)
 }
 
-func (s stubTool) Name() string          { return s.name }
-func (s stubTool) Desc() string          { return "stub " + s.name }
+func (s stubTool) Name() string { return s.name }
+func (s stubTool) Desc() string { return "stub " + s.name }
 func (s stubTool) Schema() map[string]any {
 	return toolkit.ObjSchema(map[string]any{})
 }
@@ -63,10 +63,10 @@ func newTestAgent(t *testing.T, prov Provider, tools ...toolkit.Tool) *Agent {
 	}
 	t.Cleanup(func() { aud.Close() })
 	ctx := &toolkit.Context{
-		Context:           context.Background(),
-		Profile:           &config.Profile{Name: "testp"},
-		Audit:             aud,
-		AutoApproveBelow:  toolkit.TierOnChain, // observe/diagnose/local-change auto-run
+		Context:          context.Background(),
+		Profile:          &config.Profile{Name: "testp"},
+		Audit:            aud,
+		AutoApproveBelow: toolkit.TierOnChain, // observe/diagnose/local-change auto-run
 	}
 	return &Agent{Provider: prov, Model: "mock-1", Reg: reg, Ctx: ctx, MaxIter: 4}
 }

@@ -9,8 +9,8 @@ import (
 	slashingv1beta1 "cosmossdk.io/api/cosmos/slashing/v1beta1"
 	stakingv1beta1 "cosmossdk.io/api/cosmos/staking/v1beta1"
 
-	"github.com/abhijitkrm/cometcli/internal/tools/common"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
+	"github.com/abhijitkrm/cometcli/internal/tools/common"
 )
 
 // Snapshot is one point-in-time view of validator health.
@@ -24,12 +24,12 @@ type Snapshot struct {
 	Version     string    `json:"version"`
 
 	// signing (requires grpc + signer)
-	ConsAddr   string `json:"cons_address,omitempty"`
-	Missed     int64  `json:"missed"`
-	Window     int64  `json:"window"`
+	ConsAddr   string  `json:"cons_address,omitempty"`
+	Missed     int64   `json:"missed"`
+	Window     int64   `json:"window"`
 	UptimePct  float64 `json:"uptime_pct"`
-	Jailed     bool   `json:"jailed"`
-	Tombstoned bool   `json:"tombstoned"`
+	Jailed     bool    `json:"jailed"`
+	Tombstoned bool    `json:"tombstoned"`
 
 	// host
 	DiskUsedPct float64 `json:"disk_used_pct"`

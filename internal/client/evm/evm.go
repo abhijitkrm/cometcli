@@ -15,9 +15,9 @@ import (
 
 // Client speaks JSON-RPC 2.0 to an eth endpoint.
 type Client struct {
-	url  string
-	hc   *http.Client
-	id   atomic.Int64
+	url string
+	hc  *http.Client
+	id  atomic.Int64
 }
 
 // New creates a client for an http(s):// endpoint.

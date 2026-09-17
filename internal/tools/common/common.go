@@ -3,13 +3,13 @@
 package common
 
 import (
-	"os"
-	"regexp"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"math/big"
 	"net/http"
+	"os"
+	"regexp"
 	"strconv"
 	"strings"
 

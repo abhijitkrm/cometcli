@@ -170,13 +170,13 @@ func (t *telegram) Send(ctx context.Context, msg string) error {
 
 // Watcher polls snapshots and fires sinks on rule triggers (deduped).
 type Watcher struct {
-	Ctx       *toolkit.Context
-	Interval  time.Duration
-	Rules     []Rule
-	Sinks     []Sink
-	OnEvent   func(msg string, isAlert bool)
-	fired     map[string]bool
-	prev      *Snapshot
+	Ctx      *toolkit.Context
+	Interval time.Duration
+	Rules    []Rule
+	Sinks    []Sink
+	OnEvent  func(msg string, isAlert bool)
+	fired    map[string]bool
+	prev     *Snapshot
 }
 
 // Run loops until ctx is cancelled.

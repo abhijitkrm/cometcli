@@ -1,40 +1,59 @@
-# cometcli
+<div align="center">
+  <h1>cometcli</h1>
+  <p><b>An agentic SRE terminal for Cosmos-EVM validators</b></p>
+</div>
 
-**An agentic SRE terminal for Cosmos-EVM validators.** Local-first, single
-binary, deterministic CLI on the outside — optional LLM agent on the inside.
+<div align="center">
+  <a href="https://github.com/abhijitkrm/cometcli/actions/workflows/ci.yml">
+    <img alt="CI" src="https://github.com/abhijitkrm/cometcli/actions/workflows/ci.yml/badge.svg" />
+  </a>
+  <a href="https://github.com/abhijitkrm/cometcli/releases">
+    <img alt="Release" src="https://img.shields.io/github/v/release/abhijitkrm/cometcli" />
+  </a>
+  <a href="https://github.com/abhijitkrm/cometcli/blob/main/LICENSE">
+    <img alt="License" src="https://img.shields.io/github/license/abhijitkrm/cometcli.svg" />
+  </a>
+  <a href="https://goreportcard.com/report/github.com/abhijitkrm/cometcli">
+    <img alt="Go Report Card" src="https://goreportcard.com/badge/github.com/abhijitkrm/cometcli" />
+  </a>
+  <a href="https://pkg.go.dev/github.com/abhijitkrm/cometcli">
+    <img alt="Go Reference" src="https://pkg.go.dev/badge/github.com/abhijitkrm/cometcli.svg" />
+  </a>
+</div>
 
-cometcli is for validator operators (companies and independents) who need to
-answer "is my node healthy?" and act on it in one terminal — no dashboards to
-wire up, no context-switching between `evmd`, `systemctl`, `curl`, and
-explorer tabs.
+<br/>
 
-```bash
-cometcli doctor                      # 11-point validator health checklist
-cometcli val signing                 # missed blocks + uptime over the window
-cometcli node config --action lint   # audit config.toml against the hardened baseline
-cometcli tx send --to <addr> --amount 1000000atest --gas-price 1e9
-cometcli agent                       # interactive AI SRE (or `cometcli ask "...")
-```
+cometcli is a local-first operations terminal for validator companies and
+independent operators running [Cosmos-EVM](https://github.com/cosmos/evm)
+chains. It answers "is my node healthy?" — and acts on it — in one terminal:
+CometBFT RPC, Cosmos gRPC, and Ethereum JSON-RPC observability; transaction
+construction, simulation, signing, and broadcast; service control, upgrades,
+state-sync, runbooks, and a live monitoring dashboard. No dashboards to wire
+up, no context-switching between `evmd`, `systemctl`, `curl`, and explorer
+tabs.
 
-Every capability is a deterministic subcommand **and** a tool the agent can
-call — one tool registry, two front-ends. See [PLAN.md](PLAN.md) for the
-architecture.
+Every capability is a deterministic subcommand **and** a tool the optional AI
+agent can call — one registry, two front-ends. The deterministic layer is
+boring and correct; the agent composes it. See [PLAN.md](PLAN.md) for the
+architecture and design rationale.
 
 ## Install
 
 ```bash
-# from source (Go 1.25+)
-git clone https://github.com/abhijitkrm/cometcli && cd cometcli
-go build -o cometcli ./cmd/cometcli
+# one-liner: downloads the latest signed release, verifies sha256
+curl -fsSL https://raw.githubusercontent.com/abhijitkrm/cometcli/main/scripts/install.sh | bash
 
-# or go install
+# or from source (Go 1.25+)
 go install github.com/abhijitkrm/cometcli/cmd/cometcli@latest
 ```
 
-## Quickstart
+Details — custom install dirs, checksum/cosign verification, SBOMs — in
+[docs/INSTALL.md](docs/INSTALL.md).
+
+## Quick start
 
 ```bash
-# 1. Register a node. `profile add` merges — re-run it to update one field.
+# 1. Register a node — `profile add` merges, re-run to update one field
 cometcli profile add myval \
   --chain-id primium-1 --evm-chain-id 123457 --bech32-prefix cosmos \
   --role validator --home /var/lib/evmd --binary evmd \
@@ -42,13 +61,11 @@ cometcli profile add myval \
   --evm http://127.0.0.1:8545 \
   --service systemd --unit evmd.service \
   --signer ops --signer-backend file --fee-denom adex
-cometcli profile use myval
 
-# 2. Add an ops key (transaction signing only — consensus keys never touched)
-cometcli keys add --name ops                 # generates a new key
-cometcli keys add --name ops --recover       # import a BIP-39 mnemonic
-cometcli keys add --name ops --privkey-hex <hex>   # import a raw key
-# file backend reads the password from COMETCLI_KEYRING_PASSWORD
+# 2. Add an ops key (transaction signing only — consensus keys are never touched)
+cometcli keys add --name ops                       # generate
+cometcli keys add --name ops --recover             # import BIP-39 mnemonic
+cometcli keys add --name ops --privkey-hex <hex>   # import raw secp256k1 hex
 
 # 3. Check everything
 cometcli doctor
@@ -79,30 +96,30 @@ Tools are grouped by domain. Required args also bind positionally —
 | `val` | `status`, `signing`, `rewards`, `votes` · on-chain: `unjail`, `withdraw`, `vote`, `edit`, `create` |
 | `chain` | `validators`, `params`, `gov`, `upgrade-plan`, `pool`, `balance` |
 | `evm` | `chainid` (profile-vs-RPC sanity), `parity` (comet↔JSON-RPC drift), `gasprice`, `txpool` |
-| `tx` | `send`, `delegate`, `get` — every tx tool takes `--gas-price`, `--gas-limit`, `--fee-denom` |
+| `tx` | `send`, `delegate`, `get` — every tx tool takes `--gas-price`, `--gas-limit`, `--fee-denom`, `--seq` |
 | `keys` | `add` (`--recover`/`--privkey-hex`), `list`, `show`, `rm`, `convert` (bech32↔0x) — `eth_secp256k1` by default |
 | `sec` | `exposure` (listening-port audit), `perms` (key-file permissions), `doublesign` (priv_validator_state HRS check) |
-| `mon` | `snapshot`, `watch` (live TUI), `alerts` (rule engine → stdout/webhook) |
+| `mon` | `snapshot`, `watch` (live TUI), `alerts` (rule engine → stdout/Slack/Discord/Telegram) |
 | `upgrade` | `check` (plan + binary + upstream release), `prepare` (cosmovisor staging), `watch` |
 | `snap` | `list`, `prune`, `statesync` (fetch trust height, write `[statesync]`) |
-| `runbook` | `list`, `run` — `jail-recovery`, `halt-recovery`, `host-migration`, `statesync-bootstrap`, `coordinated-upgrade` |
+| `runbook` | `list`, `show`, `run` — builtins + your own YAML in `~/.cometcli/runbooks/` |
 | `net` | `add-peer`, `rm-peer` (persistent peers in config.toml) |
 | `fleet` | `status` — health matrix across all configured profiles |
+| `agent`/`ask` | interactive AI SRE over the same registry |
 
 Global flags: `--profile` (override active), `--json` (structured output),
 `-y/--yes` (auto-approve observe/diagnose prompts — never on-chain).
 
 ## Transactions
 
-Every on-chain op goes through build → simulate → decode → approve →
-broadcast → confirm:
+Every on-chain op goes through **build → simulate → decode → approve →
+broadcast → confirm**:
 
 ```
 ⚠  [on-chain] broadcast transaction
 {
   "chain_id": "primium-1",
   "account": "cosmos10pmprk9…",
-  "account_number": 0,
   "sequence": 1,
   "messages": ["/cosmos.bank.v1beta1.MsgSend {…}"],
   "fee": "155401875000000adex",
@@ -111,45 +128,46 @@ broadcast → confirm:
 Proceed? [y/N]
 ```
 
-Nothing hits the wire without an explicit `y`. `tx get <hash>` confirms
-inclusion afterwards.
+Nothing hits the wire without an explicit `y`. Sync-acceptance is not
+success — cometcli polls for the committed result and reports the real
+`code`, height, and gas. Sequence drift auto-heals once.
 
 ## The agent
 
 `cometcli agent` (or `cometcli ask "why is my validator missing blocks?"`)
-runs an LLM in a loop over the same tool registry. Providers are pluggable:
+runs an LLM in a loop over the same tool registry:
 
 ```bash
-cometcli profile add myval --agent-provider anthropic --agent-model claude-sonnet-4-20250514
+cometcli profile add myval --agent-provider anthropic --agent-model claude-sonnet-4-5
 export ANTHROPIC_API_KEY=…          # or OPENAI_API_KEY, OLLAMA_API_KEY;
-                                    # COMETCLI_LLM_API_KEY works as a universal fallback
+                                    # COMETCLI_LLM_API_KEY is a universal fallback
 cometcli ask "summarize signing health and flag any exposure risks"
 ```
 
-Supported providers: `anthropic`, `openai`, `openai-compat` (covers Ollama,
-vLLM, LM Studio, any OpenAI-shaped endpoint via `--agent-base-url`), or `off`.
+Providers: `anthropic`, `openai`, `openai-compat` (Ollama, vLLM, LM Studio —
+any OpenAI-shaped endpoint via `--agent-base-url`), or `off`.
 
-The agent sees tool calls as function calls; every on-chain or local-change
-call still goes through the same approval gate — the model can propose, only
-you approve.
+The model sees tool calls as function calls; every on-chain or local-change
+call still goes through the same approval gate — **the model can propose,
+only you approve.**
 
 ## Safety model
 
-- **Tiers**: `observe → diagnose → local-change → on-chain`. Read-only by
+- **Tiers** — `observe → diagnose → local-change → on-chain`. Read-only by
   default; every mutation prompts.
-- **Consensus keys are radioactive**: `priv_validator_key.json` is never read
-  into memory or sent to a model. Only `priv_validator_state.json` HRS is
-  inspected for double-sign guards.
-- **Redaction**: secrets, mnemonics, and key material are scrubbed from all
-  text entering and leaving the agent.
-- **Audit**: every tool call, shell command, prompt, and tx is logged to
-  `~/.cometcli/audit/YYYY-MM-DD.jsonl` (`cometcli audit` to tail it).
-- **Bounded execution**: every tool runs under a deadline — a dead endpoint
+- **Consensus keys are radioactive** — `priv_validator_key.json` is never
+  read into memory or sent to a model. Only `priv_validator_state.json`
+  HRS is inspected for double-sign guards.
+- **Redaction** — keys, mnemonics, JWTs, bearer tokens, and URL credentials
+  are scrubbed from all text entering and leaving the agent.
+- **Audit** — every tool call, shell command, prompt, and transaction lands
+  in `~/.cometcli/audit/YYYY-MM-DD.jsonl` (`cometcli audit` to tail it).
+- **Bounded execution** — every tool runs under a deadline; a dead endpoint
   fails fast instead of hanging.
 
 ## Profiles & config
 
-State lives in `~/.cometcli/` (`$COMETCLI_HOME` to override):
+State lives in `~/.cometcli/` (`COMETCLI_HOME` to override):
 
 ```
 config.yaml     # profiles + active pointer
@@ -159,31 +177,50 @@ audit/          # JSONL audit trail
 ```
 
 Key env vars: `COMETCLI_PROFILE`, `COMETCLI_KEYRING_PASSWORD`,
-`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`.
+`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `COMETCLI_LLM_API_KEY`.
 
-## Docs
+## Documentation
 
+- [docs/INSTALL.md](docs/INSTALL.md) — install options, checksum & cosign verification
+- [PLAN.md](PLAN.md) — architecture and design rationale
 - [docs/RUNBOOKS.md](docs/RUNBOOKS.md) — builtin playbooks + authoring your own
-- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — endpoints, keyrings, tx
-  errors, SSH, state sync, agent config
+- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — endpoints, keyrings,
+  tx errors, SSH, state sync, agent config
+- [CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md)
 
 ## Development
 
 ```bash
 go build ./...          # build all packages
 go vet ./...            # vet
-go test ./...           # unit tests (keys KAT, redaction, lint, config…)
+golangci-lint run       # lint (config: .golangci.yml)
+go test ./...           # unit tests (keys KAT, redaction, lint, agent loop…)
 
 # e2e (needs a live node):
 COMETCLI_E2E=1 COMETCLI_E2E_GRPC=127.0.0.1:9090 \
 COMETCLI_E2E_COMET=tcp://127.0.0.1:26657 go test ./test/e2e/...
+
+# SSH transport e2e (needs a reachable sshd):
+COMETCLI_SSH_TEST_HOST=127.0.0.1 COMETCLI_SSH_TEST_PORT=2222 \
+COMETCLI_SSH_TEST_USER=ops COMETCLI_SSH_TEST_KEY=~/.ssh/id_ed25519 \
+go test ./internal/client/host -run SSHLive -v
 ```
+
+## Ecosystem
+
+Built for the Cosmos stack — chains running
+[CometBFT](https://github.com/cometbft/cometbft) consensus with the
+[Cosmos EVM](https://github.com/cosmos/evm) module (`evmd` and derivatives).
+If your chain exposes a CometBFT RPC, Cosmos gRPC, and Ethereum JSON-RPC,
+cometcli speaks to all three.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Security issues:
+Bug reports and feature requests via
+[issues](https://github.com/abhijitkrm/cometcli/issues). See
+[CONTRIBUTING.md](CONTRIBUTING.md); security disclosures per
 [SECURITY.md](SECURITY.md).
 
 ## License
 
-Apache-2.0
+[Apache-2.0](LICENSE)

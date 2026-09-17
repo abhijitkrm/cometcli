@@ -101,14 +101,14 @@ type Built struct {
 
 // Doc is the decoded transaction for display.
 type Doc struct {
-	ChainID   string   `json:"chain_id"`
-	Account   string   `json:"account"`
-	AccNum    uint64   `json:"account_number"`
-	Seq       uint64   `json:"sequence"`
-	Msgs      []string `json:"messages"`
-	Fee       string   `json:"fee"`
-	GasLimit  uint64   `json:"gas_limit"`
-	Memo      string   `json:"memo,omitempty"`
+	ChainID  string   `json:"chain_id"`
+	Account  string   `json:"account"`
+	AccNum   uint64   `json:"account_number"`
+	Seq      uint64   `json:"sequence"`
+	Msgs     []string `json:"messages"`
+	Fee      string   `json:"fee"`
+	GasLimit uint64   `json:"gas_limit"`
+	Memo     string   `json:"memo,omitempty"`
 }
 
 func (d Doc) String() string {

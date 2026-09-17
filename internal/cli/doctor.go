@@ -1,9 +1,9 @@
 package cli
 
 import (
-	"sync"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"

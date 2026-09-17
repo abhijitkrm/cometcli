@@ -6,8 +6,8 @@ import (
 	"context"
 	"strings"
 
-	coretypes "github.com/cometbft/cometbft/rpc/core/types"
 	rpchttp "github.com/cometbft/cometbft/rpc/client/http"
+	coretypes "github.com/cometbft/cometbft/rpc/core/types"
 	ctypes "github.com/cometbft/cometbft/types"
 )
 

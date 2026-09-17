@@ -45,19 +45,19 @@ type Config struct {
 
 // Profile describes one managed node.
 type Profile struct {
-	Name         string     `yaml:"-"`
-	ChainID      string     `yaml:"chain_id"`
-	EVMChainID   uint64     `yaml:"evm_chain_id,omitempty"`
-	Bech32Prefix string     `yaml:"bech32_prefix,omitempty"`
-	Role         string     `yaml:"role"`   // validator | rpc | sentry
-	Home         string     `yaml:"home"`   // node home dir, e.g. ~/.evmd
-	Binary       string     `yaml:"binary"` // chain binary name, e.g. evmd
-	Endpoints    Endpoints  `yaml:"endpoints"`
-	Transport    Transport  `yaml:"transport"`
-	Service      Service    `yaml:"service"`
-	Signer       Signer     `yaml:"signer"`
-	Agent        AgentConf  `yaml:"agent"`
-	Alerts       Alerts     `yaml:"alerts"`
+	Name         string            `yaml:"-"`
+	ChainID      string            `yaml:"chain_id"`
+	EVMChainID   uint64            `yaml:"evm_chain_id,omitempty"`
+	Bech32Prefix string            `yaml:"bech32_prefix,omitempty"`
+	Role         string            `yaml:"role"`   // validator | rpc | sentry
+	Home         string            `yaml:"home"`   // node home dir, e.g. ~/.evmd
+	Binary       string            `yaml:"binary"` // chain binary name, e.g. evmd
+	Endpoints    Endpoints         `yaml:"endpoints"`
+	Transport    Transport         `yaml:"transport"`
+	Service      Service           `yaml:"service"`
+	Signer       Signer            `yaml:"signer"`
+	Agent        AgentConf         `yaml:"agent"`
+	Alerts       Alerts            `yaml:"alerts"`
 	Metadata     map[string]string `yaml:"metadata,omitempty"`
 }
 
