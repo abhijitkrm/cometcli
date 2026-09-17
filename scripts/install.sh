@@ -126,14 +126,9 @@ say ""
 say "get running in 60 seconds:"
 cat <<EOF
 
-  ${BIN} profile add myval \\
-    --chain-id <your-chain-id> \\
-    --comet tcp://<node>:26657 \\
-    --grpc <node>:9090 \\
-    --home ~/.evmd \\
-    --service systemd --unit evmd.service
-
-  ${BIN} doctor --profile myval      # health checklist
+  ${BIN} init                        # guided setup — probes your node,
+                                     # detects docker/systemd service
+  ${BIN} doctor                      # health checklist
   ${BIN} mon watch                   # live dashboard
   ${BIN} agent                       # AI copilot (optional)
 

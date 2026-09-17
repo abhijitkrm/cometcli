@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -179,11 +180,27 @@ func runInit(ctx context.Context, in io.Reader, out io.Writer) error {
 	// --- service supervision: detect best guess ---
 	guess := detectService(&p)
 	p.Service.Type = ask(r, out, "service manager (systemd|docker|launchd|none)", guess)
-	if p.Service.Type != "none" && p.Service.Type != "" {
-		defUnit := map[string]string{
-			"systemd": p.Binary + ".service", "docker": p.Binary, "launchd": p.Binary,
-		}[p.Service.Type]
-		p.Service.Unit = ask(r, out, "service unit/container name", defUnit)
+	switch p.Service.Type {
+	case "docker":
+		// the unit is the *container* name, not the binary — offer a picker
+		if names := dockerContainers(&p); len(names) > 0 {
+			say("  running containers:")
+			for i, n := range names {
+				say("    %d) %s", i+1, n)
+			}
+			choice := ask(r, out, "container (number or name)", names[0])
+			if n, err := strconv.Atoi(choice); err == nil && n >= 1 && n <= len(names) {
+				p.Service.Unit = names[n-1]
+			} else {
+				p.Service.Unit = choice
+			}
+		} else {
+			p.Service.Unit = ask(r, out, "container name", p.Binary)
+		}
+	case "systemd":
+		p.Service.Unit = ask(r, out, "service unit", p.Binary+".service")
+	case "launchd":
+		p.Service.Unit = ask(r, out, "launchd label", p.Binary)
 	}
 
 	// --- signer key ---
@@ -231,13 +248,12 @@ func runInit(ctx context.Context, in io.Reader, out io.Writer) error {
 }
 
 // detectService makes a best-effort guess at how the node is supervised.
+// If docker has running containers that look like chain nodes, prefer docker.
 func detectService(p *config.Profile) string {
 	if p.Transport.Type == "ssh" {
 		return "systemd"
 	}
-	// docker container named like the binary?
-	if out, err := os.ReadFile("/proc/1/cgroup"); err == nil &&
-		strings.Contains(string(out), "docker") {
+	if _, err := exec.LookPath("docker"); err == nil && len(dockerContainers(p)) > 0 {
 		return "docker"
 	}
 	if _, err := exec.LookPath("systemctl"); err == nil {
@@ -250,4 +266,36 @@ func detectService(p *config.Profile) string {
 		return "launchd"
 	}
 	return "none"
+}
+
+// dockerContainers lists running container names (local transport only).
+func dockerContainers(p *config.Profile) []string {
+	if p.Transport.Type == "ssh" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "docker", "ps", "--format", "{{.Names}}").Output()
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			names = append(names, line)
+		}
+	}
+	// rank node-like containers first — sidecars (autoheal, monitor, …) last
+	score := func(n string) int {
+		switch {
+		case strings.Contains(n, "validator") || strings.Contains(n, p.Binary):
+			return 0
+		case strings.Contains(n, "node") || strings.Contains(n, "sentry"):
+			return 1
+		default:
+			return 2
+		}
+	}
+	sort.SliceStable(names, func(i, j int) bool { return score(names[i]) < score(names[j]) })
+	return names
 }
