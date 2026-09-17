@@ -130,7 +130,7 @@ func (w *webhook) Send(ctx context.Context, msg string) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := sinkHTTP.Do(req)
 	if err != nil {
 		return err
 	}
@@ -140,6 +140,10 @@ func (w *webhook) Send(ctx context.Context, msg string) error {
 	}
 	return nil
 }
+
+// sinkHTTP bounds sink latency so a stalling endpoint can't freeze the
+// watcher loop.
+var sinkHTTP = &http.Client{Timeout: 10 * time.Second}
 
 type telegram struct{ token, chatID string }
 
@@ -153,11 +157,14 @@ func (t *telegram) Send(ctx context.Context, msg string) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := sinkHTTP.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("telegram api: %d", resp.StatusCode)
+	}
 	return nil
 }
 

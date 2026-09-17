@@ -123,7 +123,10 @@ curl -fsSL %s -o asset.tar.gz
 tar xzf asset.tar.gz
 `, common.ShellQ(dir), common.ShellQ(url))
 	if cs := a.String("checksum", ""); cs != "" {
-		cmd += fmt.Sprintf("echo '%s  ./%s' | sha256sum -c -\n", cs, binary)
+		// sum goes to a file so a failing first tool doesn't consume the
+		// pipe before the fallback runs
+		cmd += fmt.Sprintf("printf '%%s  %%s\\n' %s %s > expected.sum && (sha256sum -c expected.sum 2>/dev/null || shasum -a 256 -c expected.sum)\n",
+			common.ShellQ(cs), common.ShellQ("./"+binary))
 	}
 	cmd += fmt.Sprintf("install -m 0755 ./%s %s/\n", common.ShellQ(binary), common.ShellQ(dir))
 	out, code, err := h.Run(c, cmd)

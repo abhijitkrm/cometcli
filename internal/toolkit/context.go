@@ -110,6 +110,14 @@ func (c *Context) Host() (host.Host, error) {
 	return c.host, c.hostErr
 }
 
+// SetHost overrides the host transport — used by tests and by tooling that
+// already resolved a connection.
+func (c *Context) SetHost(h host.Host) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.host, c.hostErr = h, nil
+}
+
 // Tx lazily builds the transaction pipeline (keyring + grpc).
 func (c *Context) Tx() (*tx.Builder, error) {
 	// Fail fast before any dialing — Profile is immutable post-NewCtx.
@@ -165,15 +173,15 @@ func (c *Context) Approve(prompt string, tier Tier, detail map[string]any) error
 	return RequireApproval(c, prompt, tier, detail)
 }
 
-// Close releases lazy clients.
+// Close releases lazy clients. Audit is deliberately not closed here:
+// derived contexts (WithDeadline) share the parent's logger, and closing
+// it per-call would kill auditing for the rest of the session. The owner
+// that opened the logger closes it at shutdown.
 func (c *Context) Close() {
 	if c.grpc != nil {
 		c.grpc.Close()
 	}
 	if h, ok := c.host.(io.Closer); ok {
 		h.Close()
-	}
-	if c.Audit != nil {
-		c.Audit.Close()
 	}
 }

@@ -149,6 +149,10 @@ func sshAuth(t config.Transport) ([]ssh.AuthMethod, error) {
 }
 
 func (s *SSH) Run(ctx context.Context, cmd string) (string, int, error) {
+	return s.runStdin(ctx, cmd, nil)
+}
+
+func (s *SSH) runStdin(ctx context.Context, cmd string, stdin *bytes.Reader) (string, int, error) {
 	sess, err := s.client.NewSession()
 	if err != nil {
 		return "", -1, err
@@ -157,6 +161,9 @@ func (s *SSH) Run(ctx context.Context, cmd string) (string, int, error) {
 	var out, serr bytes.Buffer
 	sess.Stdout = &out
 	sess.Stderr = &serr
+	if stdin != nil {
+		sess.Stdin = stdin
+	}
 
 	done := make(chan error, 1)
 	go func() { done <- sess.Run(cmd) }()
@@ -190,7 +197,7 @@ func (s *SSH) WriteFile(ctx context.Context, path string, data []byte, perm os.F
 	tmp := path + ".cometcli-tmp"
 	cmd := fmt.Sprintf("umask 077 && cat > %s && chmod %o %s && mv %s %s",
 		shellQuote(tmp), uint32(perm), shellQuote(tmp), shellQuote(tmp), shellQuote(path))
-	_, code, err := s.Run(ctx, cmd)
+	_, code, err := s.runStdin(ctx, cmd, bytes.NewReader(data))
 	if err != nil {
 		return fmt.Errorf("write %s (exit %d): %w", path, code, err)
 	}
