@@ -15,7 +15,7 @@ func Register(r *toolkit.Registry) {
 	r.Register(runTool{reg: r})
 }
 
-type listTool struct{ reg *toolkit.Registry }
+type listTool struct{}
 
 func (listTool) Name() string { return "runbook.list" }
 func (listTool) Desc() string {

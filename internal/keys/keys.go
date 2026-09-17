@@ -22,7 +22,7 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	bip32 "github.com/tyler-smith/go-bip32"
-	"golang.org/x/crypto/ripemd160"
+	"golang.org/x/crypto/ripemd160" //nolint:staticcheck // hash160 is required by cosmos address derivation
 	"golang.org/x/crypto/sha3"
 
 	"github.com/abhijitkrm/cometcli/internal/config"

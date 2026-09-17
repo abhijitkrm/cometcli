@@ -167,7 +167,7 @@ func (watchTool) Tier() toolkit.Tier { return toolkit.TierObserve }
 func (watchTool) LongRunning() bool  { return true }
 
 func (watchTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
-	var target int64 = a.Int("height", 0)
+	target := a.Int("height", 0)
 	if target == 0 {
 		g, err := c.GRPC()
 		if err != nil {

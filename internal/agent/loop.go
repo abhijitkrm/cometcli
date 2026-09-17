@@ -21,9 +21,9 @@ type Agent struct {
 	MaxIter  int
 
 	// UI hooks — the REPL renders these.
-	OnText       func(text string)                          // assistant text chunk
-	OnToolCall   func(name string, args map[string]any)     // before a tool runs
-	OnToolResult func(name, summary string, err error)      // after a tool runs
+	OnText       func(text string)                      // assistant text chunk
+	OnToolCall   func(name string, args map[string]any) // before a tool runs
+	OnToolResult func(name, summary string, err error)  // after a tool runs
 
 	history []Msg
 }
@@ -77,7 +77,7 @@ func toolFnName(n string) string { return strings.ReplaceAll(n, ".", "__") }
 func (a *Agent) Run(ctx context.Context, input string) (string, error) {
 	a.history = append(a.history, Msg{Role: "user", Text: input})
 	if a.Audit() != nil {
-		a.Audit().Log(audit.KindPrompt, a.Ctx.Profile.Name, map[string]any{"text": redact.Text(input)})
+		_ = a.Audit().Log(audit.KindPrompt, a.Ctx.Profile.Name, map[string]any{"text": redact.Text(input)})
 	}
 
 	for i := 0; i < a.MaxIter; i++ {

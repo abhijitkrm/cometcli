@@ -29,7 +29,6 @@ type WatchModel struct {
 	c        *toolkit.Context
 	interval time.Duration
 	snap     *monitor.Snapshot
-	events   []string
 	quitting bool
 }
 

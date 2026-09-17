@@ -102,7 +102,9 @@ func (a *anthropic) convMessages(in []Msg) []map[string]any {
 			}
 			for _, cl := range m.Calls {
 				var input any
-				json.Unmarshal(cl.Args, &input)
+				if err := json.Unmarshal(cl.Args, &input); err != nil {
+					input = map[string]any{"_raw": string(cl.Args)}
+				}
 				blocks = append(blocks, anthBlock{"type": "tool_use", "id": cl.ID, "name": cl.Name, "input": input})
 			}
 			out = append(out, map[string]any{"role": "assistant", "content": blocks})

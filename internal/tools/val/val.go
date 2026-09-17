@@ -128,7 +128,7 @@ func (signingTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, err
 	fmt.Fprintf(&b, "missed:     %d  (uptime %.2f%%)\n", missed, uptime)
 	fmt.Fprintf(&b, "tombstoned: %v\n", info.Tombstoned)
 	fmt.Fprintf(&b, "jailed_until: %s\n", info.JailedUntil.AsTime().Format(time.RFC3339))
-	fmt.Fprintf(&b, "index_offset: %d   start_height: %d\n", info.IndexOffset, info.StartHeight)
+	fmt.Fprintf(&b, "start_height: %d\n", info.StartHeight)
 	return &toolkit.Result{Text: b.String(), Data: map[string]any{
 		"cons_address": cons, "window": window, "missed": missed,
 		"uptime_pct": uptime, "tombstoned": info.Tombstoned,

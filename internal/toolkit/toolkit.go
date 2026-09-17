@@ -96,7 +96,7 @@ type Result struct {
 // JSON returns Data (or Text) as a JSON string.
 func (r *Result) JSON() string {
 	v := any(r.Data)
-	if v == nil {
+	if r.Data == nil {
 		v = map[string]any{"text": r.Text}
 	}
 	b, _ := json.MarshalIndent(v, "", "  ")

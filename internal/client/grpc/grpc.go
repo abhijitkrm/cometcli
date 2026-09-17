@@ -56,10 +56,10 @@ func Dial(ctx context.Context, endpoint string) (*Conn, error) {
 	}
 	dctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	cc, err := grpc.DialContext(dctx, endpoint,
+	cc, err := grpc.DialContext(dctx, endpoint, //nolint:staticcheck // blocking dial enforces our timeout
 		grpc.WithTransportCredentials(creds),
-		grpc.WithBlock(), // fail fast when the endpoint is dead
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(32 << 20)),
+		grpc.WithBlock(), //nolint:staticcheck // fail fast when the endpoint is dead
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(32<<20)),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", endpoint, err)
