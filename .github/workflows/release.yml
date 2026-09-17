@@ -18,6 +18,8 @@ jobs:
         with:
           go-version: "1.25"
       - uses: sigstore/cosign-installer@v3
+      - name: install syft (sbom generation)
+        run: curl -sSfL https://get.anchore.io/syft | sudo sh -s -- -b /usr/local/bin
       - uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
@@ -25,5 +27,5 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: sign artifacts
-        run: cosign sign-blob --yes dist/checksums.txt --output-signature dist/checksums.txt.sig --output-certificate dist/checksums.txt.pem
+          # cosign keyless needs the OIDC token — goreleaser picks it up
+          COSIGN_EXPERIMENTAL: "true"

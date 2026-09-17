@@ -191,10 +191,37 @@ func (serviceTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, err
 	}
 	out, code, err := svcRun(c, h, action)
 	c.LogShell("service "+action+" "+c.Profile.Service.Unit, code)
-	if err != nil {
-		return &toolkit.Result{Text: out, Data: map[string]any{"action": action, "exit": code, "output": out}}, nil
+	data := map[string]any{"action": action, "exit": code, "output": out}
+	text := common.OneLine(out)
+	if action == "status" && err == nil {
+		if shaped := shapeServiceStatus(c.Profile.Service.Type, out); shaped["state"] != nil {
+			for k, v := range shaped {
+				data[k] = v
+			}
+			var b strings.Builder
+			fmt.Fprintf(&b, "%s", shaped["state"])
+			if shaped["sub_state"] != nil {
+				fmt.Fprintf(&b, " (%s)", shaped["sub_state"])
+			}
+			if shaped["pid"] != nil && shaped["pid"] != "0" {
+				fmt.Fprintf(&b, "  pid %s", shaped["pid"])
+			}
+			if shaped["image"] != nil {
+				fmt.Fprintf(&b, "  image %s", shaped["image"])
+			}
+			if shaped["health"] != nil {
+				fmt.Fprintf(&b, "  health %s", shaped["health"])
+			}
+			if shaped["since"] != nil {
+				fmt.Fprintf(&b, "  since %s", shaped["since"])
+			}
+			text = b.String()
+		}
 	}
-	return &toolkit.Result{Text: common.OneLine(out), Data: map[string]any{"action": action, "exit": code, "output": out}}, nil
+	if err != nil {
+		return &toolkit.Result{Text: out, Data: data}, nil
+	}
+	return &toolkit.Result{Text: text, Data: data}, nil
 }
 
 func svcRun(c *toolkit.Context, h host.Host, action string) (string, int, error) {
@@ -203,7 +230,7 @@ func svcRun(c *toolkit.Context, h host.Host, action string) (string, int, error)
 	switch c.Profile.Service.Type {
 	case "docker":
 		if action == "status" {
-			cmd = "docker ps -a --filter name=" + common.ShellQ(unit)
+			cmd = "docker inspect -f '{{.State.Status}}|{{.State.Pid}}|{{.State.StartedAt}}|{{.Config.Image}}|{{.State.ExitCode}}|{{.State.Health.Status}}' " + common.ShellQ(unit) + " 2>/dev/null || docker ps -a --filter name=" + common.ShellQ(unit)
 		} else {
 			cmd = "docker " + action + " " + common.ShellQ(unit)
 		}
@@ -214,12 +241,48 @@ func svcRun(c *toolkit.Context, h host.Host, action string) (string, int, error)
 			cmd = "launchctl kickstart -k gui/$(id -u)/" + common.ShellQ(unit)
 		}
 	default: // systemd
-		cmd = fmt.Sprintf("systemctl %s %s 2>&1", action, common.ShellQ(unit))
 		if action == "status" {
-			cmd += " | head -20"
+			cmd = "out=$(systemctl show " + common.ShellQ(unit) + " -p ActiveState,SubState,MainPID,ExecMainStatus,ActiveEnterTimestamp --value 2>/dev/null | paste -sd'|' -); " +
+				"case \"$out\" in ''|'|||'*) systemctl status " + common.ShellQ(unit) + " 2>&1 | head -20 ;; *) echo \"$out\" ;; esac"
+		} else {
+			cmd = fmt.Sprintf("systemctl %s %s 2>&1", action, common.ShellQ(unit))
 		}
 	}
 	return h.Run(c, cmd)
+}
+
+// shapeServiceStatus parses the per-type status output into fields.
+func shapeServiceStatus(svcType, raw string) map[string]any {
+	d := map[string]any{"raw": raw}
+	parts := strings.Split(strings.TrimSpace(raw), "|")
+	switch svcType {
+	case "docker":
+		// state|pid|started|image|exitcode|health
+		if len(parts) >= 5 {
+			d["state"] = parts[0]
+			d["pid"] = parts[1]
+			d["started"] = parts[2]
+			d["image"] = parts[3]
+			d["exit_code"] = parts[4]
+			d["active"] = parts[0] == "running"
+			if len(parts) > 5 && parts[5] != "" {
+				d["health"] = parts[5]
+			}
+		}
+	default: // systemd
+		// ActiveState|SubState|MainPID|ExecMainStatus|ActiveEnterTimestamp
+		if len(parts) >= 4 {
+			d["state"] = parts[0]
+			d["sub_state"] = parts[1]
+			d["pid"] = parts[2]
+			d["exit_code"] = parts[3]
+			d["active"] = parts[0] == "active"
+			if len(parts) > 4 {
+				d["since"] = parts[4]
+			}
+		}
+	}
+	return d
 }
 
 type configShowTool struct{}

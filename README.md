@@ -154,11 +154,18 @@ State lives in `~/.cometcli/` (`$COMETCLI_HOME` to override):
 ```
 config.yaml     # profiles + active pointer
 keys/           # ops keyring (file backend)
+runbooks/       # your custom YAML playbooks
 audit/          # JSONL audit trail
 ```
 
 Key env vars: `COMETCLI_PROFILE`, `COMETCLI_KEYRING_PASSWORD`,
 `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`.
+
+## Docs
+
+- [docs/RUNBOOKS.md](docs/RUNBOOKS.md) — builtin playbooks + authoring your own
+- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — endpoints, keyrings, tx
+  errors, SSH, state sync, agent config
 
 ## Development
 

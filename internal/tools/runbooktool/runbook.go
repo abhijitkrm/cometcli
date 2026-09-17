@@ -27,7 +27,7 @@ func (listTool) Tier() toolkit.Tier     { return toolkit.TierObserve }
 func (listTool) Run(c *toolkit.Context, _ toolkit.Args) (*toolkit.Result, error) {
 	var b strings.Builder
 	var out []map[string]string
-	for _, rb := range runbook.Builtins() {
+	for _, rb := range runbook.All() {
 		fmt.Fprintf(&b, "%-22s %s\n", rb.Name, rb.Desc)
 		out = append(out, map[string]string{"name": rb.Name, "desc": rb.Desc})
 	}
@@ -42,13 +42,13 @@ func (runTool) Desc() string {
 }
 func (t runTool) Schema() map[string]any {
 	return toolkit.ObjSchema(map[string]any{
-		"name": toolkit.Enum("runbook name", runbook.Names()...),
+		"name": toolkit.Enum("runbook name", runbook.AllNames()...),
 	}, "name")
 }
 func (runTool) Tier() toolkit.Tier { return toolkit.TierLocalChange }
 
 func (t runTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
-	rb, err := runbook.Get(a.String("name", ""))
+	rb, err := runbook.GetAll(a.String("name", ""))
 	if err != nil {
 		return nil, err
 	}
