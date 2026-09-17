@@ -4,8 +4,10 @@ package montool
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/abhijitkrm/cometcli/internal/audit"
 	"github.com/abhijitkrm/cometcli/internal/monitor"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
 	"github.com/abhijitkrm/cometcli/internal/tui"
@@ -73,6 +75,9 @@ func (alertsTool) Schema() map[string]any {
 		"missed-threshold": toolkit.Int("alert when missed blocks >= N (default 50)"),
 		"disk-pct":         toolkit.Int("alert when disk used >= N%% (default 85)"),
 		"stall-secs":       toolkit.Int("alert when height stalls > N secs (default 120)"),
+		"once":             toolkit.Bool("evaluate rules once and exit (for cron/CI)"),
+		"mute":             toolkit.Str("comma-separated rule names to silence (e.g. disk-usage,height-stall)"),
+		"repeat-minutes":   toolkit.Int("re-fire a still-firing alert after N minutes (default 0 = once)"),
 	})
 }
 func (alertsTool) Tier() toolkit.Tier { return toolkit.TierDiagnose }
@@ -81,12 +86,24 @@ func (alertsTool) LongRunning() bool  { return true }
 func (alertsTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
 	iv := time.Duration(a.Int("interval", 10)) * time.Second
 	sinks := monitor.Sinks(c.Profile.Alerts)
+	muted := map[string]bool{}
+	for _, s := range strings.Split(a.String("mute", ""), ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			muted[s] = true
+		}
+	}
 	w := &monitor.Watcher{
 		Ctx:      c,
 		Interval: iv,
+		Once:     a.Bool("once", false),
+		Muted:    muted,
+		Repeat:   time.Duration(a.Int("repeat-minutes", 0)) * time.Minute,
 		Rules:    monitor.DefaultRules(a.Int("missed-threshold", 50), float64(a.Int("disk-pct", 85)), int(a.Int("stall-secs", 120))),
 		Sinks:    sinks,
-		OnEvent:  func(msg string, _ bool) { fmt.Fprintln(c.Out, "ALERT:", msg) },
+		OnEvent: func(msg string, _ bool) {
+			fmt.Fprintln(c.Out, "ALERT:", msg)
+			_ = c.Audit.Log(audit.KindAlert, c.Profile.Name, map[string]any{"msg": msg})
+		},
 	}
 	fmt.Fprintf(c.Out, "watching %s — %d rule(s), %d sink(s), every %s\n",
 		c.Profile.Name, len(w.Rules), len(sinks), iv)

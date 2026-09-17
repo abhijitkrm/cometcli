@@ -27,6 +27,21 @@ checksum:
 sboms:
   - artifacts: archive
 
+# Homebrew tap — requires github.com/abhijitkrm/homebrew-tap to exist and a
+# HOMEBREW_TAP_TOKEN secret (PAT with repo scope) in the release workflow.
+brews:
+  - name: cometcli
+    repository:
+      owner: abhijitkrm
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: https://github.com/abhijitkrm/cometcli
+    description: "Agentic SRE terminal for Cosmos-EVM validators"
+    license: Apache-2.0
+    test: |
+      system "#{bin}/cometcli version"
+
 # cosign keyless signing — runs inside the pipeline so signatures ship
 # with the release artifacts (requires cosign on PATH)
 signs:

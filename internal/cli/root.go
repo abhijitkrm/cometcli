@@ -47,7 +47,7 @@ one-shot questions.`,
 	for _, c := range toolGroupCommands(reg) {
 		root.AddCommand(c)
 	}
-	root.AddCommand(profileCmd(), auditCmd(), versionCmd())
+	root.AddCommand(profileCmd(), auditCmd(), versionCmd(), initCmd())
 	root.AddCommand(extra...)
 	return root
 }

@@ -53,7 +53,11 @@ Details — custom install dirs, checksum/cosign verification, SBOMs — in
 ## Quick start
 
 ```bash
-# 1. Register a node — `profile add` merges, re-run to update one field
+# 1. Guided setup — probes your node and fills in chain-id, bech32 prefix,
+#    bond denom, and evm-chain-id automatically
+cometcli init
+
+# (or declaratively — `profile add` merges, re-run to update one field)
 cometcli profile add myval \
   --chain-id primium-1 --evm-chain-id 123457 --bech32-prefix cosmos \
   --role validator --home /var/lib/evmd --binary evmd \
@@ -96,15 +100,15 @@ Tools are grouped by domain. Required args also bind positionally —
 | `val` | `status`, `signing`, `rewards`, `votes` · on-chain: `unjail`, `withdraw`, `vote`, `edit`, `create` |
 | `chain` | `validators`, `params`, `gov`, `upgrade-plan`, `pool`, `balance` |
 | `evm` | `chainid` (profile-vs-RPC sanity), `parity` (comet↔JSON-RPC drift), `gasprice`, `txpool` |
-| `tx` | `send`, `delegate`, `get` — every tx tool takes `--gas-price`, `--gas-limit`, `--fee-denom`, `--seq` |
+| `tx` | `send`, `delegate`, `undelegate`, `redelegate`, `get` — every tx tool takes `--gas-price`, `--gas-limit`, `--fee-denom`, `--seq` |
 | `keys` | `add` (`--recover`/`--privkey-hex`), `list`, `show`, `rm`, `convert` (bech32↔0x) — `eth_secp256k1` by default |
 | `sec` | `exposure` (listening-port audit), `perms` (key-file permissions), `doublesign` (priv_validator_state HRS check) |
-| `mon` | `snapshot`, `watch` (live TUI), `alerts` (rule engine → stdout/Slack/Discord/Telegram) |
+| `mon` | `snapshot`, `watch` (live TUI), `alerts` (rules → stdout/Slack/Discord/Telegram; `--once`, `--mute`, `--repeat-minutes`) |
 | `upgrade` | `check` (plan + binary + upstream release), `prepare` (cosmovisor staging), `watch` |
 | `snap` | `list`, `prune`, `statesync` (fetch trust height, write `[statesync]`) |
 | `runbook` | `list`, `show`, `run` — builtins + your own YAML in `~/.cometcli/runbooks/` |
 | `net` | `add-peer`, `rm-peer` (persistent peers in config.toml) |
-| `fleet` | `status` — health matrix across all configured profiles |
+| `fleet` | `status` (health matrix), `exec` (fan out a read-only tool), `shell` (command on every host, one approval) |
 | `agent`/`ask` | interactive AI SRE over the same registry |
 
 Global flags: `--profile` (override active), `--json` (structured output),
@@ -186,6 +190,7 @@ Key env vars: `COMETCLI_PROFILE`, `COMETCLI_KEYRING_PASSWORD`,
 - [docs/RUNBOOKS.md](docs/RUNBOOKS.md) — builtin playbooks + authoring your own
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — endpoints, keyrings,
   tx errors, SSH, state sync, agent config
+- [docs/RELEASE.md](docs/RELEASE.md) — release checklist and verification
 - [CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md)
 
 ## Development

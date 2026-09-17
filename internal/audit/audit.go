@@ -23,6 +23,7 @@ const (
 	KindApproval Kind = "approval" // a human approval decision
 	KindPrompt   Kind = "prompt"   // an agent prompt (redacted)
 	KindLLM      Kind = "llm"      // an LLM response digest
+	KindAlert    Kind = "alert"    // a monitor alert firing
 )
 
 // Event is one audit record.

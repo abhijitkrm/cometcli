@@ -19,6 +19,8 @@ import (
 func Register(r *toolkit.Registry) {
 	r.Register(sendTool{})
 	r.Register(delegateTool{})
+	r.Register(undelegateTool{})
+	r.Register(redelegateTool{})
 	r.Register(getTool{})
 }
 
@@ -125,6 +127,83 @@ func (delegateTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, er
 	}
 	return common.BroadcastMsgs(c, tx.Msgs{msg}, a.String("memo", ""),
 		map[string]string{"action": "delegate", "validator": valoper}, common.TxOpts(a))
+}
+
+type undelegateTool struct{}
+
+func (undelegateTool) Name() string { return "tx.undelegate" }
+func (undelegateTool) Desc() string {
+	return "Undelegate tokens from a validator (starts unbonding)"
+}
+func (undelegateTool) Schema() map[string]any {
+	return toolkit.ObjSchema(common.WithTx(map[string]any{
+		"validator": toolkit.Str("valoper address (default: signer key)"),
+		"amount":    toolkit.Str("amount, e.g. 1000000atest"),
+		"memo":      toolkit.Str("tx memo"),
+	}), "amount")
+}
+func (undelegateTool) Tier() toolkit.Tier { return toolkit.TierOnChain }
+
+func (undelegateTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
+	acct, err := common.Account(c)
+	if err != nil {
+		return nil, err
+	}
+	valoper, err := common.Valoper(c, a)
+	if err != nil {
+		return nil, err
+	}
+	coin, err := parseCoin(a.String("amount", ""))
+	if err != nil {
+		return nil, err
+	}
+	msg := &stakingv1beta1.MsgUndelegate{
+		DelegatorAddress: acct,
+		ValidatorAddress: valoper,
+		Amount:           coin,
+	}
+	return common.BroadcastMsgs(c, tx.Msgs{msg}, a.String("memo", ""),
+		map[string]string{"action": "undelegate", "validator": valoper}, common.TxOpts(a))
+}
+
+type redelegateTool struct{}
+
+func (redelegateTool) Name() string { return "tx.redelegate" }
+func (redelegateTool) Desc() string {
+	return "Move a delegation from one validator to another (no unbonding wait)"
+}
+func (redelegateTool) Schema() map[string]any {
+	return toolkit.ObjSchema(common.WithTx(map[string]any{
+		"from":   toolkit.Str("source valoper (default: signer key)"),
+		"to":     toolkit.Str("destination valoper"),
+		"amount": toolkit.Str("amount, e.g. 1000000atest"),
+		"memo":   toolkit.Str("tx memo"),
+	}), "to", "amount")
+}
+func (redelegateTool) Tier() toolkit.Tier { return toolkit.TierOnChain }
+
+func (redelegateTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
+	acct, err := common.Account(c)
+	if err != nil {
+		return nil, err
+	}
+	src, err := common.Valoper(c, toolkit.Args{"validator": a.String("from", "")})
+	if err != nil {
+		return nil, err
+	}
+	dst := a.String("to", "")
+	coin, err := parseCoin(a.String("amount", ""))
+	if err != nil {
+		return nil, err
+	}
+	msg := &stakingv1beta1.MsgBeginRedelegate{
+		DelegatorAddress:    acct,
+		ValidatorSrcAddress: src,
+		ValidatorDstAddress: dst,
+		Amount:              coin,
+	}
+	return common.BroadcastMsgs(c, tx.Msgs{msg}, a.String("memo", ""),
+		map[string]string{"action": "redelegate", "from": src, "to": dst}, common.TxOpts(a))
 }
 
 // parseCoin parses "1000000atest" into a Coin.

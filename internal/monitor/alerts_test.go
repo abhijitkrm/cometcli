@@ -127,7 +127,6 @@ func TestWatcherSinkFailureDoesNotCrash(t *testing.T) {
 
 	w := &Watcher{
 		Sinks: []Sink{&webhook{kind: "slack", url: srv.URL}},
-		fired: map[string]bool{},
 	}
 	// notify is internal — simulate an alert fire via the sinks directly
 	for _, s := range w.Sinks {

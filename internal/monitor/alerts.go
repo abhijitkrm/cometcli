@@ -18,12 +18,15 @@ import (
 type Rule struct {
 	Name string
 	Eval func(s *Snapshot, prev *Snapshot) string
+	// Consecutive requires the rule to fire on N successive polls before
+	// alerting — guards against transient blips paging operators.
+	Consecutive int
 }
 
 // DefaultRules are the built-in alert rules.
 func DefaultRules(missedThreshold int64, diskPct float64, stallSecs int) []Rule {
 	return []Rule{
-		{Name: "unreachable", Eval: func(s, p *Snapshot) string {
+		{Name: "unreachable", Consecutive: 2, Eval: func(s, p *Snapshot) string {
 			if !s.Reachable {
 				return "node RPC unreachable"
 			}
@@ -60,7 +63,7 @@ func DefaultRules(missedThreshold int64, diskPct float64, stallSecs int) []Rule 
 			}
 			return ""
 		}},
-		{Name: "service-down", Eval: func(s, p *Snapshot) string {
+		{Name: "service-down", Consecutive: 2, Eval: func(s, p *Snapshot) string {
 			if s.ServiceUp != nil && !*s.ServiceUp {
 				return "node service is not active"
 			}
@@ -175,8 +178,15 @@ type Watcher struct {
 	Rules    []Rule
 	Sinks    []Sink
 	OnEvent  func(msg string, isAlert bool)
-	fired    map[string]bool
-	prev     *Snapshot
+	// Once runs a single check pass and returns.
+	Once bool
+	// Muted skips these rule names entirely.
+	Muted map[string]bool
+	// Repeat re-fires a still-firing alert after this duration (0 = once).
+	Repeat time.Duration
+	fired  map[string]time.Time
+	streak map[string]int
+	prev   *Snapshot
 }
 
 // Run loops until ctx is cancelled.
@@ -184,7 +194,12 @@ func (w *Watcher) Run() {
 	if w.Interval == 0 {
 		w.Interval = 10 * time.Second
 	}
-	w.fired = map[string]bool{}
+	w.fired = map[string]time.Time{}
+	w.streak = map[string]int{}
+	if w.Once {
+		w.check()
+		return
+	}
 	tick := time.NewTicker(w.Interval)
 	defer tick.Stop()
 	for {
@@ -200,17 +215,31 @@ func (w *Watcher) Run() {
 func (w *Watcher) check() {
 	s := Collect(w.Ctx)
 	for _, r := range w.Rules {
+		if w.Muted[r.Name] {
+			continue
+		}
 		msg := r.Eval(s, w.prev)
+		if msg == "" {
+			w.streak[r.Name] = 0
+			continue
+		}
+		w.streak[r.Name]++
+		if need := r.Consecutive; !w.Once && need > 0 && w.streak[r.Name] < need {
+			continue
+		}
 		key := r.Name + ":" + msg
-		if msg != "" && !w.fired[key] {
-			w.fired[key] = true
-			alert := fmt.Sprintf("[cometcli %s] %s: %s", w.Ctx.Profile.Name, r.Name, msg)
-			if w.OnEvent != nil {
-				w.OnEvent(alert, true)
+		if at, ok := w.fired[key]; ok {
+			if w.Repeat <= 0 || time.Since(at) < w.Repeat {
+				continue
 			}
-			for _, sink := range w.Sinks {
-				_ = sink.Send(w.Ctx, alert)
-			}
+		}
+		w.fired[key] = time.Now()
+		alert := fmt.Sprintf("[cometcli %s] %s: %s", w.Ctx.Profile.Name, r.Name, msg)
+		if w.OnEvent != nil {
+			w.OnEvent(alert, true)
+		}
+		for _, sink := range w.Sinks {
+			_ = sink.Send(w.Ctx, alert)
 		}
 	}
 	w.prev = s
