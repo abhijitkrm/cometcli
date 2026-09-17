@@ -3,10 +3,10 @@
 package snaptool
 
 import (
-	"encoding/base64"
 	"fmt"
 	"strings"
 
+	"github.com/abhijitkrm/cometcli/internal/client/comet"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
 	"github.com/abhijitkrm/cometcli/internal/tools/common"
 )
@@ -26,7 +26,7 @@ func (stateSyncTool) Desc() string {
 }
 func (stateSyncTool) Schema() map[string]any {
 	return toolkit.ObjSchema(map[string]any{
-		"rpc":          toolkit.Str("trusted RPC endpoint for trust height/hash (repeat via metadata.statesync_rpcs)"),
+		"rpc":          toolkit.Str("trusted RPCs, comma-separated — must be reachable FROM THE NODE (docker: host.docker.internal or peer container names); extras via metadata.statesync_rpcs"),
 		"height":       toolkit.Int("trust height (default: latest - 2000)"),
 		"trust-period": toolkit.Str("trust period (default 168h)"),
 		"apply":        toolkit.Bool("write to config.toml on the host (else print only)"),
@@ -35,7 +35,17 @@ func (stateSyncTool) Schema() map[string]any {
 func (stateSyncTool) Tier() toolkit.Tier { return toolkit.TierLocalChange }
 
 func (stateSyncTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
-	cc, err := c.Comet()
+	trustPeriod := a.String("trust-period", "168h")
+	rpcs := a.String("rpc", c.Profile.Endpoints.Comet)
+	if rpcs == "" {
+		rpcs = "tcp://127.0.0.1:26657"
+	}
+	if extra := c.Profile.Metadata["statesync_rpcs"]; extra != "" {
+		rpcs = rpcs + "," + extra
+	}
+	// fetch the trust block from the trusted RPC — the profile's own node
+	// is usually the thing being rebuilt (its RPC may be down)
+	cc, err := comet.New(strings.Split(rpcs, ",")[0])
 	if err != nil {
 		return nil, err
 	}
@@ -51,16 +61,11 @@ func (stateSyncTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, e
 	if err != nil {
 		return nil, fmt.Errorf("fetch trust block %d: %w", height, err)
 	}
-	hash := base64.StdEncoding.EncodeToString(blk.BlockID.Hash) // config.toml wants base64? comet wants hex
 	hexHash := fmt.Sprintf("%X", blk.BlockID.Hash)
-	_ = hash
-	trustPeriod := a.String("trust-period", "168h")
-	rpcs := a.String("rpc", c.Profile.Endpoints.Comet)
-	if rpcs == "" {
-		rpcs = "tcp://127.0.0.1:26657"
-	}
-	if extra := c.Profile.Metadata["statesync_rpcs"]; extra != "" {
-		rpcs = rpcs + "," + extra
+
+	// CometBFT rejects single-server statesync configs at startup
+	if len(strings.Split(rpcs, ",")) < 2 {
+		return nil, fmt.Errorf("statesync needs at least 2 rpc_servers for light-client cross-checks — pass --rpc \"a,b\" or set metadata.statesync_rpcs")
 	}
 	cfg := fmt.Sprintf(`[statesync]
 enable = true
