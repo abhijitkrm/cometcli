@@ -1,7 +1,11 @@
 package cli
 
 import (
+	"fmt"
+	"os"
 	"time"
+
+	"golang.org/x/term"
 
 	"github.com/spf13/cobra"
 
@@ -17,6 +21,9 @@ func UICmd(reg *toolkit.Registry) *cobra.Command {
 		Use:   "ui",
 		Short: "Full-screen terminal app (overview, fleet, logs, tools)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if f, ok := cmd.InOrStdin().(*os.File); !ok || !term.IsTerminal(int(f.Fd())) {
+				return fmt.Errorf("cometcli ui needs an interactive terminal — run it in a real shell (or use --json commands for scripting)")
+			}
 			c, err := NewCtx(cmd, true)
 			if err != nil {
 				return err

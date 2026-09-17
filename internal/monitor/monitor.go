@@ -97,8 +97,21 @@ func Collect(c *toolkit.Context) *Snapshot {
 			}
 		}
 		if c.Profile.Service.Unit != "" {
-			out, _, _ := h.Run(c, "systemctl is-active "+c.Profile.Service.Unit+" 2>/dev/null || echo unknown")
-			up := trim(out) == "active"
+			var cmd, want string
+			switch c.Profile.Service.Type {
+			case "docker":
+				cmd = "docker inspect -f '{{.State.Status}}' " + common.ShellQ(c.Profile.Service.Unit) + " 2>/dev/null || echo unknown"
+				want = "running"
+			case "launchd":
+				cmd = "launchctl list | grep -i " + common.ShellQ(c.Profile.Service.Unit)
+				want = "" // any match = running
+			default: // systemd
+				cmd = "systemctl is-active " + common.ShellQ(c.Profile.Service.Unit) + " 2>/dev/null || echo unknown"
+				want = "active"
+			}
+			out, _, _ := h.Run(c, cmd)
+			got := trim(out)
+			up := (want == "" && got != "") || got == want
 			s.ServiceUp = &up
 		}
 	}

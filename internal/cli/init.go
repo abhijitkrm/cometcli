@@ -240,7 +240,6 @@ func runInit(ctx context.Context, in io.Reader, out io.Writer) error {
 	note("an ops key signs transactions (send/delegate/unjail) — skip for read-only monitoring")
 	if askYN(r, out, "create an ops signing key now?", true) {
 		keyName := ask(r, out, "key name", "ops")
-		p.Signer.Key = keyName
 		note("file = password-encrypted file · os = OS keychain · test = plaintext, testnets only")
 		p.Signer.Backend = ask(r, out, "keyring backend (file|os|test)", "file")
 		ring, err := keys.Open(&p)
@@ -252,6 +251,9 @@ func runInit(ctx context.Context, in io.Reader, out io.Writer) error {
 			if err != nil {
 				say("  ! key generation failed: %v", err)
 			} else {
+				// only now is the signer real — don't save a key name that
+				// doesn't exist in the keyring
+				p.Signer.Key = keyName
 				addr, _ := k.Bech32(p.Bech32Prefix)
 				say("  ✓ key %q → %s", keyName, addr)
 				say("\n  WRITE THIS DOWN — mnemonic (never stored but the keyring):\n  %s\n", mnemonic)
