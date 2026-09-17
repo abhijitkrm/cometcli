@@ -24,7 +24,31 @@ const (
 	tabFleet
 	tabLogs
 	tabTools
+	tabSend
 )
+
+// approvalReq is a synchronous toolkit approval bridged through the
+// bubbletea event loop — the tool goroutine blocks until the user answers.
+type approvalReq struct {
+	prompt string
+	tier   toolkit.Tier
+	detail map[string]any
+	resp   chan bool
+}
+
+type approvalReqMsg approvalReq
+
+// tuiApprover implements toolkit.Approver by parking the tool goroutine on
+// a channel while the UI shows a y/n modal.
+type tuiApprover struct {
+	req chan approvalReq
+}
+
+func (a *tuiApprover) approve(_ *toolkit.Context, prompt string, tier toolkit.Tier, detail map[string]any) (bool, error) {
+	r := approvalReq{prompt: prompt, tier: tier, detail: detail, resp: make(chan bool)}
+	a.req <- r
+	return <-r.resp, nil
+}
 
 var (
 	tabStyle  = lipgloss.NewStyle().Padding(0, 1).Foreground(lipgloss.Color("240"))
@@ -53,6 +77,17 @@ type AppModel struct {
 	toolSel  int
 	toolBusy string
 
+	// tx send pane
+	txTo    string
+	txAmt   string
+	txGas   string
+	txMemo  string
+	txField int
+	txErr   string
+
+	approver *tuiApprover
+	pending  *approvalReq
+
 	vp       viewport.Model
 	width    int
 	height   int
@@ -69,11 +104,18 @@ func NewApp(c *toolkit.Context, reg *toolkit.Registry, interval time.Duration) *
 	}
 	sort.Slice(tools, func(i, j int) bool { return tools[i].Name() < tools[j].Name() })
 	vp := viewport.New(80, 20)
-	return &AppModel{c: c, reg: reg, interval: interval, tools: tools, vp: vp}
+	return &AppModel{c: c, reg: reg, interval: interval, tools: tools, vp: vp,
+		approver: &tuiApprover{req: make(chan approvalReq)}, txGas: "1e9"}
+}
+
+// waitApproval parks on the approver channel — emits approvalReqMsg when a
+// tool run inside the UI needs a human decision.
+func (m *AppModel) waitApproval() tea.Cmd {
+	return func() tea.Msg { return approvalReqMsg(<-m.approver.req) }
 }
 
 func (m *AppModel) Init() tea.Cmd {
-	return tea.Batch(m.collectSnap(), m.collectFleet(), tick(m.interval))
+	return tea.Batch(m.collectSnap(), m.collectFleet(), tick(m.interval), m.waitApproval())
 }
 
 func (m *AppModel) collectSnap() tea.Cmd {
@@ -129,6 +171,32 @@ func (m *AppModel) runTool(t toolkit.Tool) tea.Cmd {
 	}
 }
 
+// runSend builds + broadcasts tx.send through the TUI approval gate.
+func (m *AppModel) runSend() tea.Cmd {
+	t, ok := m.reg.Get("tx.send")
+	if !ok {
+		return func() tea.Msg { return toolResultMsg{name: "tx.send", err: fmt.Errorf("not registered")} }
+	}
+	args := toolkit.Args{
+		"to": m.txTo, "amount": m.txAmt, "memo": m.txMemo,
+		"gas-price": m.txGas,
+	}
+	return func() tea.Msg {
+		// fresh Context (not a copy — Context carries a mutex); approvals
+		// route through the modal and nothing auto-approves inside the UI
+		sub := &toolkit.Context{
+			Context: m.c.Context, Profile: m.c.Profile, Cfg: m.c.Cfg,
+			Out: m.c.Out, Audit: m.c.Audit,
+			Approver: m.approver.approve, AutoApproveBelow: 0,
+		}
+		res, err := t.Run(sub, args)
+		if err != nil {
+			return toolResultMsg{name: "tx.send", err: err}
+		}
+		return toolResultMsg{name: "tx.send", text: res.Text}
+	}
+}
+
 func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch v := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -137,24 +205,38 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.vp.Height = v.Height - 8
 		return m, nil
 	case tea.KeyMsg:
+		// pending approval modal captures y/n above everything
+		if m.pending != nil {
+			switch v.String() {
+			case "y", "Y":
+				m.pending.resp <- true
+			case "n", "N", "esc", "ctrl+c":
+				m.pending.resp <- false
+			}
+			m.pending = nil
+			return m, m.waitApproval()
+		}
+		if m.tab == tabSend {
+			return m.updateSend(v)
+		}
 		switch v.String() {
 		case "q", "ctrl+c":
 			m.quitting = true
 			return m, tea.Quit
-		case "1", "2", "3", "4":
+		case "1", "2", "3", "4", "5":
 			m.tab = tab(int(v.String()[0] - '1'))
 			if m.tab == tabLogs {
 				return m, m.collectLogs()
 			}
 			return m, nil
-		case "tab":
-			m.tab = (m.tab + 1) % 4
+		case "tab", "]":
+			m.tab = (m.tab + 1) % 5
 			if m.tab == tabLogs {
 				return m, m.collectLogs()
 			}
 			return m, nil
-		case "shift+tab":
-			m.tab = (m.tab + 3) % 4
+		case "shift+tab", "[":
+			m.tab = (m.tab + 4) % 5
 			return m, nil
 		case "j", "down":
 			if m.tab == tabTools && m.toolSel < len(m.tools)-1 {
@@ -201,13 +283,54 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tickMsg:
 		return m, tea.Batch(m.collectSnap(), m.collectFleet(), tick(m.interval))
+	case approvalReqMsg:
+		r := approvalReq(v)
+		m.pending = &r
+		return m, nil
+	}
+	return m, nil
+}
+
+// updateSend handles keys while the tx-send form has focus.
+func (m *AppModel) updateSend(v tea.KeyMsg) (tea.Model, tea.Cmd) {
+	fields := []*string{&m.txTo, &m.txAmt, &m.txGas, &m.txMemo}
+	switch v.String() {
+	case "ctrl+c":
+		m.quitting = true
+		return m, tea.Quit
+	case "esc", "[":
+		m.tab = tabOverview
+		return m, nil
+	case "]":
+		m.tab = tabOverview
+		return m, nil
+	case "tab", "down":
+		m.txField = (m.txField + 1) % len(fields)
+	case "shift+tab", "up":
+		m.txField = (m.txField + len(fields) - 1) % len(fields)
+	case "enter":
+		if m.txTo == "" || m.txAmt == "" {
+			m.txErr = "to + amount required"
+			return m, nil
+		}
+		m.txErr = ""
+		m.toolBusy = "tx.send"
+		return m, m.runSend()
+	case "backspace":
+		if s := *fields[m.txField]; len(s) > 0 {
+			*fields[m.txField] = s[:len(s)-1]
+		}
+	default:
+		if v.Type == tea.KeyRunes {
+			*fields[m.txField] += string(v.Runes)
+		}
 	}
 	return m, nil
 }
 
 func (m *AppModel) View() string {
 	var b strings.Builder
-	tabs := []string{"Overview", "Fleet", "Logs", "Tools"}
+	tabs := []string{"Overview", "Fleet", "Logs", "Tools", "Send"}
 	for i, t := range tabs {
 		if tab(i) == m.tab {
 			b.WriteString(activeTab.Render(t))
@@ -228,15 +351,67 @@ func (m *AppModel) View() string {
 		b.WriteString(m.fleetView())
 	case tabLogs, tabTools:
 		b.WriteString(m.vp.View())
+	case tabSend:
+		b.WriteString(m.sendView())
 	}
 	if m.tab == tabTools {
 		b.WriteString("\n" + m.toolList())
 	}
-	help := "1-4/tab: panes · j/k scroll · r refresh · q quit"
-	if m.tab == tabTools {
-		help = "j/k select · enter run · q quit"
+
+	// approval modal — blocks the UI until y/n
+	if m.pending != nil {
+		var det strings.Builder
+		for k, v := range m.pending.detail {
+			fmt.Fprintf(&det, "  %s: %v\n", k, v)
+		}
+		fmt.Fprintf(&b, "\n%s\n%s\n%s\n%s\n",
+			warn.Render(fmt.Sprintf("⚠ [%s] %s", m.pending.tier, m.pending.prompt)),
+			det.String(),
+			bad.Render("on-chain"+func() string {
+				if m.pending.tier == toolkit.TierOnChain {
+					return " — real funds"
+				}
+				return ""
+			}()),
+			headStyle.Render("approve? [y/n]"))
+	}
+
+	help := "1-5/tab/[ ]: panes · j/k scroll · r refresh · q quit"
+	switch m.tab {
+	case tabTools:
+		help = "j/k select · enter run · [ ] panes · q quit"
+	case tabSend:
+		help = "tab fields · enter broadcast · esc/[ back"
 	}
 	fmt.Fprintf(&b, "\n%s\n", dim.Render(help))
+	return b.String()
+}
+
+func (m *AppModel) sendView() string {
+	var b strings.Builder
+	fields := []struct{ label, val, hint string }{
+		{"to", m.txTo, "recipient bech32/0x address"},
+		{"amount", m.txAmt, "e.g. 1000000uatom"},
+		{"gas price", m.txGas, "per-gas unit price"},
+		{"memo", m.txMemo, "optional"},
+	}
+	for i, f := range fields {
+		label := rowKey.Render(fmt.Sprintf("%-10s", f.label))
+		val := f.val
+		if i == m.txField {
+			val = selStyle.Render(val + "█")
+		} else if val == "" {
+			val = dim.Render("(" + f.hint + ")")
+		}
+		fmt.Fprintf(&b, "%s %s\n", label, val)
+	}
+	if m.toolBusy == "tx.send" {
+		fmt.Fprintf(&b, "\n%s\n", warn.Render("broadcasting…"))
+	}
+	if m.txErr != "" {
+		fmt.Fprintf(&b, "\n%s\n", bad.Render(m.txErr))
+	}
+	b.WriteString(dim.Render("\nbroadcasts via build → simulate → approve → confirm\n"))
 	return b.String()
 }
 

@@ -102,3 +102,62 @@ func TestApp_QuitKey(t *testing.T) {
 		t.Fatal("q must quit")
 	}
 }
+
+func TestApp_SendFormEditing(t *testing.T) {
+	m := NewApp(appTestCtx(), testReg(), time.Second)
+	m.tab = tabSend
+	// type into the "to" field
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("cosmos1abc")})
+	v := m2.(*AppModel)
+	if v.txTo != "cosmos1abc" {
+		t.Fatalf("to field = %q", v.txTo)
+	}
+	// tab to amount, type
+	m3, _ := v.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if m3.(*AppModel).txField != 1 {
+		t.Fatal("tab must advance field")
+	}
+	m4, _ := m3.(*AppModel).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("100")})
+	if m4.(*AppModel).txAmt != "100" {
+		t.Fatalf("amount field = %q", m4.(*AppModel).txAmt)
+	}
+	// backspace
+	m5, _ := m4.(*AppModel).Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	if m5.(*AppModel).txAmt != "10" {
+		t.Fatal("backspace must delete")
+	}
+}
+
+func TestApp_SendRequiresToAndAmount(t *testing.T) {
+	m := NewApp(appTestCtx(), testReg(), time.Second)
+	m.tab = tabSend
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m2.(*AppModel).txErr == "" {
+		t.Fatal("empty form must set an error, not broadcast")
+	}
+}
+
+func TestApp_ApprovalModalBlocksAndResolves(t *testing.T) {
+	m := NewApp(appTestCtx(), testReg(), time.Second)
+	req := approvalReq{prompt: "broadcast?", tier: toolkit.TierOnChain, resp: make(chan bool, 1)}
+	m2, _ := m.Update(approvalReqMsg(req))
+	v := m2.(*AppModel)
+	if v.pending == nil {
+		t.Fatal("pending approval must be set")
+	}
+	if !strings.Contains(v.View(), "approve?") {
+		t.Fatal("modal must render the prompt")
+	}
+	m3, _ := v.Update(key("y"))
+	if m3.(*AppModel).pending != nil {
+		t.Fatal("y must clear the modal")
+	}
+	select {
+	case ok := <-req.resp:
+		if !ok {
+			t.Fatal("y must approve")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("response channel never received the answer")
+	}
+}
