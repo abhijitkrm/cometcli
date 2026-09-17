@@ -195,6 +195,7 @@ Key env vars: `COMETCLI_PROFILE`, `COMETCLI_KEYRING_PASSWORD`,
 ## Documentation
 
 - [docs/INSTALL.md](docs/INSTALL.md) — install options, checksum & cosign verification
+- [docs/COMMANDS.md](docs/COMMANDS.md) — full command reference with examples
 - [PLAN.md](PLAN.md) — architecture and design rationale
 - [docs/RUNBOOKS.md](docs/RUNBOOKS.md) — builtin playbooks + authoring your own
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — endpoints, keyrings,
