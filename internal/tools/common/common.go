@@ -3,6 +3,8 @@
 package common
 
 import (
+	"os"
+	"regexp"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -94,6 +96,8 @@ func TxSchema() map[string]any {
 		"gas-price": toolkit.Str("gas price in fee denom (e.g. 1125000000)"),
 		"gas-limit": toolkit.Int("explicit gas limit (default: simulate)"),
 		"fee-denom": toolkit.Str("override profile fee denom"),
+		"acc-num":   toolkit.Int("explicit account number (offline signing)"),
+		"seq":       toolkit.Int("explicit account sequence (offline signing)"),
 	}
 }
 
@@ -107,11 +111,15 @@ func WithTx(props map[string]any) map[string]any {
 
 // TxOpts extracts the optional gas/fee args into tx.Options.
 func TxOpts(a toolkit.Args) tx.Options {
-	return tx.Options{
+	opt := tx.Options{
 		GasPrice: a.String("gas-price", ""),
 		GasLimit: uint64(a.Int("gas-limit", 0)),
 		FeeDenom: a.String("fee-denom", ""),
 	}
+	if a.Has("seq") {
+		opt = opt.WithAccount(uint64(a.Int("acc-num", 0)), uint64(a.Int("seq", 0)))
+	}
+	return opt
 }
 
 // BroadcastMsgs is the shared on-chain flow every tx tool uses:
@@ -123,29 +131,93 @@ func BroadcastMsgs(c *toolkit.Context, msgs tx.Msgs, memo string, meta map[strin
 	if err != nil {
 		return nil, err
 	}
-	built, err := tb.Build(c, msgs, opt)
-	if err != nil {
-		return nil, err
-	}
-	detail := map[string]any{"doc": built.Doc.String()}
-	for k, v := range meta {
-		detail[k] = v
-	}
-	if err := c.Approve("broadcast transaction\n"+built.Doc.String(), toolkit.TierOnChain, detail); err != nil {
-		return nil, err
-	}
-	hash, code, rawLog, err := tb.Broadcast(c, built.TxBytes)
-	if err != nil {
-		return nil, err
-	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "tx hash: %s\ncode:    %d\n", hash, code)
-	if rawLog != "" {
-		fmt.Fprintf(&b, "log:     %s\n", rawLog)
+	// Sequence drift can surface at any stage (simulate, CheckTx, deliver).
+	// One automatic rebuild+retry with a fresh seq heals it — the doc is
+	// re-approved since its bytes changed.
+	for attempt := 0; ; attempt++ {
+		built, err := tb.Build(c, msgs, opt)
+		if err != nil {
+			if retrySeq(err.Error(), attempt, &opt) {
+				fmt.Fprintln(os.Stderr, "sequence drifted at simulation — rebuilding with fresh seq")
+				continue
+			}
+			return nil, err
+		}
+		detail := map[string]any{"doc": built.Doc.String()}
+		for k, v := range meta {
+			detail[k] = v
+		}
+		if err := c.Approve("broadcast transaction\n"+built.Doc.String(), toolkit.TierOnChain, detail); err != nil {
+			return nil, err
+		}
+		hash, code, rawLog, err := tb.Broadcast(c, built.TxBytes)
+		if err != nil {
+			if retrySeq(err.Error(), attempt, &opt) {
+				fmt.Fprintln(os.Stderr, "sequence drifted — rebuilding with fresh seq and retrying")
+				continue
+			}
+			return nil, err
+		}
+		fmt.Fprintf(&b, "tx hash: %s\n", hash)
+		if code != 0 {
+			// CheckTx rejected — never reached a block.
+			if retrySeq(rawLog, attempt, &opt) {
+				fmt.Fprintln(os.Stderr, "sequence drifted — rebuilding with fresh seq and retrying")
+				continue
+			}
+			return nil, fmt.Errorf("mempool rejected tx (code %d): %s", code, rawLog)
+		}
+		// SYNC only means mempool-accepted; confirm the committed result.
+		final, err := tb.Confirm(c, hash)
+		if err != nil {
+			fmt.Fprintf(&b, "broadcast accepted; confirmation pending: %v\n", err)
+			fmt.Fprintln(&b, "check later: cometcli tx get "+hash)
+			return &toolkit.Result{Text: b.String(), Data: map[string]any{
+				"hash": hash, "pending": true, "doc": built.Doc,
+			}}, nil
+		}
+		if retrySeq(final.RawLog, attempt, &opt) {
+			fmt.Fprintln(os.Stderr, "sequence drifted — rebuilding with fresh seq and retrying")
+			continue
+		}
+		fmt.Fprintf(&b, "height:  %d\ncode:    %d\ngas:     %d used\n", final.Height, final.Code, final.GasUsed)
+		if final.RawLog != "" && final.Code != 0 {
+			fmt.Fprintf(&b, "log:     %s\n", final.RawLog)
+		}
+		if final.Code != 0 {
+			return nil, fmt.Errorf("tx failed in block (code %d): %s", final.Code, final.RawLog)
+		}
+		return &toolkit.Result{Text: b.String(), Data: map[string]any{
+			"hash": hash, "height": final.Height, "code": final.Code,
+			"gas_used": final.GasUsed, "raw_log": final.RawLog, "doc": built.Doc,
+		}}, nil
 	}
-	return &toolkit.Result{Text: b.String(), Data: map[string]any{
-		"hash": hash, "code": code, "raw_log": rawLog, "doc": built.Doc,
-	}}, nil
+}
+
+// retrySeq reports whether the failure is a sequence mismatch worth one
+// automatic rebuild — impossible when the caller pinned the seq explicitly,
+// and never retried more than once. On a healable mismatch it sets
+// opt.ForceSeq to the chain's expected value so a mempool-pending tx
+// doesn't leave the re-query returning the same stale seq.
+var expectedSeqRe = regexp.MustCompile(`expected (\d+)`)
+
+func retrySeq(log string, attempt int, opt *tx.Options) bool {
+	if !seqMismatch(log) || attempt != 0 || opt.PinnedAccount() {
+		return false
+	}
+	if m := expectedSeqRe.FindStringSubmatch(log); m != nil {
+		if n, err := strconv.ParseInt(m[1], 10, 64); err == nil {
+			opt.ForceSeq = n
+		}
+	}
+	return true
+}
+
+// seqMismatch matches the SDK's wrong-sequence error text.
+func seqMismatch(rawLog string) bool {
+	s := strings.ToLower(rawLog)
+	return strings.Contains(s, "account sequence") || strings.Contains(s, "sequence mismatch")
 }
 
 // latestRelease fetches the newest release tag of a github repo.

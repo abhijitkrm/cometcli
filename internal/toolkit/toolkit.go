@@ -66,6 +66,9 @@ func (a Args) Bool(key string, def bool) bool {
 }
 
 // Int reads an int arg (JSON numbers arrive as float64).
+// Has reports whether the caller supplied the argument at all.
+func (a Args) Has(key string) bool { _, ok := a[key]; return ok }
+
 func (a Args) Int(key string, def int64) int64 {
 	switch v := a[key].(type) {
 	case float64:

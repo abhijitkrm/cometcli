@@ -8,12 +8,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
+	abciv1beta1 "cosmossdk.io/api/cosmos/base/abci/v1beta1"
 	basev1beta1 "cosmossdk.io/api/cosmos/base/v1beta1"
 	secp256k1api "cosmossdk.io/api/cosmos/crypto/secp256k1"
 	signingv1beta1 "cosmossdk.io/api/cosmos/tx/signing/v1beta1"
@@ -76,8 +78,20 @@ type Options struct {
 	GasPrice    string // decimal, e.g. "0.025"
 	AccountNum  uint64
 	Sequence    uint64
+	ForceSeq    int64 // >=0 overrides the queried sequence (mempool heal)
 	haveAccount bool
 }
+
+// WithAccount pins the account number/sequence explicitly (offline signing,
+// or a caller that already resolved them) instead of querying the chain.
+func (o Options) WithAccount(num, seq uint64) Options {
+	o.AccountNum, o.Sequence, o.haveAccount = num, seq, true
+	return o
+}
+
+// PinnedAccount reports whether the caller fixed num/seq explicitly — in
+// which case a sequence mismatch can't be healed by rebuilding.
+func (o Options) PinnedAccount() bool { return o.haveAccount }
 
 // Built is a signed transaction plus its decoded rendering.
 type Built struct {
@@ -105,12 +119,18 @@ func (d Doc) String() string {
 // Build produces a signed tx. If GasLimit==0 it first simulates to estimate
 // gas (x1.4 adjust) — the signature is real either way.
 func (b *Builder) Build(ctx context.Context, msgs Msgs, opt Options) (*Built, error) {
-	num, seq, err := b.conn.Account(ctx, b.address)
-	if err != nil {
-		return nil, err
-	}
+	var num, seq uint64
 	if opt.haveAccount {
 		num, seq = opt.AccountNum, opt.Sequence
+	} else {
+		var err error
+		num, seq, err = b.conn.Account(ctx, b.address)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if opt.ForceSeq >= 0 {
+		seq = uint64(opt.ForceSeq)
 	}
 	if opt.GasAdjust == 0 {
 		opt.GasAdjust = 1.4
@@ -275,7 +295,9 @@ func (b *Builder) Simulate(ctx context.Context, txBytes []byte) (uint64, error) 
 	return res.GasInfo.GasUsed, nil
 }
 
-// Broadcast sends the tx and returns the tx hash + code.
+// Broadcast sends the tx and returns the tx hash + CheckTx code.
+// SYNC mode means "accepted to mempool" — a non-zero code is a definite
+// rejection; a zero code still needs Confirm() for the deliver_tx result.
 func (b *Builder) Broadcast(ctx context.Context, txBytes []byte) (hash string, code uint32, rawLog string, err error) {
 	res, err := b.conn.Tx.BroadcastTx(ctx, &txv1beta1.BroadcastTxRequest{
 		TxBytes: txBytes,
@@ -289,6 +311,26 @@ func (b *Builder) Broadcast(ctx context.Context, txBytes []byte) (hash string, c
 		b.audit.Tx(b.profile.Name, "broadcast", map[string]any{"hash": r.Txhash, "code": r.Code, "raw_log": r.RawLog})
 	}
 	return r.Txhash, r.Code, r.RawLog, nil
+}
+
+// Confirm polls GetTx until the tx is committed (or ctx/timeout expires) and
+// returns the final on-chain result — the code that actually matters.
+func (b *Builder) Confirm(ctx context.Context, hash string) (*abciv1beta1.TxResponse, error) {
+	deadline := time.Now().Add(30 * time.Second)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		res, err := b.GetTx(ctx, hash)
+		if err == nil && res.TxResponse != nil {
+			return res.TxResponse, nil
+		}
+		lastErr = err
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(1500 * time.Millisecond):
+		}
+	}
+	return nil, fmt.Errorf("tx %s not committed within 30s (last: %v)", hash, lastErr)
 }
 
 // GetTx fetches a committed tx by hash.
