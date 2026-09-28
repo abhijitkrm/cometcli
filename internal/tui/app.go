@@ -20,10 +20,10 @@ import (
 type tab int
 
 const (
-	tabOverview tab = iota
+	tabChat tab = iota
+	tabOverview
 	tabFleet
 	tabLogs
-	tabTools
 	tabSend
 )
 
@@ -64,17 +64,17 @@ type toolResultMsg struct {
 	err        error
 }
 
-// AppModel is the multi-pane `cometcli ui` application.
+// AppModel is the multi-pane `cometcli ui` application — chat-first, with
+// read-only dashboards behind it.
 type AppModel struct {
 	c        *toolkit.Context
 	reg      *toolkit.Registry
 	interval time.Duration
 
 	tab      tab
+	chat     *chatPane
 	snap     *monitor.Snapshot
 	fleet    map[string]*monitor.Snapshot
-	tools    []toolkit.Tool
-	toolSel  int
 	toolBusy string
 
 	// tx send pane
@@ -96,21 +96,13 @@ type AppModel struct {
 
 // NewApp creates the app model.
 func NewApp(c *toolkit.Context, reg *toolkit.Registry, interval time.Duration) *AppModel {
-	var tools []toolkit.Tool
-	for _, t := range reg.All() {
-		if t.Tier() > toolkit.TierDiagnose {
-			continue // never mutating tools in the runner
-		}
-		// only tools runnable with zero args — the UI can't fill schemas yet
-		if req, _ := t.Schema()["required"].([]string); len(req) > 0 {
-			continue
-		}
-		tools = append(tools, t)
-	}
-	sort.Slice(tools, func(i, j int) bool { return tools[i].Name() < tools[j].Name() })
 	vp := viewport.New(80, 20)
-	return &AppModel{c: c, reg: reg, interval: interval, tools: tools, vp: vp,
-		approver: &tuiApprover{req: make(chan approvalReq)}, txGas: "1e9"}
+	appr := &tuiApprover{req: make(chan approvalReq)}
+	return &AppModel{
+		c: c, reg: reg, interval: interval, vp: vp,
+		chat:     newChatPane(c, reg, appr),
+		approver: appr, txGas: "1e9",
+	}
 }
 
 // waitApproval parks on the approver channel — emits approvalReqMsg when a
@@ -120,7 +112,7 @@ func (m *AppModel) waitApproval() tea.Cmd {
 }
 
 func (m *AppModel) Init() tea.Cmd {
-	return tea.Batch(m.collectSnap(), m.collectFleet(), tick(m.interval), m.waitApproval())
+	return tea.Batch(m.collectSnap(), m.collectFleet(), tick(m.interval), m.waitApproval(), m.waitEvent())
 }
 
 func (m *AppModel) collectSnap() tea.Cmd {
@@ -179,16 +171,6 @@ func (m *AppModel) collectLogs() tea.Cmd {
 	}
 }
 
-func (m *AppModel) runTool(t toolkit.Tool) tea.Cmd {
-	return func() tea.Msg {
-		res, err := t.Run(m.subCtx(), toolkit.Args{})
-		if err != nil {
-			return toolResultMsg{name: t.Name(), err: err}
-		}
-		return toolResultMsg{name: t.Name(), text: res.Text}
-	}
-}
-
 // runSend builds + broadcasts tx.send through the TUI approval gate.
 func (m *AppModel) runSend() tea.Cmd {
 	t, ok := m.reg.Get("tx.send")
@@ -215,22 +197,54 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = v.Width, v.Height
 		m.vp.Width = v.Width - 4
-		m.vp.Height = v.Height - 8
+		if m.tab == tabChat {
+			m.vp.Height = v.Height - 9 // tabs + status + input + help
+		} else {
+			m.vp.Height = v.Height - 6
+		}
+		m.chat.ta.SetWidth(v.Width - 4)
+		m.chat.mdW = min(v.Width-8, 110)
+		m.chat.md = nil // re-render lazily at the new width
 		return m, nil
 	case tea.KeyMsg:
 		// pending approval modal captures y/n above everything
 		if m.pending != nil {
+			ok := false
 			switch v.String() {
 			case "y", "Y":
-				m.pending.resp <- true
-			case "n", "N", "esc", "ctrl+c":
-				m.pending.resp <- false
+				ok = true
 			}
+			m.pending.resp <- ok
+			m.chat.append("approval", fmt.Sprintf("%s: %s",
+				map[bool]string{true: "approved", false: "denied"}[ok], m.pending.prompt))
+			m.syncChatView()
 			m.pending = nil
 			return m, m.waitApproval()
 		}
 		if m.tab == tabSend {
 			return m.updateSend(v)
+		}
+		if m.tab == tabChat {
+			// on chat, printable keys belong to the textarea; only pane
+			// switching and quit are intercepted
+			switch v.String() {
+			case "ctrl+c":
+				m.quitting = true
+				return m, tea.Quit
+			case "tab":
+				m.tab = tabOverview
+				return m, nil
+			case "shift+tab":
+				m.tab = tabSend
+				return m, nil
+			case "pgdown":
+				m.vp.HalfPageDown()
+				return m, nil
+			case "pgup":
+				m.vp.HalfPageUp()
+				return m, nil
+			}
+			return m.chatKey(v)
 		}
 		switch v.String() {
 		case "q", "ctrl+c":
@@ -252,17 +266,9 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.tab = (m.tab + 4) % 5
 			return m, nil
 		case "j", "down":
-			if m.tab == tabTools && m.toolSel < len(m.tools)-1 {
-				m.toolSel++
-			} else {
-				m.vp.ScrollDown(1)
-			}
+			m.vp.ScrollDown(1)
 		case "k", "up":
-			if m.tab == tabTools && m.toolSel > 0 {
-				m.toolSel--
-			} else {
-				m.vp.ScrollUp(1)
-			}
+			m.vp.ScrollUp(1)
 		case "d", "pgdown":
 			m.vp.HalfPageDown()
 		case "u", "pgup":
@@ -273,12 +279,6 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, m.collectLogs())
 			}
 			return m, tea.Batch(cmds...)
-		case "enter":
-			if m.tab == tabTools && m.toolSel < len(m.tools) && m.toolBusy == "" {
-				t := m.tools[m.toolSel]
-				m.toolBusy = t.Name()
-				return m, m.runTool(t)
-			}
 		}
 	case *monitor.Snapshot:
 		m.snap = v
@@ -290,15 +290,51 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case toolResultMsg:
 		m.toolBusy = ""
 		if v.err != nil {
-			m.vp.SetContent(fmt.Sprintf("$ %s\n\nerror: %v", v.name, v.err))
+			m.chat.append("err", fmt.Sprintf("%s: %v", v.name, v.err))
 		} else {
-			m.vp.SetContent(fmt.Sprintf("$ %s\n\n%s", v.name, v.text))
+			m.chat.append("ok", fmt.Sprintf("%s → %s", v.name, firstLine(v.text)))
 		}
+		m.syncChatView()
+	case runResMsg:
+		m.toolBusy = ""
+		if v.err != nil {
+			m.chat.append("err", fmt.Sprintf("%s: %v", v.name, v.err))
+		} else {
+			m.chat.append("ok", v.name)
+			m.chat.append("info", v.text)
+		}
+		m.syncChatView()
+	case evText:
+		m.chat.append("agent", v.s)
+		m.syncChatView()
+		return m, m.waitEvent()
+	case evToolCall:
+		m.chat.append("call", v.name+" "+compactArgs(v.args))
+		m.syncChatView()
+		return m, m.waitEvent()
+	case evToolRes:
+		if v.err != nil {
+			m.chat.append("err", fmt.Sprintf("%s: %v", v.name, v.err))
+		} else {
+			m.chat.append("ok", v.name+" → "+firstLine(v.summary))
+		}
+		m.syncChatView()
+		return m, m.waitEvent()
+	case evDone:
+		m.chat.busy = false
+		if v.err != nil {
+			m.chat.append("err", "agent: "+v.err.Error())
+			m.syncChatView()
+		}
+		// text already streamed through OnText/evText
+		return m, m.waitEvent()
 	case tickMsg:
 		return m, tea.Batch(m.collectSnap(), m.collectFleet(), tick(m.interval))
 	case approvalReqMsg:
 		r := approvalReq(v)
 		m.pending = &r
+		m.chat.append("approval", "requested: "+r.prompt)
+		m.syncChatView()
 		return m, nil
 	}
 	return m, nil
@@ -343,7 +379,7 @@ func (m *AppModel) updateSend(v tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m *AppModel) View() string {
 	var b strings.Builder
-	tabs := []string{"Overview", "Fleet", "Logs", "Tools", "Send"}
+	tabs := []string{"Chat", "Overview", "Fleet", "Logs", "Send"}
 	for i, t := range tabs {
 		if tab(i) == m.tab {
 			b.WriteString(activeTab.Render(t))
@@ -355,20 +391,24 @@ func (m *AppModel) View() string {
 	if m.snap != nil {
 		clock = m.snap.TS.Format("15:04:05")
 	}
-	fmt.Fprintf(&b, "  %s  %s\n\n", headStyle.Render(m.c.Profile.Name), dim.Render(clock))
+	fmt.Fprintf(&b, "  %s  %s\n", headStyle.Render(m.c.Profile.Name), dim.Render(clock))
 
-	switch m.tab {
-	case tabOverview:
-		b.WriteString(m.overviewView())
-	case tabFleet:
-		b.WriteString(m.fleetView())
-	case tabLogs, tabTools:
+	if m.tab == tabChat {
+		b.WriteString(m.statusLine() + "\n")
 		b.WriteString(m.vp.View())
-	case tabSend:
-		b.WriteString(m.sendView())
-	}
-	if m.tab == tabTools {
-		b.WriteString("\n" + m.toolList())
+		b.WriteString("\n" + m.chat.ta.View())
+	} else {
+		b.WriteString("\n")
+		switch m.tab {
+		case tabOverview:
+			b.WriteString(m.overviewView())
+		case tabFleet:
+			b.WriteString(m.fleetView())
+		case tabLogs:
+			b.WriteString(m.vp.View())
+		case tabSend:
+			b.WriteString(m.sendView())
+		}
 	}
 
 	// approval modal — blocks the UI until y/n
@@ -391,13 +431,33 @@ func (m *AppModel) View() string {
 
 	help := "1-5/tab/[ ]: panes · j/k scroll · r refresh · q quit"
 	switch m.tab {
-	case tabTools:
-		help = "j/k select · enter run · [ ] panes · q quit"
+	case tabChat:
+		help = "enter send · esc cancel run · pgup/pgdn scroll · tab panes · ctrl+c quit · /help"
 	case tabSend:
 		help = "tab fields · enter broadcast · esc/[ back"
 	}
 	fmt.Fprintf(&b, "\n%s\n", dim.Render(help))
 	return b.String()
+}
+
+// statusLine is the chat-pane header: provider, mode, live height.
+func (m *AppModel) statusLine() string {
+	prov := "no agent"
+	if m.chat.agent != nil {
+		prov = fmt.Sprintf("%s/%s", m.chat.agent.Provider.Name(), m.chat.agent.Model)
+		if m.chat.agent.Safe {
+			prov += " [safe]"
+		}
+	}
+	live := "offline"
+	if m.snap != nil && m.snap.Reachable {
+		live = fmt.Sprintf("h=%d peers=%d", m.snap.Height, m.snap.Peers)
+	}
+	busy := ""
+	if m.chat.busy {
+		busy = " · " + warn.Render("working… esc to cancel")
+	}
+	return "  " + dim.Render(fmt.Sprintf("%s · %s", prov, live)) + busy
 }
 
 func (m *AppModel) sendView() string {
@@ -473,28 +533,14 @@ func (m *AppModel) fleetView() string {
 	return b.String()
 }
 
-func (m *AppModel) toolList() string {
-	var b strings.Builder
-	// keep the picker to a screenful around the selection
-	const rows = 12
-	start := 0
-	if m.toolSel >= rows {
-		start = m.toolSel - rows + 1
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
 	}
-	for i := start; i < len(m.tools) && i < start+rows; i++ {
-		t := m.tools[i]
-		line := fmt.Sprintf(" %-22s %s", t.Name(), dim.Render(t.Desc()))
-		if i == m.toolSel {
-			if m.toolBusy == t.Name() {
-				line = fmt.Sprintf(" %-22s %s", t.Name(), warn.Render("running…"))
-			}
-			b.WriteString(selStyle.Render(line))
-		} else {
-			b.WriteString(line)
-		}
-		b.WriteString("\n")
+	if len(s) > 120 {
+		s = s[:120] + "…"
 	}
-	return b.String()
+	return s
 }
 
 // RunApp starts the multi-pane TUI.

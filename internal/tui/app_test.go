@@ -47,27 +47,20 @@ func key(s string) tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 }
 
-func TestApp_OnlyReadOnlyToolsListed(t *testing.T) {
-	m := NewApp(appTestCtx(), testReg(), time.Second)
-	for _, tool := range m.tools {
-		if tool.Tier() > toolkit.TierDiagnose {
-			t.Fatalf("mutating tool %q must not appear in the runner", tool.Name())
-		}
-	}
-	if len(m.tools) != 1 || m.tools[0].Name() != "node.status" {
-		t.Fatalf("expected only node.status, got %v", m.tools)
-	}
-}
-
 func TestApp_TabSwitch(t *testing.T) {
 	m := NewApp(appTestCtx(), testReg(), time.Second)
-	m2, _ := m.Update(key("2"))
+	m.tab = tabOverview // digits switch panes except on chat
+	m2, _ := m.Update(key("3"))
 	if m2.(*AppModel).tab != tabFleet {
-		t.Fatal("key 2 must select fleet tab")
+		t.Fatal("key 3 must select fleet tab")
 	}
-	m3, _ := m2.Update(key("1"))
+	m3, _ := m2.Update(key("2"))
 	if m3.(*AppModel).tab != tabOverview {
-		t.Fatal("key 1 must select overview tab")
+		t.Fatal("key 2 must select overview tab")
+	}
+	m4, _ := m3.Update(key("1"))
+	if m4.(*AppModel).tab != tabChat {
+		t.Fatal("key 1 must select chat tab")
 	}
 }
 
@@ -97,9 +90,52 @@ func TestApp_ToolRunResultLandsInViewport(t *testing.T) {
 
 func TestApp_QuitKey(t *testing.T) {
 	m := NewApp(appTestCtx(), testReg(), time.Second)
+	// q quits from dashboard panes…
+	m.tab = tabOverview
 	m2, cmd := m.Update(key("q"))
 	if !m2.(*AppModel).quitting || cmd == nil {
-		t.Fatal("q must quit")
+		t.Fatal("q must quit from a dashboard pane")
+	}
+	// …while ctrl+c quits even from chat
+	m3, _ := NewApp(appTestCtx(), testReg(), time.Second).Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if !m3.(*AppModel).quitting {
+		t.Fatal("ctrl+c must quit from chat")
+	}
+}
+
+func TestApp_ChatSlashRunWithoutAgent(t *testing.T) {
+	m := NewApp(appTestCtx(), testReg(), time.Second)
+	// no provider configured in the test profile → agent is nil, /run still works
+	cmd := m.chatSubmit("/run node.status")
+	if cmd == nil {
+		t.Fatal("/run must return a command")
+	}
+	msg := cmd()
+	m2, _ := m.Update(msg)
+	v := m2.(*AppModel)
+	if !strings.Contains(v.chat.transcript(), "ok") {
+		t.Fatalf("tool result missing from transcript:\n%s", v.chat.transcript())
+	}
+}
+
+func TestApp_ChatPlainTextWithoutAgent(t *testing.T) {
+	m := NewApp(appTestCtx(), testReg(), time.Second)
+	m.chatSubmit("is my validator healthy?")
+	if !strings.Contains(m.chat.transcript(), "no agent provider") {
+		t.Fatalf("expected provider warning:\n%s", m.chat.transcript())
+	}
+}
+
+func TestApp_ChatAgentEventsAppend(t *testing.T) {
+	m := NewApp(appTestCtx(), testReg(), time.Second)
+	m2, _ := m.Update(evText{"checking the node"})
+	m3, _ := m2.(*AppModel).Update(evToolCall{name: "node.status", args: map[string]any{}})
+	m4, _ := m3.(*AppModel).Update(evToolRes{name: "node.status", summary: "h=42"})
+	tr := m4.(*AppModel).chat.transcript()
+	for _, want := range []string{"checking the node", "node.status", "h=42"} {
+		if !strings.Contains(tr, want) {
+			t.Fatalf("transcript missing %q:\n%s", want, tr)
+		}
 	}
 }
 

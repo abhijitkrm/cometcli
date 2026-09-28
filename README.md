@@ -112,7 +112,7 @@ Tools are grouped by domain. Required args also bind positionally —
 | `keys` | `add` (`--recover`/`--privkey-hex`), `list`, `show`, `rm`, `convert` (bech32↔0x) — `eth_secp256k1` by default |
 | `sec` | `exposure` (listening-port audit), `perms` (key-file permissions), `doublesign` (priv_validator_state HRS check) |
 | `mon` | `snapshot`, `watch` (live TUI), `alerts` (rules → stdout/Slack/Discord/Telegram; `--once`, `--mute`, `--repeat-minutes`) |
-| `ui` | full-screen app: overview, fleet matrix, log tail, read-only tool runner |
+| `ui` | chat-first TUI: talk to the agent, `/run` tools, approvals in-app; overview/fleet/logs/send panes behind it |
 | `upgrade` | `check` (plan + binary + upstream release), `prepare` (cosmovisor staging), `watch` |
 | `snap` | `list`, `prune`, `statesync` (fetch trust height, write `[statesync]`) |
 | `runbook` | `list`, `show`, `run` — builtins + your own YAML in `~/.cometcli/runbooks/` |

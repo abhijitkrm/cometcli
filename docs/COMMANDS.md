@@ -184,7 +184,9 @@ cometcli runbook run coordinated-upgrade
 ## Interfaces
 
 ```bash
-cometcli ui                            # full TUI: overview, fleet, logs, tools, send
+cometcli ui                            # chat-first TUI (Claude Code style): ask in natural
+                                       # language, /run tools, approvals in-app, txs broadcast
+                                       # from the chat. Overview/fleet/logs/send panes on tabs
 cometcli agent                         # interactive AI SRE (needs ANTHROPIC_API_KEY or Ollama)
 cometcli agent --task "check fleet"    # headless one-shot task (cron/CI)
 cometcli agent --task "audit exposure" --safe --budget 6 --max-iter 4
