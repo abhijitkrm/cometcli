@@ -17,6 +17,7 @@ type mockProvider struct {
 	responses []*Response
 	calls     int
 	lastReq   *Request
+	reqs      []*Request
 	err       error
 }
 
@@ -24,6 +25,7 @@ func (m *mockProvider) Name() string { return "mock" }
 func (m *mockProvider) Chat(ctx context.Context, r *Request) (*Response, error) {
 	m.calls++
 	m.lastReq = r
+	m.reqs = append(m.reqs, r)
 	if m.err != nil {
 		return nil, m.err
 	}

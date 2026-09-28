@@ -19,13 +19,21 @@ type Agent struct {
 	Reg      *toolkit.Registry
 	Ctx      *toolkit.Context
 	MaxIter  int
+	// MaxCalls bounds tool invocations per Run (0 = unlimited). Bounds
+	// spend, not just rounds — MaxIter counts model turns.
+	MaxCalls int
+	// Safe refuses local-change/on-chain tools entirely: they're filtered
+	// from the advertised tool set and hard-blocked in execCall.
+	Safe bool
 
 	// UI hooks — the REPL renders these.
 	OnText       func(text string)                      // assistant text chunk
 	OnToolCall   func(name string, args map[string]any) // before a tool runs
 	OnToolResult func(name, summary string, err error)  // after a tool runs
 
-	history []Msg
+	history   []Msg
+	sysPrompt string // cached per Run — snapshot probed once per turn
+	calls     int
 }
 
 // New builds an agent for a context.
@@ -62,6 +70,9 @@ func modelOf(p Provider) string {
 func (a *Agent) toolDefs() []ToolDef {
 	var out []ToolDef
 	for _, t := range a.Reg.All() {
+		if a.Safe && t.Tier() >= toolkit.TierLocalChange {
+			continue
+		}
 		out = append(out, ToolDef{
 			Name:   toolFnName(t.Name()),
 			Desc:   fmt.Sprintf("[%s] %s", t.Tier(), t.Desc()),
@@ -75,6 +86,8 @@ func toolFnName(n string) string { return strings.ReplaceAll(n, ".", "__") }
 
 // Run processes one user turn, executing tools until the model finishes.
 func (a *Agent) Run(ctx context.Context, input string) (string, error) {
+	a.calls = 0
+	a.sysPrompt = "" // refresh the live snapshot once per turn
 	a.history = append(a.history, Msg{Role: "user", Text: input})
 	if a.Audit() != nil {
 		_ = a.Audit().Log(audit.KindPrompt, a.Ctx.Profile.Name, map[string]any{"text": redact.Text(input)})
@@ -122,6 +135,15 @@ func (a *Agent) execCall(ctx context.Context, call Call) Msg {
 		return Msg{Role: "tool", CallID: call.ID, ToolName: name,
 			Text: "no such tool: " + name, IsError: true}
 	}
+	if a.Safe && t.Tier() >= toolkit.TierLocalChange {
+		return Msg{Role: "tool", CallID: call.ID, ToolName: name,
+			Text: fmt.Sprintf("blocked: %s is a %s tool and the agent is in safe mode — recommend it to the operator instead", name, t.Tier()), IsError: true}
+	}
+	a.calls++
+	if a.MaxCalls > 0 && a.calls > a.MaxCalls {
+		return Msg{Role: "tool", CallID: call.ID, ToolName: name,
+			Text: fmt.Sprintf("tool-call budget exhausted (%d) — stop calling tools and summarize findings so far", a.MaxCalls), IsError: true}
+	}
 	runCtx := a.Ctx
 	var cancel context.CancelFunc
 	if !toolkit.IsLongRunning(t) {
@@ -162,7 +184,10 @@ func (a *Agent) execCall(ctx context.Context, call Call) Msg {
 }
 
 func (a *Agent) system() string {
-	return SystemPrompt(a.Ctx) + SnapshotText(a.Ctx)
+	if a.sysPrompt == "" {
+		a.sysPrompt = SystemPrompt(a.Ctx) + SnapshotText(a.Ctx)
+	}
+	return a.sysPrompt
 }
 
 // Audit exposes the context audit logger.

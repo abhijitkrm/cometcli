@@ -200,6 +200,12 @@ func ResolveName(fnName string) string { return strings.ReplaceAll(fnName, "__",
 // Approver asks the human for confirmation. It must return true to proceed.
 type Approver func(c *Context, prompt string, tier Tier, detail map[string]any) (bool, error)
 
+// DenyApprover refuses every approval request — for transports and modes
+// with no human on the other end (MCP stdio, agent --safe, alert triage).
+func DenyApprover(_ *Context, _ string, tier Tier, _ map[string]any) (bool, error) {
+	return false, fmt.Errorf("%s operation needs interactive approval — run it via `cometcli` directly", tier)
+}
+
 // RequireApproval invokes the approver and returns an error if denied.
 func RequireApproval(c *Context, prompt string, tier Tier, detail map[string]any) error {
 	if c.Approver == nil {

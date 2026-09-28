@@ -9,7 +9,8 @@ import (
 // runAgent is implemented in the agent milestone; stubbed until the
 // provider loop lands.
 func runAgent(cmd *cobra.Command, reg *toolkit.Registry) error {
-	return runAgentImpl(cmd, reg, "")
+	task, _ := cmd.Flags().GetString("task")
+	return runAgentImpl(cmd, reg, task)
 }
 
 func runAsk(cmd *cobra.Command, reg *toolkit.Registry, args []string) error {

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/abhijitkrm/cometcli/internal/agent"
 	"github.com/abhijitkrm/cometcli/internal/audit"
 	"github.com/abhijitkrm/cometcli/internal/monitor"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
@@ -17,7 +18,7 @@ import (
 func Register(r *toolkit.Registry) {
 	r.Register(watchTool{})
 	r.Register(snapshotTool{})
-	r.Register(alertsTool{})
+	r.Register(alertsTool{reg: r})
 }
 
 type watchTool struct{}
@@ -63,7 +64,7 @@ func (snapshotTool) Run(c *toolkit.Context, _ toolkit.Args) (*toolkit.Result, er
 	return &toolkit.Result{Text: txt, Data: map[string]any{"snapshot": s}}, nil
 }
 
-type alertsTool struct{}
+type alertsTool struct{ reg *toolkit.Registry }
 
 func (alertsTool) Name() string { return "mon.alerts" }
 func (alertsTool) Desc() string {
@@ -78,12 +79,13 @@ func (alertsTool) Schema() map[string]any {
 		"once":             toolkit.Bool("evaluate rules once and exit (for cron/CI)"),
 		"mute":             toolkit.Str("comma-separated rule names to silence (e.g. disk-usage,height-stall)"),
 		"repeat-minutes":   toolkit.Int("re-fire a still-firing alert after N minutes (default 0 = once)"),
+		"triage":           toolkit.Bool("AI-diagnose each firing alert and include the diagnosis (needs agent.provider in profile)"),
 	})
 }
 func (alertsTool) Tier() toolkit.Tier { return toolkit.TierDiagnose }
 func (alertsTool) LongRunning() bool  { return true }
 
-func (alertsTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
+func (t alertsTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
 	iv := time.Duration(a.Int("interval", 10)) * time.Second
 	sinks := monitor.Sinks(c.Profile.Alerts)
 	muted := map[string]bool{}
@@ -100,6 +102,7 @@ func (alertsTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, erro
 		Repeat:   time.Duration(a.Int("repeat-minutes", 0)) * time.Minute,
 		Rules:    monitor.DefaultRules(a.Int("missed-threshold", 50), float64(a.Int("disk-pct", 85)), int(a.Int("stall-secs", 120))),
 		Sinks:    sinks,
+		Triage:   triageFunc(c, t.reg, a.Bool("triage", false)),
 		OnEvent: func(msg string, _ bool) {
 			fmt.Fprintln(c.Out, "ALERT:", msg)
 			_ = c.Audit.Log(audit.KindAlert, c.Profile.Name, map[string]any{"msg": msg})
@@ -109,4 +112,38 @@ func (alertsTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, erro
 		c.Profile.Name, len(w.Rules), len(sinks), iv)
 	w.Run()
 	return &toolkit.Result{Text: "watcher stopped"}, nil
+}
+
+// triageFunc builds a bounded, read-only agent that diagnoses each firing
+// alert. Returns nil (with a warning) when no LLM provider is configured —
+// alerts still fire plain.
+func triageFunc(c *toolkit.Context, reg *toolkit.Registry, enabled bool) func(string, string) string {
+	if !enabled {
+		return nil
+	}
+	sc := &toolkit.Context{
+		Context: c.Context, Profile: c.Profile, Cfg: c.Cfg, Out: c.Out,
+		Audit: c.Audit, Approver: toolkit.DenyApprover,
+		AutoApproveBelow: toolkit.TierLocalChange,
+	}
+	ag, err := agent.New(sc, reg)
+	if err != nil {
+		fmt.Fprintf(c.Out, "triage unavailable (alerting continues without it): %v\n", err)
+		return nil
+	}
+	ag.Safe = true // diagnose only — never mutate from an alert
+	ag.MaxIter = 6
+	ag.MaxCalls = 8
+	return func(rule, msg string) string {
+		ag.Reset()
+		out, err := ag.Run(c.Context, fmt.Sprintf(
+			"ALERT on validator %s — rule %q fired: %s\n"+
+				"Diagnose the likely cause using read-only tools. "+
+				"Reply in ≤3 lines: probable cause + recommended next action. Do not attempt fixes.",
+			c.Profile.Name, rule, msg))
+		if err != nil {
+			return "triage failed: " + err.Error()
+		}
+		return strings.TrimSpace(out)
+	}
 }

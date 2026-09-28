@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 
 	"github.com/abhijitkrm/cometcli/internal/mcp"
@@ -27,9 +25,7 @@ func MCPCmd(reg *toolkit.Registry) *cobra.Command {
 			}
 			defer c.Close()
 			c.AutoApproveBelow = toolkit.TierLocalChange
-			c.Approver = func(_ *toolkit.Context, prompt string, tier toolkit.Tier, _ map[string]any) (bool, error) {
-				return false, fmt.Errorf("%s operation needs interactive approval — run it via `cometcli` directly", tier)
-			}
+			c.Approver = toolkit.DenyApprover
 			return (&mcp.Server{
 				Reg: reg, Ctx: c,
 				Name: "cometcli", Version: Version,

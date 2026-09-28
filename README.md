@@ -164,6 +164,19 @@ The model sees tool calls as function calls; every on-chain or local-change
 call still goes through the same approval gate — **the model can propose,
 only you approve.**
 
+Bounded runs for automation:
+
+```bash
+cometcli agent --task "check fleet, report anomalies" --budget 8 --max-iter 6
+cometcli ask "is anything wrong?" --safe   # read-only: mutating tools refused
+cometcli mon alerts --triage               # every alert ships with an AI diagnosis
+```
+
+`--triage` runs a bounded, safe-mode agent per firing alert and appends the
+diagnosis to whatever the webhook delivers — you get *"missed 9931/10000 —
+likely jailed; run `cometcli val unjail` after jailed_until"* instead of a
+bare alarm.
+
 ### MCP server
 
 `cometcli mcp` exposes the whole registry as a Model Context Protocol

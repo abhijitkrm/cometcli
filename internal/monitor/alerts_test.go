@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/abhijitkrm/cometcli/internal/config"
+	"github.com/abhijitkrm/cometcli/internal/toolkit"
 )
 
 func TestSlackPayload(t *testing.T) {
@@ -134,5 +135,39 @@ func TestWatcherSinkFailureDoesNotCrash(t *testing.T) {
 	}
 	if calls.Load() != 1 {
 		t.Fatal("sink not invoked")
+	}
+}
+
+func TestWatcherTriageAppendsDiagnosis(t *testing.T) {
+	// dead endpoint → unreachable rule fires; triage text must land in the
+	// delivered alert (and thus in sinks)
+	var got string
+	w := &Watcher{
+		Ctx: &toolkit.Context{
+			Context: context.Background(),
+			Profile: &config.Profile{Name: "p",
+				Endpoints: config.Endpoints{Comet: "tcp://127.0.0.1:1"}},
+		},
+		Once: true,
+		Rules: []Rule{{Name: "unreachable", Eval: func(s, _ *Snapshot) string {
+			if !s.Reachable {
+				return "node RPC unreachable"
+			}
+			return ""
+		}}},
+		Triage: func(rule, msg string) string {
+			if rule != "unreachable" || msg != "node RPC unreachable" {
+				t.Errorf("triage got rule=%q msg=%q", rule, msg)
+			}
+			return "cause: rpc down; action: restart container"
+		},
+		OnEvent: func(msg string, isAlert bool) { got = msg },
+	}
+	w.Run()
+	if !strings.Contains(got, "unreachable") {
+		t.Fatalf("alert missing rule: %q", got)
+	}
+	if !strings.Contains(got, "— triage: cause: rpc down") {
+		t.Fatalf("triage not appended: %q", got)
 	}
 }

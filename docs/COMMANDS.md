@@ -125,6 +125,7 @@ cometcli mon snapshot                  # one-shot snapshot — scriptable
 cometcli mon alerts                    # long-running watcher → Slack/Discord/Telegram webhooks
 cometcli mon alerts --once             # evaluate rules once, exit (cron-friendly)
 cometcli mon alerts --mute disk,unreachable --repeat-minutes 30
+cometcli mon alerts --triage           # AI-diagnose each alert before it pages (needs agent.provider)
 ```
 
 Webhook sinks: `COMETCLI_ALERT_SLACK`, `COMETCLI_ALERT_DISCORD`,
@@ -185,6 +186,8 @@ cometcli runbook run coordinated-upgrade
 ```bash
 cometcli ui                            # full TUI: overview, fleet, logs, tools, send
 cometcli agent                         # interactive AI SRE (needs ANTHROPIC_API_KEY or Ollama)
+cometcli agent --task "check fleet"    # headless one-shot task (cron/CI)
+cometcli agent --task "audit exposure" --safe --budget 6 --max-iter 4
 cometcli ask "is my validator healthy" # one-shot agent question
 cometcli ask "why is disk at 88%"      # chains tools: doctor → df → verdict
 cometcli mcp                           # serve all tools over MCP (stdio) for external agents

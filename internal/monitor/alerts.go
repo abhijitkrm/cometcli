@@ -178,6 +178,9 @@ type Watcher struct {
 	Rules    []Rule
 	Sinks    []Sink
 	OnEvent  func(msg string, isAlert bool)
+	// Triage, if set, diagnoses each firing alert — its output is appended
+	// to the alert text delivered to sinks (bounded, best-effort).
+	Triage func(rule, msg string) string
 	// Once runs a single check pass and returns.
 	Once bool
 	// Muted skips these rule names entirely.
@@ -235,6 +238,11 @@ func (w *Watcher) check() {
 		}
 		w.fired[key] = time.Now()
 		alert := fmt.Sprintf("[cometcli %s] %s: %s", w.Ctx.Profile.Name, r.Name, msg)
+		if w.Triage != nil {
+			if d := w.Triage(r.Name, msg); d != "" {
+				alert += "\n— triage: " + d
+			}
+		}
 		if w.OnEvent != nil {
 			w.OnEvent(alert, true)
 		}

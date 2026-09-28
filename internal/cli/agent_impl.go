@@ -21,6 +21,16 @@ func runAgentImpl(cmd *cobra.Command, reg *toolkit.Registry, oneshot string) err
 	if err != nil {
 		return err
 	}
+	if safe, _ := cmd.Flags().GetBool("safe"); safe {
+		a.Safe = true
+		c.Approver = toolkit.DenyApprover // hard-refuse anything that slips past filtering
+	}
+	if b, _ := cmd.Flags().GetInt("budget"); b > 0 {
+		a.MaxCalls = b
+	}
+	if n, _ := cmd.Flags().GetInt("max-iter"); n > 0 {
+		a.MaxIter = n
+	}
 	if oneshot != "" {
 		a.OnText = func(t string) { fmt.Fprintln(c.Out, t) }
 		a.OnToolCall = func(name string, args map[string]any) {
