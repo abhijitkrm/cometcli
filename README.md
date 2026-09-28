@@ -164,6 +164,20 @@ The model sees tool calls as function calls; every on-chain or local-change
 call still goes through the same approval gate — **the model can propose,
 only you approve.**
 
+### MCP server
+
+`cometcli mcp` exposes the whole registry as a Model Context Protocol
+server on stdio — point any MCP client (Claude Desktop, Cursor, a custom
+orchestrator) at it:
+
+```json
+{ "mcpServers": { "cometcli": { "command": "cometcli", "args": ["mcp"] } } }
+```
+
+Observe/diagnose tools run freely and carry `readOnlyHint`; mutating tiers
+are marked `destructiveHint` and refused — stdio has no human to approve,
+run those via the CLI.
+
 ## Safety model
 
 - **Tiers** — `observe → diagnose → local-change → on-chain`. Read-only by

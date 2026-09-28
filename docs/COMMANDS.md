@@ -187,6 +187,7 @@ cometcli ui                            # full TUI: overview, fleet, logs, tools,
 cometcli agent                         # interactive AI SRE (needs ANTHROPIC_API_KEY or Ollama)
 cometcli ask "is my validator healthy" # one-shot agent question
 cometcli ask "why is disk at 88%"      # chains tools: doctor → df → verdict
+cometcli mcp                           # serve all tools over MCP (stdio) for external agents
 cometcli audit                         # today's audit log (tools, shells, txs, approvals)
 cometcli completion zsh                # shell completion
 cometcli version
