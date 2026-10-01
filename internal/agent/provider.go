@@ -85,6 +85,14 @@ func NewProvider(ac config.AgentConf) (Provider, error) {
 			model: def(ac.Model, "gpt-4.1"),
 			base:  def(ac.BaseURL, "https://api.openai.com"),
 		}, nil
+	case "groq":
+		// Groq's OpenAI-compatible endpoint — https://console.groq.com
+		return &openai{
+			name:  "groq",
+			key:   key("GROQ_API_KEY"),
+			model: def(ac.Model, "llama-3.3-70b-versatile"),
+			base:  def(ac.BaseURL, "https://api.groq.com/openai"),
+		}, nil
 	case "openai-compat", "ollama", "local", "vllm":
 		base := ac.BaseURL
 		if base == "" {

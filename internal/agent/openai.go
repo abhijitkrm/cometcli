@@ -11,13 +11,18 @@ import (
 )
 
 // openai implements Provider against OpenAI chat completions and any
-// OpenAI-compatible endpoint (Ollama, vLLM, llama.cpp server).
+// OpenAI-compatible endpoint (Groq, Ollama, vLLM, llama.cpp server).
 type openai struct {
-	key, model, base string
-	hc               *http.Client
+	key, model, base, name string
+	hc                     *http.Client
 }
 
-func (o *openai) Name() string { return "openai" }
+func (o *openai) Name() string {
+	if o.name != "" {
+		return o.name
+	}
+	return "openai"
+}
 
 func (o *openai) client() *http.Client {
 	if o.hc == nil {

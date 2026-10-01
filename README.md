@@ -157,7 +157,8 @@ export ANTHROPIC_API_KEY=…          # or OPENAI_API_KEY, OLLAMA_API_KEY;
 cometcli ask "summarize signing health and flag any exposure risks"
 ```
 
-Providers: `anthropic`, `openai`, `openai-compat` (Ollama, vLLM, LM Studio —
+Providers: `anthropic`, `openai`, `groq` (`GROQ_API_KEY`, default model
+`llama-3.3-70b-versatile`), `openai-compat` (Ollama, vLLM, LM Studio —
 any OpenAI-shaped endpoint via `--agent-base-url`), or `off`.
 
 The model sees tool calls as function calls; every on-chain or local-change
