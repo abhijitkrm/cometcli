@@ -80,8 +80,9 @@ func profileAddCmd() *cobra.Command {
 	var p config.Profile
 	var signerKey, feeDenom, valoper string
 	cmd := &cobra.Command{
-		Use:   "add <name>",
-		Short: "Add or update a node profile",
+		Use:     "add <name>",
+		Aliases: []string{"edit", "set"},
+		Short:   "Add or update a node profile",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, a []string) error {
 			cfg, err := config.Load()
