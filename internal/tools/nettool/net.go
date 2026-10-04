@@ -103,12 +103,12 @@ func editPeers(c *toolkit.Context, peer string, add bool) (*toolkit.Result, erro
 		clean = keep
 	}
 	newLine := line[:qi+1] + strings.Join(clean, ",") + line[qj:]
+	updated := cfg[:idx] + newLine + cfg[idx+lineEnd:]
 	if err := c.Approve(fmt.Sprintf("%s persistent peer %s", verb, peer), toolkit.TierLocalChange,
-		map[string]any{"peer": peer, "peers_after": clean}); err != nil {
+		map[string]any{"peer": peer, "peers_after": clean, "diff": toolkit.Diff(path, cfg, updated)}); err != nil {
 		return nil, err
 	}
-	cfg = cfg[:idx] + newLine + cfg[idx+lineEnd:]
-	if err := h.WriteFile(c, path, []byte(cfg), 0o644); err != nil {
+	if err := h.WriteFile(c, path, []byte(updated), 0o644); err != nil {
 		return nil, err
 	}
 	return &toolkit.Result{Text: fmt.Sprintf("%s %s — %d persistent peer(s)", done, peer, len(clean)),

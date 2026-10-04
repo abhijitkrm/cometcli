@@ -187,9 +187,11 @@ pre/post-conditions checked via tools; aborts loudly on guard failure.
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Entry**: bare `cometcli` opens the REPL; `cometcli ask "..."` for one-shot.
-  Slash commands: `/profile`, `/mode readonly|ops`, `/approve`, `/audit`,
-  `/runbook`, `/model`.
+- **Entry**: bare `cometcli` opens the REPL; `cometcli ask "..."` for one-shot;
+  `cometcli serve` puts the same session behind a loopback, token-protected web
+  chat. All front-ends render one `agent.Event` stream (deltas, tool cards,
+  approvals). Slash commands: `/profile`, `/mode readonly|ops`, `/approve`,
+  `/audit`, `/runbook`, `/model`.
 - **Context snapshot**: on session start, inject a *bounded* digest — chain-id,
   evm chain-id, node version, validator status, height, peers, disk — refreshed
   lazily, never key material.

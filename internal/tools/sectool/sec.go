@@ -43,56 +43,142 @@ func (exposureTool) Run(c *toolkit.Context, _ toolkit.Args) (*toolkit.Result, er
 	if err != nil {
 		return nil, err
 	}
-	out, code, err := h.Run(c, "ss -tlnH 2>/dev/null || netstat -tln 2>/dev/null | tail -n +3")
-	c.LogShell("ss -tln", code)
-	if err != nil {
-		return nil, fmt.Errorf("list sockets: %w", err)
+	var ls []listener
+	source := ""
+	// Containers: the published port map is authoritative — host sockets
+	// show only the docker proxy, and on macOS live in a VM.
+	if c.Profile.Service.Type == "docker" && c.Profile.Service.Unit != "" {
+		cmd := "docker port " + c.Profile.Service.Unit
+		out, code, err := h.Run(c, cmd)
+		c.LogShell(cmd, code)
+		if err == nil {
+			ls, source = parseDockerPorts(out), "docker port "+c.Profile.Service.Unit
+		}
 	}
+	if source == "" {
+		cmd := "ss -tlnH 2>/dev/null || netstat -anp tcp 2>/dev/null | grep LISTEN || netstat -tln 2>/dev/null"
+		out, code, err := h.Run(c, cmd)
+		c.LogShell("ss -tln | netstat", code)
+		if err != nil {
+			return nil, fmt.Errorf("list sockets: %w", err)
+		}
+		ls, source = parseSockets(out), "host sockets"
+	}
+	if len(ls) == 0 {
+		// Never report "clean" when nothing could be read.
+		return nil, fmt.Errorf("could not enumerate listening sockets via %s — exposure unknown, not clean", source)
+	}
+
 	var b strings.Builder
+	fmt.Fprintf(&b, "source: %s\n", source)
 	var findings []map[string]string
 	crits := 0
-	for _, line := range strings.Split(out, "\n") {
-		f := strings.Fields(line)
-		if len(f) < 4 {
-			continue
-		}
-		// local address column position differs between ss/netstat; find host:port
-		var laddr string
-		for _, col := range f {
-			if strings.Count(col, ":") >= 1 {
-				laddr = col
-				break
-			}
-		}
-		if laddr == "" {
-			continue
-		}
-		port := laddr[strings.LastIndex(laddr, ":")+1:]
-		note, sensitive := sensitivePorts[port]
+	for _, l := range ls {
+		note, sensitive := sensitivePorts[l.port]
 		if !sensitive {
 			continue
 		}
-		hostPart := laddr[:strings.LastIndex(laddr, ":")]
-		public := hostPart == "*" || hostPart == "0.0.0.0" || hostPart == "::" ||
-			(!strings.HasPrefix(hostPart, "127.") && hostPart != "localhost" && hostPart != "[::1]" && hostPart != "::1")
-		if port == "26656" {
-			fmt.Fprintf(&b, "i  :%s  %-14s p2p reachable (%s)\n", port, laddr, note)
+		if l.port == "26656" {
+			fmt.Fprintf(&b, "i  :%s  %-22s p2p reachable (%s)\n", l.port, l.bind, note)
 			continue
 		}
-		if public {
+		if l.public {
 			level := "warn"
 			if c.Profile.IsValidator() {
 				level = "critical"
 				crits++
 			}
-			fmt.Fprintf(&b, "✗  :%s  %-14s PUBLIC — %s [%s]\n", port, laddr, note, level)
-			findings = append(findings, map[string]string{"port": port, "bind": laddr, "level": level})
+			fmt.Fprintf(&b, "✗  :%s  %-22s PUBLIC — %s [%s]\n", l.port, l.bind, note, level)
+			findings = append(findings, map[string]string{"port": l.port, "bind": l.bind, "level": level})
 		} else {
-			fmt.Fprintf(&b, "✓  :%s  %-14s localhost\n", port, laddr)
+			fmt.Fprintf(&b, "✓  :%s  %-22s localhost\n", l.port, l.bind)
 		}
 	}
 	fmt.Fprintf(&b, "\n%d critical exposure(s)", crits)
-	return &toolkit.Result{Text: b.String(), Data: map[string]any{"findings": findings, "critical": crits}}, nil
+	return &toolkit.Result{Text: b.String(), Data: map[string]any{"findings": findings, "critical": crits, "source": source}}, nil
+}
+
+// listener is one listening socket: port classifies it (the service port —
+// the container port for docker), bind is what's shown to the operator.
+type listener struct {
+	port, bind string
+	public     bool
+}
+
+func isLoopbackHost(h string) bool {
+	h = strings.Trim(h, "[]")
+	return strings.HasPrefix(h, "127.") || h == "localhost" || h == "::1"
+}
+
+// parseDockerPorts reads `docker port <c>` lines: "26657/tcp -> 0.0.0.0:26677".
+// IPv4/IPv6 duplicates of the same mapping collapse into one entry.
+func parseDockerPorts(out string) []listener {
+	var ls []listener
+	seen := map[string]bool{}
+	for _, line := range strings.Split(out, "\n") {
+		cport, hostAddr, ok := strings.Cut(strings.TrimSpace(line), " -> ")
+		if !ok {
+			continue
+		}
+		cport, _, _ = strings.Cut(cport, "/")
+		i := strings.LastIndex(hostAddr, ":")
+		if i < 0 {
+			continue
+		}
+		host, hport := hostAddr[:i], hostAddr[i+1:]
+		public := !isLoopbackHost(host)
+		key := fmt.Sprintf("%s|%s|%v", cport, hport, public)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		bind := hostAddr
+		if hport != cport {
+			bind += " (container :" + cport + ")"
+		}
+		ls = append(ls, listener{port: cport, bind: bind, public: public})
+	}
+	return ls
+}
+
+// parseSockets reads ss / Linux netstat ("0.0.0.0:26657") and BSD/macOS
+// netstat ("*.26657", "127.0.0.1.6060") listing lines.
+func parseSockets(out string) []listener {
+	var ls []listener
+	seen := map[string]bool{}
+	for _, line := range strings.Split(out, "\n") {
+		f := strings.Fields(line)
+		for _, col := range f[min(1, len(f)):] {
+			host, port, ok := splitListenAddr(col)
+			if !ok {
+				continue
+			}
+			public := host == "*" || !isLoopbackHost(host)
+			if key := port + "|" + fmt.Sprint(public); !seen[key] {
+				seen[key] = true
+				ls = append(ls, listener{port: port, bind: col, public: public})
+			}
+			break // first address column is the local one
+		}
+	}
+	return ls
+}
+
+func splitListenAddr(col string) (host, port string, ok bool) {
+	sep := strings.LastIndex(col, ":")
+	if sep < 0 {
+		sep = strings.LastIndex(col, ".") // BSD netstat: host.port
+	}
+	if sep <= 0 || sep == len(col)-1 {
+		return "", "", false
+	}
+	port = col[sep+1:]
+	for _, r := range port {
+		if r < '0' || r > '9' {
+			return "", "", false
+		}
+	}
+	return col[:sep], port, true
 }
 
 type permsTool struct{}

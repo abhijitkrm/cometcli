@@ -80,10 +80,6 @@ trust_period = "%s"
 			"trust_height": height, "trust_hash": hexHash, "rpc_servers": rpcs,
 		}}, nil
 	}
-	if err := c.Approve(fmt.Sprintf("write [statesync] into %s/config/config.toml (trust_height=%d)", c.Profile.Home, height),
-		toolkit.TierLocalChange, map[string]any{"height": height, "hash": hexHash}); err != nil {
-		return nil, err
-	}
 	h, err := c.Host()
 	if err != nil {
 		return nil, err
@@ -94,6 +90,11 @@ trust_period = "%s"
 		return nil, err
 	}
 	updated := patchStatesync(string(raw), rpcs, height, hexHash, trustPeriod)
+	if err := c.Approve(fmt.Sprintf("write [statesync] into %s (trust_height=%d)", path, height),
+		toolkit.TierLocalChange, map[string]any{"height": height, "hash": hexHash,
+			"diff": toolkit.Diff(path, string(raw), updated)}); err != nil {
+		return nil, err
+	}
 	if err := h.WriteFile(c, path, []byte(updated), 0o644); err != nil {
 		return nil, err
 	}

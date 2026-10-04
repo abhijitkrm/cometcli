@@ -2,8 +2,13 @@ package agent
 
 import (
 	"bufio"
+	"context"
+	"errors"
 	"fmt"
 	"io"
+	"os"
+	"os/signal"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/glamour"
@@ -17,7 +22,8 @@ var (
 	errSt    = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
 )
 
-// REPL is the interactive agent terminal.
+// REPL is the line-oriented agent terminal (`cometcli agent`). Approvals
+// use whatever Approver the agent's context carries (stdin y/N here).
 type REPL struct {
 	Agent *Agent
 	Out   io.Writer
@@ -31,24 +37,54 @@ func NewREPL(a *Agent, in io.Reader, out io.Writer) *REPL {
 	return &REPL{Agent: a, Out: out, In: in, md: r}
 }
 
+// Printer renders agent events as plain terminal lines. Streamed deltas
+// print as they arrive; when nothing streamed, the round's full text is
+// rendered as markdown (when md is non-nil).
+type Printer struct {
+	Out      io.Writer
+	MD       *glamour.TermRenderer
+	streamed bool
+}
+
+// Handle renders one event.
+func (p *Printer) Handle(e Event) {
+	switch e.Kind {
+	case EvDelta:
+		p.streamed = true
+		fmt.Fprint(p.Out, e.Text)
+	case EvText:
+		if p.streamed {
+			fmt.Fprintln(p.Out)
+			p.streamed = false
+			return
+		}
+		if p.MD != nil {
+			if out, err := p.MD.Render(e.Text); err == nil {
+				fmt.Fprint(p.Out, out)
+				return
+			}
+		}
+		fmt.Fprintln(p.Out, e.Text)
+	case EvToolStart:
+		fmt.Fprintf(p.Out, "%s %s %s\n", toolSt.Render("◐"), callSt.Render(e.Tool), toolSt.Render(CompactArgs(e.Args)))
+	case EvToolResult:
+		if e.Err != "" {
+			fmt.Fprintf(p.Out, "  %s %s\n", toolSt.Render("✗"), errSt.Render(e.Err))
+		} else {
+			fmt.Fprintf(p.Out, "  %s %s\n", toolSt.Render("✓"), toolSt.Render(e.Text))
+		}
+	}
+}
+
 // Run starts the loop until /exit or EOF.
 func (r *REPL) Run() error {
 	a := r.Agent
-	a.OnText = func(t string) { r.renderMD(t) }
-	a.OnToolCall = func(name string, args map[string]any) {
-		fmt.Fprintf(r.Out, "%s %s %s\n", toolSt.Render("◐ tool:"), callSt.Render(name), toolSt.Render(compactArgs(args)))
-	}
-	a.OnToolResult = func(name, summary string, err error) {
-		if err != nil {
-			fmt.Fprintf(r.Out, "%s %s %s\n", toolSt.Render("✗"), callSt.Render(name), errSt.Render(err.Error()))
-		} else {
-			fmt.Fprintf(r.Out, "%s %s %s\n", toolSt.Render("✓"), callSt.Render(name), toolSt.Render(summary))
-		}
-	}
+	pr := &Printer{Out: r.Out, MD: r.md}
+	a.OnEvent = pr.Handle
 
-	fmt.Fprintf(r.Out, "%s — %s on %s (%s)\n%s\n\n",
+	fmt.Fprintf(r.Out, "%s — %s/%s on %s · %s\n%s\n\n",
 		promptSt.Render("cometcli agent"), a.Provider.Name(), a.Model,
-		a.Ctx.Profile.Name, "type /help, /reset, /profile, /audit, /exit")
+		a.Ctx.Profile.Name, a.Policy, toolSt.Render("type /help for commands, ctrl+c cancels a running turn, /exit quits"))
 
 	sc := bufio.NewScanner(r.In)
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
@@ -62,70 +98,80 @@ func (r *REPL) Run() error {
 			continue
 		}
 		if strings.HasPrefix(line, "/") {
-			if done := r.slash(line); done {
+			prompt, done := r.slash(line)
+			if done {
 				return nil
 			}
-			continue
+			if prompt == "" {
+				continue
+			}
+			line = prompt
 		}
-		if _, err := a.Run(r.Agent.Ctx, line); err != nil {
-			fmt.Fprintf(r.Out, "%s %v\n", errSt.Render("error:"), err)
-		}
+		r.turn(line)
 		fmt.Fprintln(r.Out)
 	}
 }
 
-func (r *REPL) slash(cmd string) bool {
-	fields := strings.Fields(cmd)
-	switch fields[0] {
-	case "/exit", "/quit", "/q":
-		return true
-	case "/help":
-		fmt.Fprintln(r.Out, `Commands:
-  /profile        show active profile
-  /reset          clear conversation
-  /tools          list available tools
-  /audit          show audit log path
-  /mode           show approval mode
-  /exit           quit`)
-	case "/profile":
-		p := r.Agent.Ctx.Profile
-		fmt.Fprintf(r.Out, "%s (%s, chain %s, role %s)\n", p.Name, p.Transport.Type, p.ChainID, p.Role)
-	case "/reset":
-		r.Agent.Reset()
-		fmt.Fprintln(r.Out, "conversation cleared")
-	case "/tools":
-		for _, t := range r.Agent.Reg.All() {
-			fmt.Fprintf(r.Out, "  %-24s [%s] %s\n", t.Name(), t.Tier(), t.Desc())
+// turn runs one agent turn; ctrl+c cancels the turn, not the REPL.
+func (r *REPL) turn(line string) {
+	ctx, cancel := context.WithCancel(r.Agent.Ctx)
+	defer cancel()
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt)
+	defer signal.Stop(sig)
+	go func() {
+		select {
+		case <-sig:
+			cancel()
+		case <-ctx.Done():
 		}
-	case "/audit":
-		if r.Agent.Audit() != nil {
-			fmt.Fprintln(r.Out, r.Agent.Audit().Path())
-		}
-	case "/mode":
-		fmt.Fprintln(r.Out, "approvals: observe/diagnose auto · local-change prompts · on-chain always prompts")
-	default:
-		fmt.Fprintln(r.Out, "unknown command: "+fields[0])
-	}
-	return false
-}
-
-func (r *REPL) renderMD(text string) {
-	if r.md != nil {
-		if out, err := r.md.Render(text); err == nil {
-			fmt.Fprint(r.Out, out)
+	}()
+	if _, err := r.Agent.Run(ctx, line); err != nil {
+		if errors.Is(err, context.Canceled) {
+			fmt.Fprintln(r.Out, toolSt.Render("\n(cancelled)"))
 			return
 		}
+		fmt.Fprintf(r.Out, "%s %v\n", errSt.Render("error:"), err)
 	}
-	fmt.Fprintln(r.Out, text)
 }
 
-func compactArgs(args map[string]any) string {
+// slash handles a command; returns a prompt to submit (from /runbook) and
+// whether to quit.
+func (r *REPL) slash(cmd string) (prompt string, quit bool) {
+	switch strings.Fields(cmd)[0] {
+	case "/exit", "/quit", "/q":
+		return "", true
+	case "/help":
+		fmt.Fprintln(r.Out, "Commands:\n"+CommandHelp+"\n  /exit                         quit")
+		return "", false
+	}
+	res, err := RunCommand(r.Agent, r.Agent.Ctx, r.Agent.Reg, cmd)
+	switch {
+	case errors.Is(err, ErrUnknownCommand):
+		fmt.Fprintln(r.Out, "unknown command — /help")
+	case err != nil:
+		fmt.Fprintln(r.Out, errSt.Render(err.Error()))
+	default:
+		if res.Text != "" {
+			fmt.Fprintln(r.Out, toolSt.Render(res.Text))
+		}
+	}
+	return res.Prompt, false
+}
+
+// CompactArgs renders tool args on one bounded line.
+func CompactArgs(args map[string]any) string {
 	if len(args) == 0 {
 		return ""
 	}
+	keys := make([]string, 0, len(args))
+	for k := range args {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
 	var parts []string
-	for k, v := range args {
-		parts = append(parts, fmt.Sprintf("%s=%v", k, v))
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%v", k, args[k]))
 	}
 	s := strings.Join(parts, " ")
 	if len(s) > 100 {

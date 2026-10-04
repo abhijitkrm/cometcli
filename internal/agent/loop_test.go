@@ -70,7 +70,8 @@ func newTestAgent(t *testing.T, prov Provider, tools ...toolkit.Tool) *Agent {
 		Audit:            aud,
 		AutoApproveBelow: toolkit.TierOnChain, // observe/diagnose/local-change auto-run
 	}
-	return &Agent{Provider: prov, Model: "mock-1", Reg: reg, Ctx: ctx, MaxIter: 4}
+	return &Agent{Provider: prov, Model: "mock-1", Reg: reg, Ctx: ctx, MaxIter: 4,
+		SnapshotFn: func(*toolkit.Context) string { return "LIVE: height=42" }}
 }
 
 func TestLoop_ToolCallRoundTrip(t *testing.T) {

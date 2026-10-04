@@ -220,8 +220,14 @@ func (s *SSH) Stat(ctx context.Context, path string) (os.FileInfo, error) {
 	return &fileInfo{name: f[4], size: size, mode: os.FileMode(mode)}, nil
 }
 
-// Close shuts the connection.
-func (s *SSH) Close() error { return s.client.Close() }
+// Close shuts the connection. Safe on a nil or never-connected *SSH (a
+// failed dial can surface as a typed nil inside the Host interface).
+func (s *SSH) Close() error {
+	if s == nil || s.client == nil {
+		return nil
+	}
+	return s.client.Close()
+}
 
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"

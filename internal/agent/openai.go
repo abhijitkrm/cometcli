@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 )
@@ -26,7 +27,7 @@ func (o *openai) Name() string {
 
 func (o *openai) client() *http.Client {
 	if o.hc == nil {
-		o.hc = &http.Client{Timeout: 120 * time.Second}
+		o.hc = &http.Client{Timeout: 300 * time.Second}
 	}
 	return o.hc
 }
@@ -40,7 +41,7 @@ type oaiToolCall struct {
 	} `json:"function"`
 }
 
-func (o *openai) Chat(ctx context.Context, r *Request) (*Response, error) {
+func (o *openai) body(r *Request) map[string]any {
 	var msgs []map[string]any
 	if r.System != "" {
 		msgs = append(msgs, map[string]any{"role": "system", "content": r.System})
@@ -56,11 +57,9 @@ func (o *openai) Chat(ctx context.Context, r *Request) (*Response, error) {
 			}
 			var tcs []oaiToolCall
 			for _, cl := range m.Calls {
-				tcs = append(tcs, oaiToolCall{ID: cl.ID, Type: "function",
-					Function: struct {
-						Name      string `json:"name"`
-						Arguments string `json:"arguments"`
-					}{Name: cl.Name, Arguments: string(cl.Args)}})
+				tc := oaiToolCall{ID: cl.ID, Type: "function"}
+				tc.Function.Name, tc.Function.Arguments = cl.Name, string(cl.Args)
+				tcs = append(tcs, tc)
 			}
 			if len(tcs) > 0 {
 				mm["tool_calls"] = tcs
@@ -88,6 +87,10 @@ func (o *openai) Chat(ctx context.Context, r *Request) (*Response, error) {
 	if len(tools) > 0 {
 		body["tools"] = tools
 	}
+	return body
+}
+
+func (o *openai) post(ctx context.Context, body map[string]any) (*http.Response, error) {
 	raw, _ := json.Marshal(body)
 	url := strings.TrimSuffix(o.base, "/") + "/v1/chat/completions"
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(raw))
@@ -98,7 +101,11 @@ func (o *openai) Chat(ctx context.Context, r *Request) (*Response, error) {
 	if o.key != "" {
 		req.Header.Set("authorization", "Bearer "+o.key)
 	}
-	resp, err := o.client().Do(req)
+	return o.client().Do(req)
+}
+
+func (o *openai) Chat(ctx context.Context, r *Request) (*Response, error) {
+	resp, err := o.post(ctx, o.body(r))
 	if err != nil {
 		return nil, err
 	}
@@ -119,10 +126,10 @@ func (o *openai) Chat(ctx context.Context, r *Request) (*Response, error) {
 		return nil, err
 	}
 	if out.Error != nil {
-		return nil, fmt.Errorf("openai: %s", out.Error.Message)
+		return nil, fmt.Errorf("%s: %s", o.Name(), out.Error.Message)
 	}
 	if len(out.Choices) == 0 {
-		return nil, fmt.Errorf("openai: no choices")
+		return nil, fmt.Errorf("%s: no choices", o.Name())
 	}
 	ch := out.Choices[0].Message
 	res := &Response{Text: ch.Content, Done: len(ch.ToolCalls) == 0}
@@ -131,5 +138,103 @@ func (o *openai) Chat(ctx context.Context, r *Request) (*Response, error) {
 			ID: tc.ID, Name: tc.Function.Name, Args: json.RawMessage(tc.Function.Arguments),
 		})
 	}
+	return res, nil
+}
+
+// Stream consumes chat-completions SSE chunks. Text deltas go to onText;
+// tool calls arrive as fragments keyed by index (id/name first, then
+// argument pieces) and are assembled here. Servers that send a whole tool
+// call in one chunk (Ollama) work the same way.
+func (o *openai) Stream(ctx context.Context, r *Request, onText func(string)) (*Response, error) {
+	body := o.body(r)
+	body["stream"] = true
+	resp, err := o.post(ctx, body)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		return nil, apiError(o.Name(), resp)
+	}
+	type partial struct {
+		id, name string
+		args     strings.Builder
+	}
+	calls := map[int]*partial{}
+	var text strings.Builder
+	err = readSSE(resp.Body, func(data string) error {
+		if data == "[DONE]" {
+			return nil
+		}
+		var ch struct {
+			Choices []struct {
+				Delta struct {
+					Content   string `json:"content"`
+					ToolCalls []struct {
+						Index    int    `json:"index"`
+						ID       string `json:"id"`
+						Function struct {
+							Name      string `json:"name"`
+							Arguments string `json:"arguments"`
+						} `json:"function"`
+					} `json:"tool_calls"`
+				} `json:"delta"`
+			} `json:"choices"`
+			Error *struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if json.Unmarshal([]byte(data), &ch) != nil {
+			return nil
+		}
+		if ch.Error != nil {
+			return fmt.Errorf("%s: %s", o.Name(), ch.Error.Message)
+		}
+		if len(ch.Choices) == 0 {
+			return nil
+		}
+		d := ch.Choices[0].Delta
+		if d.Content != "" {
+			text.WriteString(d.Content)
+			onText(d.Content)
+		}
+		for _, tc := range d.ToolCalls {
+			p := calls[tc.Index]
+			if p == nil {
+				p = &partial{}
+				calls[tc.Index] = p
+			}
+			if tc.ID != "" {
+				p.id = tc.ID
+			}
+			if tc.Function.Name != "" {
+				p.name = tc.Function.Name
+			}
+			p.args.WriteString(tc.Function.Arguments)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	res := &Response{Text: text.String()}
+	idx := make([]int, 0, len(calls))
+	for i := range calls {
+		idx = append(idx, i)
+	}
+	sort.Ints(idx)
+	for _, i := range idx {
+		p := calls[i]
+		args := p.args.String()
+		if strings.TrimSpace(args) == "" {
+			args = "{}"
+		}
+		id := p.id
+		if id == "" {
+			id = fmt.Sprintf("call_%d", i)
+		}
+		res.Calls = append(res.Calls, Call{ID: id, Name: p.name, Args: json.RawMessage(args)})
+	}
+	res.Done = len(res.Calls) == 0
 	return res, nil
 }

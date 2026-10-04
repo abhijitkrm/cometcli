@@ -83,7 +83,7 @@ func profileAddCmd() *cobra.Command {
 		Use:     "add <name>",
 		Aliases: []string{"edit", "set"},
 		Short:   "Add or update a node profile",
-		Args:  cobra.ExactArgs(1),
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, a []string) error {
 			cfg, err := config.Load()
 			if err != nil {
@@ -254,6 +254,7 @@ func auditCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().IntVar(&tail, "tail", 30, "show last N events")
+	cmd.AddCommand(auditSessionsCmd(), auditReplayCmd())
 	return cmd
 }
 

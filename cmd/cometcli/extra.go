@@ -8,7 +8,7 @@ import (
 )
 
 // extraCommands returns hand-written commands that aren't schema-generated
-// tools: doctor, agent, ask, ui, mcp.
+// tools: doctor, agent, ask, ui, mcp, serve.
 func extraCommands(reg *toolkit.Registry) []*cobra.Command {
 	return []*cobra.Command{
 		cli.DoctorCmd(reg),
@@ -16,5 +16,6 @@ func extraCommands(reg *toolkit.Registry) []*cobra.Command {
 		cli.AgentCmd(reg),
 		cli.UICmd(reg),
 		cli.MCPCmd(reg),
+		cli.ServeCmd(reg),
 	}
 }

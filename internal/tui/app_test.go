@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"github.com/abhijitkrm/cometcli/internal/agent"
 	"strings"
 	"testing"
 	"time"
@@ -128,14 +129,29 @@ func TestApp_ChatPlainTextWithoutAgent(t *testing.T) {
 
 func TestApp_ChatAgentEventsAppend(t *testing.T) {
 	m := NewApp(appTestCtx(), testReg(), time.Second)
-	m2, _ := m.Update(evText{"checking the node"})
-	m3, _ := m2.(*AppModel).Update(evToolCall{name: "node.status", args: map[string]any{}})
-	m4, _ := m3.(*AppModel).Update(evToolRes{name: "node.status", summary: "h=42"})
+	m2, _ := m.Update(evAgent{agent.Event{Kind: agent.EvText, Text: "checking the node"}})
+	m3, _ := m2.(*AppModel).Update(evAgent{agent.Event{Kind: agent.EvToolStart, Tool: "node.status", Tier: "observe"}})
+	m4, _ := m3.(*AppModel).Update(evAgent{agent.Event{Kind: agent.EvToolResult, Tool: "node.status", Text: "h=42"}})
 	tr := m4.(*AppModel).chat.transcript()
 	for _, want := range []string{"checking the node", "node.status", "h=42"} {
 		if !strings.Contains(tr, want) {
 			t.Fatalf("transcript missing %q:\n%s", want, tr)
 		}
+	}
+}
+
+func TestApp_ChatStreamingDeltasCollapseIntoOneBlock(t *testing.T) {
+	m := NewApp(appTestCtx(), testReg(), time.Second)
+	before := len(m.chat.blocks)
+	for _, d := range []string{"node ", "is ", "healthy"} {
+		m.Update(evAgent{agent.Event{Kind: agent.EvDelta, Text: d}})
+	}
+	if got := m.chat.blocks[len(m.chat.blocks)-1]; got != "node is healthy" {
+		t.Fatalf("live block = %q", got)
+	}
+	m.Update(evAgent{agent.Event{Kind: agent.EvText, Text: "node is healthy"}})
+	if len(m.chat.blocks) != before+1 || m.chat.live != -1 {
+		t.Fatalf("deltas+final should be one block; blocks=%d live=%d", len(m.chat.blocks)-before, m.chat.live)
 	}
 }
 

@@ -3,7 +3,10 @@ package agent
 import (
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/abhijitkrm/cometcli/internal/config"
+	"github.com/abhijitkrm/cometcli/internal/monitor"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
 )
 
@@ -33,20 +36,67 @@ You operate ONE node via tools. Rules you must follow:
 	return b.String()
 }
 
-// SnapshotText renders a one-paragraph live status line for prompt context.
+// snapshotMax bounds the live digest injected into every system prompt.
+const snapshotMax = 1024
+
+// SnapshotText renders a bounded live digest (chain, node, validator,
+// host) for prompt context, gathered with the same collector as the
+// dashboards. Never touches key material — monitor.Collect only reads RPC
+// status, signing info, and host df/free.
 func SnapshotText(c *toolkit.Context) string {
-	var parts []string
-	if cc, err := c.Comet(); err == nil {
-		if st, err := cc.Status(c); err == nil {
-			parts = append(parts,
-				fmt.Sprintf("height=%d catching_up=%v", st.SyncInfo.LatestBlockHeight, st.SyncInfo.CatchingUp),
-				fmt.Sprintf("voting_power=%d", st.ValidatorInfo.VotingPower))
+	sub, cancel := toolkit.WithDeadline(c, 8*time.Second)
+	defer cancel()
+	defer sub.Close()
+	return formatSnapshot(c.Profile, monitor.Collect(sub))
+}
+
+func formatSnapshot(p *config.Profile, s *monitor.Snapshot) string {
+	if s == nil || !s.Reachable {
+		msg := "(no live snapshot — node unreachable or unconfigured"
+		if s != nil && len(s.Errors) > 0 {
+			msg += ": " + s.Errors[0]
 		}
+		return truncate(msg+")", snapshotMax)
 	}
-	if len(parts) == 0 {
-		return "(no live snapshot — node unreachable or unconfigured)"
+	var b strings.Builder
+	fmt.Fprintf(&b, "LIVE SNAPSHOT (%s UTC):\n", s.TS.UTC().Format("15:04:05"))
+	if p != nil {
+		fmt.Fprintf(&b, "- chain: chain-id=%s evm-chain-id=%d\n", orNone(p.ChainID), p.EVMChainID)
 	}
-	return "LIVE: " + strings.Join(parts, "  ")
+	fmt.Fprintf(&b, "- node: version=%s height=%d catching_up=%v peers=%d voting_power=%d\n",
+		orNone(s.Version), s.Height, s.CatchingUp, s.Peers, s.VotingPower)
+	if s.Window > 0 || s.Jailed || s.Tombstoned {
+		fmt.Fprintf(&b, "- validator: missed=%d/%d uptime=%.2f%% jailed=%v tombstoned=%v\n",
+			s.Missed, s.Window, s.UptimePct, s.Jailed, s.Tombstoned)
+	}
+	if s.DiskUsedPct > 0 || s.MemUsedPct > 0 || s.ServiceUp != nil {
+		svc := "unknown"
+		if s.ServiceUp != nil {
+			svc = fmt.Sprint(*s.ServiceUp)
+		}
+		host := []string{fmt.Sprintf("disk=%.0f%%", s.DiskUsedPct)}
+		if s.MemUsedPct > 0 { // 0 means the probe isn't available (e.g. macOS)
+			host = append(host, fmt.Sprintf("mem=%.0f%%", s.MemUsedPct))
+		}
+		fmt.Fprintf(&b, "- host: %s service_up=%s\n", strings.Join(host, " "), svc)
+	}
+	if s.EVMHeight > 0 {
+		fmt.Fprintf(&b, "- evm: height=%d drift=%d\n", s.EVMHeight, s.EVMDrift)
+	}
+	for i, e := range s.Errors {
+		if i == 3 {
+			break
+		}
+		fmt.Fprintf(&b, "- probe error: %s\n", truncate(e, 160))
+	}
+	return truncate(b.String(), snapshotMax)
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }
 
 func orNone(s string) string {
