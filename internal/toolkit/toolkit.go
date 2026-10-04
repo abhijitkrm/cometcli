@@ -130,8 +130,17 @@ type Tool interface {
 }
 
 // Schema helpers for declaring arg schemas compactly.
+// Strict validators (Groq, OpenAI strict mode) reject "properties": null and
+// "required": null, so empty values are emitted as {} and omitted.
 func ObjSchema(props map[string]any, required ...string) map[string]any {
-	return map[string]any{"type": "object", "properties": props, "required": required}
+	if props == nil {
+		props = map[string]any{}
+	}
+	s := map[string]any{"type": "object", "properties": props}
+	if len(required) > 0 {
+		s["required"] = required
+	}
+	return s
 }
 
 func Str(desc string) map[string]any  { return map[string]any{"type": "string", "description": desc} }

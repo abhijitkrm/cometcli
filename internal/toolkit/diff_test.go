@@ -21,3 +21,16 @@ func TestDiff(t *testing.T) {
 		t.Fatal("no-op edit must produce empty diff")
 	}
 }
+
+func TestObjSchemaNoNulls(t *testing.T) {
+	s := ObjSchema(nil)
+	if _, ok := s["required"]; ok {
+		t.Fatal("empty required must be omitted, not null")
+	}
+	if p, ok := s["properties"].(map[string]any); !ok || p == nil {
+		t.Fatal("nil properties must become {}")
+	}
+	if r := ObjSchema(map[string]any{"a": Str("x")}, "a")["required"].([]string); len(r) != 1 {
+		t.Fatal("required lost")
+	}
+}
