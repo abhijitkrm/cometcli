@@ -66,6 +66,9 @@ func RunCommand(a *Agent, c *toolkit.Context, reg *toolkit.Registry, line string
 		return nil
 	}
 	switch f[0] {
+	case "/help":
+		return CmdResult{Text: HelpText(a)}, nil
+
 	case "/profile":
 		if c == nil || c.Profile == nil {
 			return CmdResult{Text: "no active profile"}, nil
