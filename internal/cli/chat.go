@@ -223,8 +223,12 @@ func runPrint(cmd *cobra.Command, c *toolkit.Context, reg *toolkit.Registry, pro
 		return err
 	}
 	defer a.Close()
-	if _, err := configureChatAgent(cmd, a); err != nil {
+	note, err := configureChatAgent(cmd, a)
+	if err != nil {
 		return err
+	}
+	if note != "" {
+		fmt.Fprintln(cmd.ErrOrStderr(), note)
 	}
 	out := cmd.OutOrStdout()
 	enc := json.NewEncoder(out)

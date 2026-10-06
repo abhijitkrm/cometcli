@@ -179,6 +179,7 @@ func NewProvider(ac config.AgentConf) (Provider, error) {
 			base = "http://localhost:11434" // ollama default
 		}
 		return &openai{
+			name:  "openai-compat",
 			key:   key("OLLAMA_API_KEY"),
 			model: def(ac.Model, "qwen3:32b"),
 			base:  base,

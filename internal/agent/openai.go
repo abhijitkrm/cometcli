@@ -93,7 +93,8 @@ func (o *openai) body(r *Request) map[string]any {
 			body["max_tokens"] = r.MaxTok // llama.cpp / older vLLM / Ollama
 		}
 	}
-	if r.Effort != "" {
+	if r.Effort != "" && o.hosted() {
+		// local OpenAI-compatible servers may reject unknown fields
 		body["reasoning_effort"] = oaiEffort(r.Effort)
 	}
 	return body

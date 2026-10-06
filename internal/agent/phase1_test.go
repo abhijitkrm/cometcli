@@ -556,7 +556,7 @@ func TestRetryIsAnnouncedAndTimeoutsAreNot(t *testing.T) {
 	if _, err := doHTTP(context.Background(), hc, slow.URL, []byte(`{}`), nil); err == nil {
 		t.Fatal("want timeout error")
 	}
-	if n.Load() != 1 {
+	if n.Load() > 1 { // 0 when the timeout fires before the handler runs
 		t.Fatalf("timed-out request retried: %d attempts", n.Load())
 	}
 }
