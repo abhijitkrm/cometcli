@@ -60,13 +60,12 @@ func (statusTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, erro
 	v := res.Validator
 	var b strings.Builder
 	fmt.Fprintf(&b, "validator: %s\n", valoper)
-	fmt.Fprintf(&b, "moniker:   %s\n", v.Description.Moniker)
+	rates := v.GetCommission().GetCommissionRates()
+	fmt.Fprintf(&b, "moniker:   %s\n", v.GetDescription().GetMoniker())
 	fmt.Fprintf(&b, "status:    %s   jailed: %v\n", bondStatus(v.Status), v.Jailed)
 	fmt.Fprintf(&b, "tokens:    %s\n", v.Tokens)
 	fmt.Fprintf(&b, "commission: %s%% (max %s%%, max change %s%%)\n",
-		common.DecPct(string(v.Commission.CommissionRates.Rate)),
-		common.DecPct(string(v.Commission.CommissionRates.MaxRate)),
-		common.DecPct(string(v.Commission.CommissionRates.MaxChangeRate)))
+		common.DecPct(rates.GetRate()), common.DecPct(rates.GetMaxRate()), common.DecPct(rates.GetMaxChangeRate()))
 	if cons, err := common.ConsAddress(c, valoper); err == nil {
 		fmt.Fprintf(&b, "valcons:   %s\n", cons)
 		if si, err := g.Slashing.SigningInfo(c, &slashingv1beta1.QuerySigningInfoRequest{ConsAddress: cons}); err == nil {
@@ -76,7 +75,7 @@ func (statusTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, erro
 		}
 	}
 	return &toolkit.Result{Text: b.String(), Data: map[string]any{
-		"valoper": valoper, "moniker": v.Description.Moniker, "jailed": v.Jailed,
+		"valoper": valoper, "moniker": v.GetDescription().GetMoniker(), "jailed": v.Jailed,
 		"status": bondStatus(v.Status), "tokens": v.Tokens,
 	}}, nil
 }
@@ -305,6 +304,9 @@ func (editTool) Schema() map[string]any {
 func (editTool) Tier() toolkit.Tier { return toolkit.TierOnChain }
 
 func (editTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
+	if a.String("commission-rate", "") == "" && a.String("moniker", "") == "" && a.String("min-self-delegation", "") == "" {
+		return nil, fmt.Errorf("nothing to change — pass commission-rate, moniker or min-self-delegation")
+	}
 	valoper, err := common.Valoper(c, a)
 	if err != nil {
 		return nil, err
@@ -359,19 +361,27 @@ func (voteTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error)
 	if err != nil {
 		return nil, err
 	}
-	opt := map[string]govv1.VoteOption{
+	optName := strings.ToLower(strings.TrimSpace(a.String("option", "")))
+	opt, ok := map[string]govv1.VoteOption{
 		"yes":          govv1.VoteOption_VOTE_OPTION_YES,
 		"no":           govv1.VoteOption_VOTE_OPTION_NO,
 		"abstain":      govv1.VoteOption_VOTE_OPTION_ABSTAIN,
 		"no_with_veto": govv1.VoteOption_VOTE_OPTION_NO_WITH_VETO,
-	}[a.String("option", "yes")]
+		"nowithveto":   govv1.VoteOption_VOTE_OPTION_NO_WITH_VETO,
+	}[optName]
+	if !ok {
+		return nil, fmt.Errorf("option %q: want yes, no, abstain or no_with_veto", a.String("option", ""))
+	}
+	if a.Int("proposal", 0) <= 0 {
+		return nil, fmt.Errorf("proposal id is required")
+	}
 	msg := &govv1.MsgVote{
 		ProposalId: uint64(a.Int("proposal", 0)),
 		Voter:      acct,
 		Option:     opt,
 	}
 	return common.BroadcastMsgs(c, tx.Msgs{msg}, a.String("memo", ""),
-		map[string]string{"action": "gov-vote", "proposal": fmt.Sprint(msg.ProposalId), "option": a.String("option", "yes")}, common.TxOpts(a))
+		map[string]string{"action": "gov-vote", "proposal": fmt.Sprint(msg.ProposalId), "option": optName}, common.TxOpts(a))
 }
 
 // ---- helpers ----

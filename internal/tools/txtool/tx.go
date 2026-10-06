@@ -3,6 +3,7 @@ package txtool
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	bankv1beta1 "cosmossdk.io/api/cosmos/bank/v1beta1"
@@ -207,13 +208,25 @@ func (redelegateTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, 
 }
 
 // parseCoin parses "1000000atest" into a Coin.
+// coinRe is an integer amount in base units followed by an SDK denom.
+var (
+	coinRe  = regexp.MustCompile(`^([0-9]+)([a-zA-Z][a-zA-Z0-9/:._-]{2,127})$`)
+	decimRe = regexp.MustCompile(`^[0-9]*\.[0-9]+[a-zA-Z]`)
+)
+
 func parseCoin(s string) (*basev1beta1.Coin, error) {
-	i := 0
-	for i < len(s) && (s[i] >= '0' && s[i] <= '9' || s[i] == '.') {
-		i++
+	if decimRe.MatchString(s) {
+		return nil, fmt.Errorf("bad amount %q — amounts are integers in the base denom (with 18 decimals, 1.5 tokens is 1500000000000000000adex)", s)
 	}
-	if i == 0 || i == len(s) {
-		return nil, fmt.Errorf("bad amount %q — want e.g. 1000000atest", s)
+	m := coinRe.FindStringSubmatch(s)
+	if m == nil {
+		return nil, fmt.Errorf("bad amount %q — want <integer><denom>, e.g. 1000000atest", s)
 	}
-	return &basev1beta1.Coin{Amount: s[:i], Denom: s[i:]}, nil
+	if len(m[2]) > 1 && (m[2][0] == 'e' || m[2][0] == 'E') && m[2][1] >= '0' && m[2][1] <= '9' {
+		return nil, fmt.Errorf("bad amount %q — scientific notation isn't supported; write the integer out", s)
+	}
+	if strings.TrimLeft(m[1], "0") == "" {
+		return nil, fmt.Errorf("bad amount %q — must be greater than zero", s)
+	}
+	return &basev1beta1.Coin{Amount: m[1], Denom: m[2]}, nil
 }
