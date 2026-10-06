@@ -38,6 +38,9 @@ type Context struct {
 	AcceptEdits bool
 	// WorkRoot anchors relative rule patterns and accept-edits scope.
 	WorkRoot string
+	// HookDecision is a PreToolUse hook's verdict for this call:
+	// "allow" skips the prompt, "ask" forces one ("" = no opinion).
+	HookDecision string
 
 	mu      sync.Mutex
 	comet   *comet.Client
@@ -164,7 +167,7 @@ func WithDeadline(c *Context, timeout time.Duration) (*Context, context.CancelFu
 		Context: ctx, Profile: c.Profile, Cfg: c.Cfg, Out: c.Out,
 		Audit: c.Audit, Approver: c.Approver, AutoApproveBelow: c.AutoApproveBelow,
 		Session: c.Session, Rules: c.Rules, ReadOnly: c.ReadOnly,
-		AcceptEdits: c.AcceptEdits, WorkRoot: c.WorkRoot,
+		AcceptEdits: c.AcceptEdits, WorkRoot: c.WorkRoot, HookDecision: c.HookDecision,
 	}, cancel
 }
 
@@ -176,7 +179,7 @@ func WithCancel(c *Context) (*Context, context.CancelFunc) {
 		Context: ctx, Profile: c.Profile, Cfg: c.Cfg, Out: c.Out,
 		Audit: c.Audit, Approver: c.Approver, AutoApproveBelow: c.AutoApproveBelow,
 		Session: c.Session, Rules: c.Rules, ReadOnly: c.ReadOnly,
-		AcceptEdits: c.AcceptEdits, WorkRoot: c.WorkRoot,
+		AcceptEdits: c.AcceptEdits, WorkRoot: c.WorkRoot, HookDecision: c.HookDecision,
 	}, cancel
 }
 
@@ -234,9 +237,9 @@ func (c *Context) Check(g Gate) error {
 	switch {
 	case d == DecideDeny:
 		return fmt.Errorf("denied by permission rule %s", rule)
-	case d == DecideAsk || g.Tier == TierOnChain:
+	case d == DecideAsk || g.Tier == TierOnChain || c.HookDecision == "ask":
 		return RequireApproval(c, g.Prompt, g.Tier, g.Detail)
-	case d == DecideAllow:
+	case d == DecideAllow || c.HookDecision == "allow":
 		return nil
 	case c.AcceptEdits && g.InRoot && g.Tier == TierLocalChange:
 		return nil

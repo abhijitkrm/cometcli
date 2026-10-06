@@ -14,7 +14,9 @@ import (
 
 	"github.com/abhijitkrm/cometcli/internal/audit"
 	"github.com/abhijitkrm/cometcli/internal/config"
+	"github.com/abhijitkrm/cometcli/internal/hooks"
 	"github.com/abhijitkrm/cometcli/internal/redact"
+	"github.com/abhijitkrm/cometcli/internal/settings"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
 )
 
@@ -83,6 +85,9 @@ type Agent struct {
 	loaded    map[string]bool // tools loaded with tool_search
 	rounds    int             // model rounds in the latest Run
 	ownCtx    bool            // a.Ctx was built by SwitchScope
+	ext       *ext            // settings, hooks, commands, MCP servers
+	parent    *Agent          // set on subagents
+	def       *settings.AgentDef
 }
 
 // New builds an agent for a context. With a profile it runs in node mode
@@ -97,8 +102,27 @@ func New(c *toolkit.Context, reg *toolkit.Registry) (*Agent, error) {
 	case c.Profile != nil:
 		ac = c.Profile.Agent
 	}
+	cwd, _ := os.Getwd()
+	e, err := loadExtensions(cwd, reg) // exports settings env before the provider reads keys
+	if err != nil {
+		return nil, err
+	}
+	st := e.Settings
+	if st.Model != "" {
+		ac.Model = st.Model
+	}
+	if st.Effort != "" {
+		ac.Effort = st.Effort
+	}
+	if st.Permissions.DefaultMode != "" {
+		ac.Mode = st.Permissions.DefaultMode
+	}
+	ac.Permissions.Allow = append(ac.Permissions.Allow, st.Permissions.Allow...)
+	ac.Permissions.Ask = append(ac.Permissions.Ask, st.Permissions.Ask...)
+	ac.Permissions.Deny = append(ac.Permissions.Deny, st.Permissions.Deny...)
 	prov, err := NewProvider(ac)
 	if err != nil {
+		e.close(reg)
 		return nil, err
 	}
 	pol, err := PolicyFrom(ac)
@@ -125,8 +149,9 @@ func New(c *toolkit.Context, reg *toolkit.Registry) (*Agent, error) {
 	if a.Rules, err = toolkit.NewRules(ac.Permissions.Allow, ac.Permissions.Ask, ac.Permissions.Deny); err != nil {
 		return nil, err
 	}
-	a.WorkRoot, _ = os.Getwd()
+	a.WorkRoot = cwd
 	a.Tools = toolkit.NewSession("")
+	a.ext = e
 	if a.Model == "" {
 		a.Model = modelOf(prov)
 	}
@@ -234,7 +259,7 @@ func (a *Agent) toolDefs() []ToolDef {
 		if !a.Policy.Allows(t.Tier()) && !toolkit.IsDynamic(t) {
 			continue
 		}
-		if !a.advertised(t) {
+		if !a.advertised(t) || !a.allowedByDef(t.Name()) {
 			continue
 		}
 		out = append(out, ToolDef{
@@ -246,6 +271,9 @@ func (a *Agent) toolDefs() []ToolDef {
 	out = append(out, todoToolDef)
 	if a.deferred() {
 		out = append(out, toolSearchDef)
+	}
+	if a.parent == nil {
+		out = append(out, a.taskToolDef())
 	}
 	return out
 }
@@ -278,6 +306,33 @@ func (a *Agent) run(ctx context.Context, input string) (string, error) {
 			a.emit(Event{Kind: EvNotice, Text: "auto-compact failed: " + err.Error()})
 		}
 	}
+	if a.ext != nil && a.parent == nil {
+		for _, n := range a.ext.notes {
+			a.emit(Event{Kind: EvNotice, Text: n})
+		}
+		a.ext.notes = nil
+		if a.sys == "" || a.ext.resumed {
+			in := a.hookInput(hooks.SessionStart)
+			in.Source = "startup"
+			if a.ext.resumed {
+				in.Source = "resume"
+			}
+			a.ext.resumed = false
+			if out := a.runHook(ctx, in); out.Context != "" {
+				a.carry = strings.TrimSpace(a.carry + "\n\n<session-start-hook>\n" + a.Redact.Text(out.Context) + "\n</session-start-hook>")
+			}
+		}
+		in := a.hookInput(hooks.UserPromptSubmit)
+		in.Prompt = input
+		out := a.runHook(ctx, in)
+		if out.Block {
+			return "", fmt.Errorf("prompt blocked by hook: %s", out.Reason)
+		}
+		if out.Context != "" {
+			input += "\n\n<hook-context>\n" + out.Context + "\n</hook-context>"
+		}
+	}
+	defer a.grantTurnRules()()
 	input = a.Redact.Text(input)
 	if lg := a.Audit(); lg != nil {
 		_ = lg.Log(audit.KindPrompt, a.profileName(), map[string]any{"text": input})
@@ -285,7 +340,7 @@ func (a *Agent) run(ctx context.Context, input string) (string, error) {
 	a.history = append(a.history, Msg{Role: "user", Text: a.turnPrefix() + input})
 
 	var texts []string
-	conts, compacted := 0, false
+	conts, compacted, stops := 0, false, 0
 	a.rounds = 0
 	for i := 0; i < a.MaxIter; i++ {
 		a.rounds++
@@ -336,6 +391,16 @@ func (a *Agent) run(ctx context.Context, input string) (string, error) {
 			a.emit(Event{Kind: EvNotice, Text: "reply hit the output-token limit — continuing"})
 			a.history = append(a.history, Msg{Role: "user", Text: "Your reply was cut off by the output limit. Continue exactly where you stopped, without repeating anything."})
 			continue
+		}
+		if (resp.Done || len(resp.Calls) == 0) && a.parent == nil && stops < 3 && a.ext != nil && a.ext.Hooks.Has(hooks.Stop) {
+			in := a.hookInput(hooks.Stop)
+			in.StopHookActive = stops > 0
+			if out := a.runHook(ctx, in); out.Block {
+				stops++
+				a.emit(Event{Kind: EvNotice, Text: "Stop hook: " + a.Redact.Text(out.Reason)})
+				a.history = append(a.history, Msg{Role: "user", Text: "[Stop hook] " + a.Redact.Text(out.Reason) + "\nAddress this, then finish."})
+				continue
+			}
 		}
 		if resp.Done || len(resp.Calls) == 0 {
 			if conts > 0 {
@@ -455,6 +520,10 @@ func (a *Agent) execCall(ctx context.Context, call Call) Msg {
 		return a.todoWrite(call, args)
 	case toolSearchName:
 		return a.toolSearch(call, args)
+	case taskToolName:
+		if a.parent == nil {
+			return a.runTask(ctx, call, args)
+		}
 	}
 	t, ok := a.Reg.Get(name)
 	if !ok {
@@ -477,12 +546,37 @@ func (a *Agent) execCall(ctx context.Context, call Call) Msg {
 
 	runCtx, cancel := a.toolCtx(ctx, t, args)
 	var res *toolkit.Result
-	err := a.ruleGate(runCtx, t, shownArgs)
+	in := a.hookInput(hooks.PreToolUse)
+	in.ToolName, in.ToolInput = name, args
+	pre := a.runHook(ctx, in)
+	var err error
+	switch {
+	case pre.Block || pre.Decision == "deny":
+		err = fmt.Errorf("blocked by PreToolUse hook: %s", pre.Reason)
+	default:
+		runCtx.HookDecision = pre.Decision
+		err = a.ruleGate(runCtx, t, shownArgs)
+	}
 	if err == nil {
 		res, err = t.Run(runCtx, args)
 	}
 	runCtx.Close()
 	cancel()
+	var postNote string
+	if a.ext != nil && a.ext.Hooks.Has(hooks.PostToolUse) && !pre.Block && pre.Decision != "deny" {
+		in := a.hookInput(hooks.PostToolUse)
+		in.ToolName, in.ToolInput = name, args
+		resp := map[string]any{"success": err == nil}
+		if err != nil {
+			resp["error"] = err.Error()
+		} else if res != nil {
+			resp["output"] = res.Text
+		}
+		in.ToolResponse = resp
+		if post := a.runHook(ctx, in); post.Block || post.Context != "" {
+			postNote = strings.TrimSpace(post.Reason + "\n" + post.Context)
+		}
+	}
 
 	var text string
 	if err == nil {
@@ -508,9 +602,13 @@ func (a *Agent) execCall(ctx context.Context, call Call) Msg {
 		}
 		lg.ToolSeen(a.profileName(), name, t.Tier().String(), shownArgs, data, err, text)
 	}
-	if err != nil {
-		return a.toolErr(call, name, "error: "+err.Error())
+	if postNote != "" {
+		postNote = "\n[PostToolUse hook] " + a.Redact.Text(postNote)
 	}
+	if err != nil {
+		return a.toolErr(call, name, "error: "+err.Error()+postNote)
+	}
+	text += postNote
 	a.emit(Event{Kind: EvToolResult, Tool: name, Tier: t.Tier().String(), Text: firstLine(text)})
 	return Msg{Role: "tool", CallID: call.ID, ToolName: name, Text: text}
 }
@@ -554,6 +652,12 @@ func (a *Agent) ruleGate(c *toolkit.Context, t toolkit.Tool, shownArgs map[strin
 		return nil
 	}
 	d, rule := a.Rules.Decide(toolkit.Request{Tool: t.Name()})
+	switch {
+	case d != toolkit.DecideDeny && c.HookDecision == "ask":
+		d, rule = toolkit.DecideAsk, "PreToolUse hook"
+	case d == toolkit.DecideDefault && c.HookDecision == "allow":
+		d = toolkit.DecideAllow
+	}
 	switch d {
 	case toolkit.DecideDeny:
 		return fmt.Errorf("denied by permission rule %s", rule)
@@ -572,9 +676,12 @@ func (a *Agent) ruleGate(c *toolkit.Context, t toolkit.Tool, shownArgs map[strin
 func (a *Agent) system() string {
 	if a.sys == "" {
 		if a.Node() {
-			a.sys = a.Redact.Text(SystemPrompt(a.Ctx)) + a.toolCatalog() + a.snapshot()
+			a.sys = a.Redact.Text(SystemPrompt(a.Ctx)) + a.memoryText() + a.toolCatalog() + a.snapshot()
 		} else {
-			a.sys = a.Redact.Text(GeneralPrompt(a.Ctx, a.Tools.Cwd(a.WorkRoot)))
+			a.sys = a.Redact.Text(GeneralPrompt(a.Ctx, a.Tools.Cwd(a.WorkRoot))) + a.memoryText() + a.toolCatalog()
+		}
+		if a.parent != nil {
+			a.sys += a.subagentPrompt()
 		}
 		if a.AppendSystem != "" {
 			a.sys += "\n" + a.Redact.Text(a.AppendSystem) + "\n"

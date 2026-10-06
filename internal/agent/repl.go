@@ -169,7 +169,7 @@ func (r *REPL) slash(cmd string) (prompt string, quit bool) {
 	case "/exit", "/quit", "/q":
 		return "", true
 	case "/help":
-		fmt.Fprintln(r.Out, "Commands:\n"+CommandHelp+"\n  /exit                         quit")
+		fmt.Fprintln(r.Out, "Commands:\n"+HelpText(r.Agent)+"\n  /exit                         quit")
 		return "", false
 	}
 	res, err := RunCommand(r.Agent, r.Agent.Ctx, r.Agent.Reg, cmd)

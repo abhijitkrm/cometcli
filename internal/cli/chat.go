@@ -242,6 +242,34 @@ func runPrint(cmd *cobra.Command, c *toolkit.Context, reg *toolkit.Registry, pro
 			}
 		}
 	}
+	// slash commands work headlessly too: `cometcli -p "/vote yes 7"`
+	if strings.HasPrefix(prompt, "/") {
+		cr, err := agent.RunCommand(a, c, reg, prompt)
+		if err != nil {
+			if errors.Is(err, agent.ErrUnknownCommand) {
+				return fmt.Errorf("unknown command %s", strings.Fields(prompt)[0])
+			}
+			return err
+		}
+		if cr.Job != nil {
+			txt, err := cr.Job(cmd.Context())
+			if err != nil {
+				return err
+			}
+			cr.Text = txt
+		}
+		if cr.Prompt == "" {
+			if cr.Text != "" {
+				fmt.Fprintln(out, cr.Text)
+			}
+			return nil
+		}
+		if verbose && cr.Text != "" {
+			fmt.Fprintln(cmd.ErrOrStderr(), cr.Text)
+		}
+		prompt = cr.Prompt
+	}
+
 	start := time.Now()
 	res, runErr := a.Run(cmd.Context(), prompt)
 	if format == "text" {

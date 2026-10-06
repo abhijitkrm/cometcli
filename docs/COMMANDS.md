@@ -20,6 +20,8 @@ cmd | cometcli -p "prompt"             # piped input is attached as <stdin> cont
 cometcli -c / -r <id>                  # continue the latest session here / resume one
 cometcli config show                   # global agent settings (general mode; profiles override)
 cometcli config set agent.provider groq
+cometcli trust                         # let this project's hooks and MCP servers run
+cometcli mcp add|list|remove …         # MCP servers the agent connects to
 ```
 
 Headless flags: `--output-format text|json|stream-json`, `--include-partial-messages`
@@ -254,6 +256,9 @@ saved after each turn to `~/.cometcli/sessions/` (0600, already redacted).
 | `/effort [level\|default]` | show or set reasoning depth for the rest of the session |
 | `/sessions`, `/resume <id>` | list saved sessions, or load one into the current session |
 | `/permissions`, `/allow\|/ask\|/deny <rule>` | show rules; add one for this session |
+| `/memory`, `/remember [--user\|--node] <text>` | memory files loaded; add a line to COMET.md |
+| `/mcp`, `/agents` | connected MCP servers; subagents for the task tool |
+| `/<custom>` | commands from `.cometcli/commands/*.md` — see [EXTENDING.md](EXTENDING.md) |
 | `/one [profile\|off]` | switch the session to node mode for a profile, or back to general (conversation kept) |
 
 ### General tools and permissions

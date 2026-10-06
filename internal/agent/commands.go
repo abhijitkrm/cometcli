@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/abhijitkrm/cometcli/internal/config"
 	"github.com/abhijitkrm/cometcli/internal/runbook"
+	"github.com/abhijitkrm/cometcli/internal/settings"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
 )
 
@@ -279,6 +282,9 @@ func RunCommand(a *Agent, c *toolkit.Context, reg *toolkit.Registry, line string
 		if rule == "" {
 			return CmdResult{}, fmt.Errorf("usage: %s <rule> — e.g. bash(systemctl status:*), edit(./config/**), val.unjail", f[0])
 		}
+		if a.Rules == nil {
+			a.Rules, _ = toolkit.NewRules(nil, nil, nil)
+		}
 		if err := a.Rules.Add(f[0][1:], rule); err != nil {
 			return CmdResult{}, err
 		}
@@ -317,6 +323,66 @@ func RunCommand(a *Agent, c *toolkit.Context, reg *toolkit.Registry, line string
 		a.Restore(sf)
 		return CmdResult{Text: fmt.Sprintf("resumed %s — %s (%d messages)", sf.ID, sf.Title, len(sf.History))}, nil
 
+	case "/memory":
+		if err := needAgent(); err != nil {
+			return CmdResult{}, err
+		}
+		a.system()
+		var b strings.Builder
+		if a.ext == nil || len(a.ext.memory) == 0 {
+			b.WriteString("no memory files loaded\n")
+		}
+		if a.ext != nil {
+			for _, m := range a.ext.memory {
+				fmt.Fprintf(&b, "%-8s %s (%d lines)\n", m.Scope, m.Path, strings.Count(m.Content, "\n")+1)
+			}
+		}
+		b.WriteString("add with /remember <text> (project COMET.md), /remember --user|--node <text>")
+		return CmdResult{Text: b.String()}, nil
+
+	case "/remember", "/#":
+		if err := needAgent(); err != nil {
+			return CmdResult{}, err
+		}
+		rest := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), f[0]))
+		path, err := a.memoryTarget(&rest)
+		if err != nil {
+			return CmdResult{}, err
+		}
+		if rest == "" {
+			return CmdResult{}, fmt.Errorf("usage: /remember [--user|--node] <text>")
+		}
+		if err := settings.AppendMemory(path, rest); err != nil {
+			return CmdResult{}, err
+		}
+		// the system prompt is frozen: tell the model now, the file
+		// carries it into future sessions
+		a.carry = strings.TrimSpace(a.carry + "\n\n[Operator added to memory (" + path + "): " + a.Redact.Text(rest) + "]")
+		return CmdResult{Text: "remembered in " + path}, nil
+
+	case "/mcp":
+		if err := needAgent(); err != nil {
+			return CmdResult{}, err
+		}
+		srv := a.MCPServers()
+		if len(srv) == 0 {
+			return CmdResult{Text: "no MCP servers connected — add one with `cometcli mcp add <name> -- <command> [args…]`"}, nil
+		}
+		return CmdResult{Text: "connected: " + strings.Join(srv, ", ") + "\ntheir tools load on demand (tool_search)"}, nil
+
+	case "/agents":
+		if err := needAgent(); err != nil {
+			return CmdResult{}, err
+		}
+		if a.ext == nil || len(a.ext.Agents) == 0 {
+			return CmdResult{Text: "only the general subagent — define more in .cometcli/agents/<name>.md (frontmatter: name, description, tools; body: its instructions)"}, nil
+		}
+		var b strings.Builder
+		for _, d := range a.ext.Agents {
+			fmt.Fprintf(&b, "%-16s %s (%s)\n", d.Name, d.Description, d.Path)
+		}
+		return CmdResult{Text: strings.TrimRight(b.String(), "\n")}, nil
+
 	case "/runbook", "/runbooks":
 		if len(f) == 1 {
 			var b strings.Builder
@@ -344,7 +410,35 @@ func RunCommand(a *Agent, c *toolkit.Context, reg *toolkit.Registry, line string
 			Prompt: fmt.Sprintf("Run runbook %q with runbook.run, then summarize each step's outcome and anything that needs my attention.", rb.Name),
 		}, nil
 	}
+	if a != nil && a.ext != nil {
+		if cmd, ok := a.ext.Commands[strings.TrimPrefix(f[0], "/")]; ok {
+			args := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), f[0]))
+			return a.runCustomCommand(c, cmd, args)
+		}
+	}
 	return CmdResult{}, ErrUnknownCommand
+}
+
+// memoryTarget picks the file /remember writes: --user, --node, or the
+// project's COMET.md (the user file without a project).
+func (a *Agent) memoryTarget(rest *string) (string, error) {
+	switch {
+	case strings.HasPrefix(*rest, "--user"):
+		*rest = strings.TrimSpace(strings.TrimPrefix(*rest, "--user"))
+		d, err := config.Dir()
+		return filepath.Join(d, "COMET.md"), err
+	case strings.HasPrefix(*rest, "--node"):
+		*rest = strings.TrimSpace(strings.TrimPrefix(*rest, "--node"))
+		if !a.Node() {
+			return "", fmt.Errorf("--node needs node mode (/one <profile>)")
+		}
+		return settings.NodeMemoryPath(a.Ctx.Profile.Name)
+	}
+	if a.ext != nil && a.ext.Settings.Root != "" {
+		return filepath.Join(a.ext.Settings.Root, "COMET.md"), nil
+	}
+	d, err := config.Dir()
+	return filepath.Join(d, "COMET.md"), err
 }
 
 // humanTok renders a token count compactly: 950, 12.3k, 1.2M.

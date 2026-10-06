@@ -130,6 +130,9 @@ func (a *Agent) Restore(sf *SessionFile) {
 		a.loaded[n] = true
 	}
 	a.Tools = toolkit.NewSession(sf.ShellCwd)
+	if a.ext != nil {
+		a.ext.resumed = true
+	}
 	// the frozen system prompt carries the old snapshot: force a refresh
 	// onto the next turn
 	a.snapAt = time.Time{}

@@ -173,6 +173,9 @@ node in context. Every shell command is classified before it runs: reads run, ch
 ask, transactions always ask, and key material or state resets are refused. See
 [docs/COMMANDS.md](docs/COMMANDS.md#general-tools-and-permissions).
 
+Settings files, `COMET.md` memory, custom slash commands, hooks, MCP servers and
+subagents work like Claude Code's — see [docs/EXTENDING.md](docs/EXTENDING.md).
+
 `cometcli ask "…"`, `cometcli agent` and `cometcli ui` still work as before (node mode
 on the active profile).
 

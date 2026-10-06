@@ -605,5 +605,8 @@ func RunAppWith(c *toolkit.Context, reg *toolkit.Registry, interval time.Duratio
 	m.initial = prompt
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err := p.Run()
+	if m.chat.agent != nil {
+		m.chat.agent.Close()
+	}
 	return err
 }

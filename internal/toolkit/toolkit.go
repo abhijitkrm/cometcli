@@ -171,6 +171,20 @@ func (r *Registry) Register(t Tool) {
 	r.tools[t.Name()] = t
 }
 
+// Upsert adds or replaces a tool (dynamic tools: MCP servers).
+func (r *Registry) Upsert(t Tool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.tools[t.Name()] = t
+}
+
+// Remove drops a tool by name.
+func (r *Registry) Remove(name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.tools, name)
+}
+
 // Get fetches a tool by name.
 func (r *Registry) Get(name string) (Tool, bool) {
 	r.mu.RLock()
@@ -205,7 +219,12 @@ func (r *Registry) FuncSchemas() []map[string]any {
 }
 
 // ResolveName maps an agent-side function name back to a tool name.
-func ResolveName(fnName string) string { return strings.ReplaceAll(fnName, "__", ".") }
+func ResolveName(fnName string) string {
+	if strings.HasPrefix(fnName, "mcp__") {
+		return fnName // MCP tools keep their mcp__server__tool name
+	}
+	return strings.ReplaceAll(fnName, "__", ".")
+}
 
 // Approver asks the human for confirmation. It must return true to proceed.
 type Approver func(c *Context, prompt string, tier Tier, detail map[string]any) (bool, error)

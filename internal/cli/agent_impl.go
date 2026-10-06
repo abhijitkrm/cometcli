@@ -23,6 +23,7 @@ func runAgentImpl(cmd *cobra.Command, reg *toolkit.Registry, oneshot string) err
 	if err != nil {
 		return err
 	}
+	defer a.Close()
 	note, err := applyAgentFlags(cmd, a)
 	if err != nil {
 		return err

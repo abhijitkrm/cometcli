@@ -193,7 +193,7 @@ func (m *AppModel) chatSlash(s string) tea.Cmd {
 		m.quitting = true
 		return tea.Quit
 	case "/help":
-		return add("info", "commands:\n"+agent.CommandHelp+`
+		return add("info", "commands:\n"+agent.HelpText(p.agent)+`
   /run <tool> {"args"}          run a tool directly (e.g. /run node.logs {"lines":50})
   /exit                         quit
 anything else is sent to the agent — "why is disk high", "unjail", "send 1uatom to …" all work`)

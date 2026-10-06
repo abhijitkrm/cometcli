@@ -30,12 +30,36 @@ var toolSearchDef = ToolDef{
 	}, "query"),
 }
 
-// deferred reports whether this session loads node tools on demand.
-// General mode has no node tools to defer.
-func (a *Agent) deferred() bool { return a.conf.Tools != "all" && a.Node() }
+// deferred reports whether this session loads tools on demand: node
+// tools in node mode, MCP server tools in either mode.
+func (a *Agent) deferred() bool {
+	if a.conf.Tools == "all" {
+		return false
+	}
+	if a.Node() {
+		return true
+	}
+	for _, t := range a.Reg.All() {
+		if isMCP(t) {
+			return true
+		}
+	}
+	return false
+}
+
+// deferrable reports whether t is listed in the catalog rather than sent.
+func (a *Agent) deferrable(t toolkit.Tool) bool {
+	if isMCP(t) {
+		return true
+	}
+	return a.Node() && !toolkit.IsAgentOnly(t) && !coreTools[t.Name()] && !toolkit.IsLongRunning(t) && strings.Contains(t.Name(), ".")
+}
 
 // advertised reports whether t goes into this request's tool list.
 func (a *Agent) advertised(t toolkit.Tool) bool {
+	if isMCP(t) {
+		return a.conf.Tools == "all" || a.loaded[t.Name()]
+	}
 	if toolkit.IsAgentOnly(t) {
 		return true
 	}
@@ -57,10 +81,15 @@ func (a *Agent) toolCatalog() string {
 	groups := map[string][]string{}
 	var order []string
 	for _, t := range a.Reg.All() {
-		if toolkit.IsAgentOnly(t) || coreTools[t.Name()] || toolkit.IsLongRunning(t) {
+		if !a.deferrable(t) {
 			continue
 		}
 		dom, verb, ok := strings.Cut(t.Name(), ".")
+		if isMCP(t) {
+			rest := strings.TrimPrefix(t.Name(), "mcp__")
+			srv, tool, _ := strings.Cut(rest, "__")
+			dom, verb, ok = "mcp__"+srv, tool, true
+		}
 		if !ok {
 			continue
 		}
@@ -73,7 +102,7 @@ func (a *Agent) toolCatalog() string {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("TOOL CATALOG — load with tool_search before calling (e.g. select:val.unjail):\n")
+	b.WriteString("TOOL CATALOG — load with tool_search before calling (e.g. select:val.unjail, select:mcp__server__tool):\n")
 	for _, d := range order {
 		fmt.Fprintf(&b, "- %s: %s\n", d, strings.Join(groups[d], ", "))
 	}
@@ -106,6 +135,10 @@ func (a *Agent) toolSearch(call Call, args map[string]any) Msg {
 	var names []string
 	for _, t := range picks {
 		if toolkit.IsLongRunning(t) {
+			continue
+		}
+		if !a.deferrable(t) && !coreTools[t.Name()] {
+			missing = append(missing, t.Name()+" (node tool: needs node mode — /one <profile>)")
 			continue
 		}
 		a.loaded[t.Name()] = true
@@ -141,7 +174,7 @@ func (a *Agent) searchTools(q string, n int) []toolkit.Tool {
 	}
 	var hits []hit
 	for _, t := range a.Reg.All() {
-		if toolkit.IsAgentOnly(t) {
+		if !a.deferrable(t) && !coreTools[t.Name()] {
 			continue
 		}
 		name, desc := strings.ToLower(t.Name()), strings.ToLower(t.Desc())

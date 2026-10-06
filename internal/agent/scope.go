@@ -96,9 +96,12 @@ func (a *Agent) SwitchScope(p *config.Profile) {
 	a.carry += note
 }
 
-// Close releases a context created by SwitchScope.
+// Close releases a context created by SwitchScope and stops MCP servers.
 func (a *Agent) Close() {
 	if a.ownCtx {
 		a.Ctx.Close()
+	}
+	if a.parent == nil {
+		a.ext.close(a.Reg)
 	}
 }

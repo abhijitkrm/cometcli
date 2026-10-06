@@ -77,8 +77,12 @@ func ParseRule(s string) (Rule, error) {
 
 func (r Rule) toolMatches(tool string) bool {
 	tool = strings.ToLower(tool)
-	if strings.HasSuffix(r.Tool, ".*") {
+	switch {
+	case strings.HasSuffix(r.Tool, "*"):
 		return strings.HasPrefix(tool, strings.TrimSuffix(r.Tool, "*"))
+	case strings.HasPrefix(r.Tool, "mcp__") && strings.Count(r.Tool, "__") == 1:
+		// "mcp__github" covers every tool of that server
+		return strings.HasPrefix(tool, r.Tool+"__")
 	}
 	return r.Tool == tool
 }
@@ -195,6 +199,29 @@ func (r *Rules) Add(list, s string) error {
 		return fmt.Errorf("unknown rule list %q", list)
 	}
 	return nil
+}
+
+// Remove deletes the first rule in a list whose text is s.
+func (r *Rules) Remove(list, s string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var l *[]Rule
+	switch list {
+	case "allow":
+		l = &r.allow
+	case "ask":
+		l = &r.ask
+	case "deny":
+		l = &r.deny
+	default:
+		return
+	}
+	for i, x := range *l {
+		if x.Raw == strings.TrimSpace(s) {
+			*l = append((*l)[:i], (*l)[i+1:]...)
+			return
+		}
+	}
 }
 
 // Lists returns copies of the rule strings.
