@@ -79,8 +79,17 @@ type Options struct {
 	GasPrice    string // decimal, e.g. "0.025"
 	AccountNum  uint64
 	Sequence    uint64
-	ForceSeq    int64 // >=0 overrides the queried sequence (mempool heal)
 	haveAccount bool
+	// forcedSeq overrides the queried sequence (mempool heal); nil = use
+	// the chain's. A pointer so the zero Options can't mean "sequence 0".
+	forcedSeq *uint64
+}
+
+// ForceSequence overrides the queried sequence — used to heal a mismatch
+// with the value the chain reported it expects.
+func (o Options) ForceSequence(seq uint64) Options {
+	o.forcedSeq = &seq
+	return o
 }
 
 // WithAccount pins the account number/sequence explicitly (offline signing,
@@ -130,8 +139,8 @@ func (b *Builder) Build(ctx context.Context, msgs Msgs, opt Options) (*Built, er
 			return nil, err
 		}
 	}
-	if opt.ForceSeq >= 0 {
-		seq = uint64(opt.ForceSeq)
+	if opt.forcedSeq != nil {
+		seq = *opt.forcedSeq
 	}
 	if opt.GasAdjust == 0 {
 		opt.GasAdjust = 1.4
@@ -315,10 +324,17 @@ func (b *Builder) Broadcast(ctx context.Context, txBytes []byte) (hash string, c
 	return r.Txhash, r.Code, r.RawLog, nil
 }
 
+// ConfirmTimeout and ConfirmPoll bound how long Confirm waits for a tx to
+// be committed (variables so tests can shorten them).
+var (
+	ConfirmTimeout = 30 * time.Second
+	ConfirmPoll    = 1500 * time.Millisecond
+)
+
 // Confirm polls GetTx until the tx is committed (or ctx/timeout expires) and
 // returns the final on-chain result — the code that actually matters.
 func (b *Builder) Confirm(ctx context.Context, hash string) (*abciv1beta1.TxResponse, error) {
-	deadline := time.Now().Add(30 * time.Second)
+	deadline := time.Now().Add(ConfirmTimeout)
 	var lastErr error
 	for time.Now().Before(deadline) {
 		res, err := b.GetTx(ctx, hash)
@@ -329,10 +345,10 @@ func (b *Builder) Confirm(ctx context.Context, hash string) (*abciv1beta1.TxResp
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(1500 * time.Millisecond):
+		case <-time.After(ConfirmPoll):
 		}
 	}
-	return nil, fmt.Errorf("tx %s not committed within 30s (last: %v)", hash, lastErr)
+	return nil, fmt.Errorf("tx %s not committed within %s (last: %v)", hash, ConfirmTimeout, lastErr)
 }
 
 // GetTx fetches a committed tx by hash.

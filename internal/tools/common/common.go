@@ -202,7 +202,7 @@ func BroadcastMsgs(c *toolkit.Context, msgs tx.Msgs, memo string, meta map[strin
 // retrySeq reports whether the failure is a sequence mismatch worth one
 // automatic rebuild — impossible when the caller pinned the seq explicitly,
 // and never retried more than once. On a healable mismatch it sets
-// opt.ForceSeq to the chain's expected value so a mempool-pending tx
+// a forced sequence (the chain's expected value) so a mempool-pending tx
 // doesn't leave the re-query returning the same stale seq.
 var expectedSeqRe = regexp.MustCompile(`expected (\d+)`)
 
@@ -211,8 +211,8 @@ func retrySeq(log string, attempt int, opt *tx.Options) bool {
 		return false
 	}
 	if m := expectedSeqRe.FindStringSubmatch(log); m != nil {
-		if n, err := strconv.ParseInt(m[1], 10, 64); err == nil {
-			opt.ForceSeq = n
+		if n, err := strconv.ParseUint(m[1], 10, 64); err == nil {
+			*opt = opt.ForceSequence(n)
 		}
 	}
 	return true
