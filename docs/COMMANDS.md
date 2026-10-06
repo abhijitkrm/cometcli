@@ -218,7 +218,7 @@ saved after each turn to `~/.cometcli/sessions/` (0600, already redacted).
 
 | Command | Effect |
 |---|---|
-| `/mode [ops\|readonly]` | show or set the approval posture; readonly hides mutating tools from the model |
+| `/mode [ops\|accept-edits\|readonly\|bypass]` | show or set the approval posture; readonly hides mutating tools from the model |
 | `/approve local-change on\|off` | autopilot local-change tools; on-chain can never be autopiloted |
 | `/model [name \| provider name]` | show or switch the LLM mid-conversation |
 | `/runbook [name]` | list runbooks, or have the agent run one through the normal approval gate |
@@ -228,6 +228,45 @@ saved after each turn to `~/.cometcli/sessions/` (0600, already redacted).
 | `/cost` | session token usage, cache hits, and current context size |
 | `/effort [level\|default]` | show or set reasoning depth for the rest of the session |
 | `/sessions`, `/resume <id>` | list saved sessions, or load one into the current session |
+| `/permissions`, `/allow\|/ask\|/deny <rule>` | show rules; add one for this session |
+
+### General tools and permissions
+
+Besides the node tools, the agent has general SRE tools that run on the profile's host
+(local, or over SSH — same tools either way):
+
+| Tool | What it does |
+|---|---|
+| `bash` | any shell command; the working directory persists, stdin is closed (prompts get EOF), default timeout 2 min (max 10) |
+| `read`, `write`, `edit` | files with line numbers; edits need a fresh read and show a diff for approval |
+| `glob`, `grep` | find files by pattern, search contents (ripgrep when installed) |
+| `web_fetch` | release notes, docs, a node's REST endpoint; each new domain is approved, localhost isn't |
+| `todo_write` | a visible checklist for multi-step work |
+
+Every shell command is classified before it runs: reads (`ls`, `journalctl`, `docker
+logs`, `systemctl status`, `evmd q …`, JSON-RPC queries via curl, …) run at once;
+anything that changes the host asks; a transaction — `evmd tx …` directly, inside
+`docker exec`/`docker run`, or inside a script the command runs — **always** asks, in
+every mode. Consensus keys, mnemonics, key ceremonies (`keys add/export`, scripts that
+run them) and state resets (`unsafe-reset-all`, deleting `priv_validator_state.json`)
+are refused outright: the agent hands those steps to you.
+
+Modes (`--permission-mode`, `/mode`): `ops` (default — changes ask), `accept-edits`
+(file edits inside the working directory don't ask), `readonly` (nothing that changes
+anything can run; the shell is limited to reads), `bypass` (local changes don't ask;
+transactions still do).
+
+Rules refine that per session (`/allow`, `/ask`, `/deny`, `--allowedTools`,
+`--disallowedTools`) or per profile (`agent.permissions`). Deny beats ask beats allow,
+and an allow must cover every part of a compound command:
+
+```yaml
+agent:
+  permissions:
+    allow: ["bash(docker logs:*)", "bash(./info.sh)", "web_fetch(domain:github.com)", "node.*"]
+    ask:   ["bash(docker compose:*)"]
+    deny:  ["bash(rm:*)", "edit(/etc/**)", "val.unjail"]
+```
 
 ### Agent config (per profile)
 

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/abhijitkrm/cometcli/internal/config"
+	"github.com/abhijitkrm/cometcli/internal/toolkit"
 )
 
 // SessionFile is a saved conversation, written after every turn to
@@ -33,6 +34,9 @@ type SessionFile struct {
 	ToolSig string `json:"tool_sig,omitempty"`
 	Carry   string `json:"carry,omitempty"`
 	History []Msg  `json:"history"`
+	// ShellCwd is the bash tool's working directory; Todos the checklist.
+	ShellCwd string `json:"shell_cwd,omitempty"`
+	Todos    []Todo `json:"todos,omitempty"`
 }
 
 const sessionVersion = 1
@@ -75,6 +79,7 @@ func (a *Agent) Save() error {
 		Title: a.title(), Cwd: cwd, Profile: a.profileName(),
 		Provider: a.Provider.Name(), Model: a.Model, Usage: a.total,
 		System: a.sys, ToolSig: a.toolSig, Carry: a.carry, History: a.history,
+		ShellCwd: a.Tools.Cwd(""), Todos: a.todos,
 	}
 	raw, err := json.Marshal(sf)
 	if err != nil {
@@ -118,6 +123,8 @@ func (a *Agent) Restore(sf *SessionFile) {
 	a.id, a.created = sf.ID, sf.Created
 	a.history, a.sys, a.toolSig, a.carry = sf.History, sf.System, sf.ToolSig, sf.Carry
 	a.total = sf.Usage
+	a.todos = sf.Todos
+	a.Tools = toolkit.NewSession(sf.ShellCwd)
 	// the frozen system prompt carries the old snapshot: force a refresh
 	// onto the next turn
 	a.snapAt = time.Time{}

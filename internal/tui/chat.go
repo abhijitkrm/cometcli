@@ -282,6 +282,8 @@ func (m *AppModel) onAgentEvent(e agent.Event) {
 		p.blocks[p.think] = dimSt.Render("∴ " + t)
 	case agent.EvNotice:
 		p.append("info", e.Text)
+	case agent.EvTodos:
+		p.append("info", agent.RenderTodos(e.Todos))
 	case agent.EvDelta:
 		p.liveText += e.Text
 		if p.live < 0 {

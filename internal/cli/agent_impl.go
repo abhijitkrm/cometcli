@@ -45,7 +45,11 @@ func runAgentImpl(cmd *cobra.Command, reg *toolkit.Registry, oneshot string) err
 // asked (--continue / --resume). Flags a command doesn't define read as
 // unset. The returned note describes a resumed session.
 func applyAgentFlags(cmd *cobra.Command, a *agent.Agent) (string, error) {
-	if m, _ := cmd.Flags().GetString("mode"); m != "" {
+	m, _ := cmd.Flags().GetString("mode")
+	if pm, _ := cmd.Flags().GetString("permission-mode"); pm != "" {
+		m = pm
+	}
+	if m != "" {
 		mode, err := agent.ParseMode(m)
 		if err != nil {
 			return "", err
@@ -77,6 +81,14 @@ func applyAgentFlags(cmd *cobra.Command, a *agent.Agent) (string, error) {
 	}
 	if m, _ := cmd.Flags().GetString("model"); m != "" {
 		a.Model = m
+	}
+	for list, flag := range map[string]string{"allow": "allowedTools", "deny": "disallowedTools"} {
+		rules, _ := cmd.Flags().GetStringSlice(flag)
+		for _, r := range rules {
+			if err := a.Rules.Add(list, r); err != nil {
+				return "", fmt.Errorf("--%s: %w", flag, err)
+			}
+		}
 	}
 	if e, _ := cmd.Flags().GetString("effort"); e != "" {
 		if err := agent.ValidEffort(e); err != nil {

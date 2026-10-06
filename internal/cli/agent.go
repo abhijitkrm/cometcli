@@ -25,6 +25,9 @@ func sessionFlags(cmd *cobra.Command) {
 	cmd.Flags().String("model", "", "model for this session (overrides the profile)")
 	cmd.Flags().String("effort", "", "reasoning depth: low | medium | high | xhigh | max")
 	cmd.Flags().Int("max-tokens", 0, "max output tokens per model round")
+	cmd.Flags().String("permission-mode", "", "approval posture: ops | accept-edits | readonly | bypass")
+	cmd.Flags().StringSlice("allowedTools", nil, `permission rules to allow, e.g. "bash(git status:*)","read"`)
+	cmd.Flags().StringSlice("disallowedTools", nil, `permission rules to deny, e.g. "bash(rm:*)","web_fetch"`)
 }
 
 // AgentCmd opens the agentic REPL. Implemented in internal/agent.

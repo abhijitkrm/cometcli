@@ -27,6 +27,8 @@ const (
 	// EvNotice is a status line from the loop itself: continuation after
 	// an output cutoff, compaction, a refusal, a failed session save.
 	EvNotice EventKind = "notice"
+	// EvTodos carries the agent's updated task checklist (Todos).
+	EvTodos EventKind = "todos"
 	// EvApproval asks the human to approve a gated action; answer it via
 	// Approval.Answer. Only emitted when the context uses EventApprover.
 	EvApproval EventKind = "approval"
@@ -42,6 +44,7 @@ type Event struct {
 	Args     map[string]any `json:"args,omitempty"`
 	Err      string         `json:"error,omitempty"`
 	Approval *Approval      `json:"approval,omitempty"`
+	Todos    []Todo         `json:"todos,omitempty"`
 }
 
 // Approval is a pending human decision. Answer it exactly once.

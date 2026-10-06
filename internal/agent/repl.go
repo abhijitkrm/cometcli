@@ -60,6 +60,12 @@ func (p *Printer) Handle(e Event) {
 			p.thinking = true
 		}
 		fmt.Fprint(p.Out, toolSt.Render(e.Text))
+	case EvTodos:
+		if p.streamed {
+			fmt.Fprintln(p.Out)
+			p.streamed = false
+		}
+		fmt.Fprintln(p.Out, toolSt.Render(RenderTodos(e.Todos)))
 	case EvNotice:
 		if p.streamed {
 			fmt.Fprintln(p.Out)

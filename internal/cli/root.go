@@ -77,8 +77,8 @@ func toolGroupCommands(reg *toolkit.Registry) []*cobra.Command {
 	groups := map[string]*cobra.Command{}
 	for _, t := range reg.All() {
 		domain, _, ok := strings.Cut(t.Name(), ".")
-		if !ok {
-			continue
+		if !ok || toolkit.IsAgentOnly(t) {
+			continue // general agent tools (bash, read, …) have no subcommand
 		}
 		parent, ok := groups[domain]
 		if !ok {
@@ -263,7 +263,11 @@ func StdinApprover(in io.Reader) toolkit.Approver {
 		}
 		fmt.Fprint(c.Out, "Proceed? [y/N] ")
 		line, err := reader.ReadString('\n')
-		if err != nil {
+		if err == io.EOF && strings.TrimSpace(line) == "" {
+			fmt.Fprintln(c.Out)
+			return false, fmt.Errorf("not approved: no terminal to answer on (stdin closed) — run interactively, or allow it with --allowedTools / agent.permissions")
+		}
+		if err != nil && err != io.EOF {
 			return false, err
 		}
 		return strings.EqualFold(strings.TrimSpace(line), "y"), nil

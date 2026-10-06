@@ -28,6 +28,16 @@ type Context struct {
 	Approver Approver
 	// AutoApprove tiers below this run without prompting (agent/CI use).
 	AutoApproveBelow Tier
+	// Session is agent-session state for general tools (cwd, reads).
+	Session *Session
+	// Rules are the session's allow/ask/deny permission patterns.
+	Rules *Rules
+	// ReadOnly refuses any action whose effective tier mutates.
+	ReadOnly bool
+	// AcceptEdits auto-approves file writes inside WorkRoot.
+	AcceptEdits bool
+	// WorkRoot anchors relative rule patterns and accept-edits scope.
+	WorkRoot string
 
 	mu      sync.Mutex
 	comet   *comet.Client
@@ -101,11 +111,13 @@ func (c *Context) EVM() (*evmclient.Client, error) {
 func (c *Context) Host() (host.Host, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.Profile == nil {
-		return nil, errNoProfile
-	}
 	if c.host == nil && c.hostErr == nil {
-		c.host, c.hostErr = host.Connect(c.Context, c.Profile)
+		if c.Profile == nil {
+			// no node profile (general mode): the operator's own machine
+			c.host = &host.Local{}
+		} else {
+			c.host, c.hostErr = host.Connect(c.Context, c.Profile)
+		}
 	}
 	return c.host, c.hostErr
 }
@@ -151,6 +163,8 @@ func WithDeadline(c *Context, timeout time.Duration) (*Context, context.CancelFu
 	return &Context{
 		Context: ctx, Profile: c.Profile, Cfg: c.Cfg, Out: c.Out,
 		Audit: c.Audit, Approver: c.Approver, AutoApproveBelow: c.AutoApproveBelow,
+		Session: c.Session, Rules: c.Rules, ReadOnly: c.ReadOnly,
+		AcceptEdits: c.AcceptEdits, WorkRoot: c.WorkRoot,
 	}, cancel
 }
 
@@ -161,6 +175,8 @@ func WithCancel(c *Context) (*Context, context.CancelFunc) {
 	return &Context{
 		Context: ctx, Profile: c.Profile, Cfg: c.Cfg, Out: c.Out,
 		Audit: c.Audit, Approver: c.Approver, AutoApproveBelow: c.AutoApproveBelow,
+		Session: c.Session, Rules: c.Rules, ReadOnly: c.ReadOnly,
+		AcceptEdits: c.AcceptEdits, WorkRoot: c.WorkRoot,
 	}, cancel
 }
 
@@ -181,6 +197,53 @@ func (c *Context) Approve(prompt string, tier Tier, detail map[string]any) error
 		return nil
 	}
 	return RequireApproval(c, prompt, tier, detail)
+}
+
+// Gate describes an action whose risk is decided per call (a shell
+// command, a file path) rather than by the tool's static tier.
+type Gate struct {
+	Request
+	Tier   Tier
+	Prompt string
+	Detail map[string]any
+	// Forbidden, when set, refuses the action in every mode and despite
+	// any rule (consensus keys, state resets): the reason is shown.
+	Forbidden string
+	// InRoot marks a file edit inside WorkRoot (auto under accept-edits).
+	InRoot bool
+	// AskByDefault prompts when no rule matches even though the tier is
+	// read-only (web fetches: the URL itself can carry data out). Bypass
+	// mode still auto-approves.
+	AskByDefault bool
+}
+
+// Check runs the permission pipeline for a dynamic action: forbidden →
+// read-only mode → deny/ask/allow rules → accept-edits → tier policy.
+// On-chain actions always reach the human, whatever the rules say.
+func (c *Context) Check(g Gate) error {
+	if g.Forbidden != "" {
+		return fmt.Errorf("refused: %s", g.Forbidden)
+	}
+	if c.ReadOnly && g.Tier >= TierLocalChange {
+		return fmt.Errorf("blocked: this is a %s action and the session is read-only — recommend it to the operator instead", g.Tier)
+	}
+	if g.Root == "" {
+		g.Root = c.WorkRoot
+	}
+	d, rule := c.Rules.Decide(g.Request)
+	switch {
+	case d == DecideDeny:
+		return fmt.Errorf("denied by permission rule %s", rule)
+	case d == DecideAsk || g.Tier == TierOnChain:
+		return RequireApproval(c, g.Prompt, g.Tier, g.Detail)
+	case d == DecideAllow:
+		return nil
+	case c.AcceptEdits && g.InRoot && g.Tier == TierLocalChange:
+		return nil
+	case g.AskByDefault && c.AutoApproveBelow <= TierLocalChange:
+		return RequireApproval(c, g.Prompt, g.Tier, g.Detail)
+	}
+	return c.Approve(g.Prompt, g.Tier, g.Detail)
 }
 
 // Close releases lazy clients. Audit is deliberately not closed here:

@@ -5,16 +5,19 @@ import (
 	"github.com/abhijitkrm/cometcli/internal/tools/chain"
 	"github.com/abhijitkrm/cometcli/internal/tools/evmtool"
 	"github.com/abhijitkrm/cometcli/internal/tools/fleet"
+	"github.com/abhijitkrm/cometcli/internal/tools/fs"
 	"github.com/abhijitkrm/cometcli/internal/tools/keystool"
 	"github.com/abhijitkrm/cometcli/internal/tools/montool"
 	"github.com/abhijitkrm/cometcli/internal/tools/nettool"
 	"github.com/abhijitkrm/cometcli/internal/tools/node"
 	"github.com/abhijitkrm/cometcli/internal/tools/runbooktool"
 	"github.com/abhijitkrm/cometcli/internal/tools/sectool"
+	"github.com/abhijitkrm/cometcli/internal/tools/shell"
 	"github.com/abhijitkrm/cometcli/internal/tools/snaptool"
 	"github.com/abhijitkrm/cometcli/internal/tools/txtool"
 	"github.com/abhijitkrm/cometcli/internal/tools/upgradetool"
 	"github.com/abhijitkrm/cometcli/internal/tools/val"
+	"github.com/abhijitkrm/cometcli/internal/tools/web"
 )
 
 // RegisterAll registers every tool in the catalog.
@@ -32,4 +35,8 @@ func RegisterAll(r *toolkit.Registry) {
 	fleet.Register(r)
 	nettool.Register(r)
 	txtool.Register(r)
+	// general-purpose agent tools
+	shell.Register(r)
+	fs.Register(r)
+	web.Register(r)
 }

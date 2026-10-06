@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -53,6 +54,13 @@ type Agent struct {
 	CompactAt int
 	// Persist saves the session after every turn so it can be resumed.
 	Persist bool
+	// Rules are the session's permission rules (allow/ask/deny).
+	Rules *toolkit.Rules
+	// Tools is shell/file state shared by general tools (working
+	// directory, files read).
+	Tools *toolkit.Session
+	// WorkRoot anchors relative permission patterns and accept-edits.
+	WorkRoot string
 
 	conf      config.AgentConf
 	id        string
@@ -68,6 +76,7 @@ type Agent struct {
 	toolTrunc int
 	lastIn    int   // prompt tokens of the latest round (0 = unknown)
 	total     Usage // session token totals
+	todos     []Todo
 }
 
 // New builds an agent for a context from the profile's agent config.
@@ -98,6 +107,11 @@ func New(c *toolkit.Context, reg *toolkit.Registry) (*Agent, error) {
 	if err := ValidEffort(a.Effort); err != nil {
 		return nil, err
 	}
+	if a.Rules, err = toolkit.NewRules(ac.Permissions.Allow, ac.Permissions.Ask, ac.Permissions.Deny); err != nil {
+		return nil, err
+	}
+	a.WorkRoot, _ = os.Getwd()
+	a.Tools = toolkit.NewSession("")
 	if a.Model == "" {
 		a.Model = modelOf(prov)
 	}
@@ -173,6 +187,8 @@ func (a *Agent) Reset() {
 	a.snap, a.sys, a.toolSig, a.carry = "", "", "", ""
 	a.lastIn, a.total = 0, Usage{}
 	a.created = time.Time{}
+	a.todos = nil
+	a.Tools = toolkit.NewSession("")
 }
 
 // Usage returns the session's accumulated token usage and the size of
@@ -200,7 +216,7 @@ func (a *Agent) toolDefs() []ToolDef {
 		if toolkit.IsLongRunning(t) {
 			continue // watchers never return inside a turn
 		}
-		if !a.Policy.Allows(t.Tier()) {
+		if !a.Policy.Allows(t.Tier()) && !toolkit.IsDynamic(t) {
 			continue
 		}
 		out = append(out, ToolDef{
@@ -209,7 +225,7 @@ func (a *Agent) toolDefs() []ToolDef {
 			Schema: t.Schema(),
 		})
 	}
-	return out
+	return append(out, todoToolDef)
 }
 
 func toolFnName(n string) string { return strings.ReplaceAll(n, ".", "__") }
@@ -410,6 +426,9 @@ func (a *Agent) execCall(ctx context.Context, call Call) Msg {
 	if err := json.Unmarshal(call.Args, &args); err != nil {
 		return a.toolErr(call, name, "bad args: "+err.Error())
 	}
+	if name == todoToolName {
+		return a.todoWrite(call, args)
+	}
 	t, ok := a.Reg.Get(name)
 	if !ok {
 		return a.toolErr(call, name, "no such tool: "+name)
@@ -419,7 +438,7 @@ func (a *Agent) execCall(ctx context.Context, call Call) Msg {
 	if toolkit.IsLongRunning(t) {
 		return a.toolErr(call, name, "refused: "+name+" is a long-running watcher and cannot finish inside an agent turn — suggest `cometcli "+strings.ReplaceAll(name, ".", " ")+"` to the operator")
 	}
-	if !a.Policy.Allows(t.Tier()) {
+	if !a.Policy.Allows(t.Tier()) && !toolkit.IsDynamic(t) {
 		msg := fmt.Sprintf("blocked: %s is a %s tool and the session is in readonly mode — recommend it to the operator instead", name, t.Tier())
 		a.Audit().ToolSeen(a.profileName(), name, t.Tier().String(), shownArgs, nil, fmt.Errorf("%s", msg), "")
 		return a.toolErr(call, name, msg)
@@ -429,8 +448,12 @@ func (a *Agent) execCall(ctx context.Context, call Call) Msg {
 		return a.toolErr(call, name, fmt.Sprintf("tool-call budget exhausted (%d) — stop calling tools and summarize findings so far", a.MaxCalls))
 	}
 
-	runCtx, cancel := a.toolCtx(ctx, t)
-	res, err := t.Run(runCtx, args)
+	runCtx, cancel := a.toolCtx(ctx, t, args)
+	var res *toolkit.Result
+	err := a.ruleGate(runCtx, t, shownArgs)
+	if err == nil {
+		res, err = t.Run(runCtx, args)
+	}
 	runCtx.Close()
 	cancel()
 
@@ -441,8 +464,11 @@ func (a *Agent) execCall(ctx context.Context, call Call) Msg {
 			text = res.JSON()
 		}
 		limit := a.toolTrunc
+		if ol, ok := t.(toolkit.OutputLimiter); ok && limit == 0 {
+			limit = ol.OutputLimit()
+		}
 		if limit == 0 {
-			limit = 8192
+			limit = 16_000
 		}
 		text = ansiRe.ReplaceAllString(text, "") // colored logs waste tokens and confuse models
 		text = clip(text, limit)                 // bound context growth
@@ -466,23 +492,50 @@ func (a *Agent) execCall(ctx context.Context, call Call) Msg {
 // 90s deadline for short tools, the session audit logger, and the policy's
 // approval threshold. Read-only sessions hard-deny any approval request
 // that slips past filtering.
-func (a *Agent) toolCtx(ctx context.Context, t toolkit.Tool) (*toolkit.Context, context.CancelFunc) {
+func (a *Agent) toolCtx(ctx context.Context, t toolkit.Tool, args toolkit.Args) (*toolkit.Context, context.CancelFunc) {
 	parent := &toolkit.Context{
 		Context: ctx, Profile: a.Ctx.Profile, Cfg: a.Ctx.Cfg, Out: a.Ctx.Out,
 		Audit: a.Audit(), Approver: a.Ctx.Approver,
+		Session: a.Tools, Rules: a.Rules, WorkRoot: a.WorkRoot,
+		ReadOnly: a.Policy.ReadOnly(), AcceptEdits: a.Policy.AcceptEdits(),
 	}
 	var sub *toolkit.Context
 	var cancel context.CancelFunc
-	if toolkit.IsLongRunning(t) {
+	switch {
+	case toolkit.IsLongRunning(t):
 		sub, cancel = toolkit.WithCancel(parent)
-	} else {
-		sub, cancel = toolkit.WithDeadline(parent, 90*time.Second)
+	default:
+		d := 90 * time.Second
+		if to, ok := t.(toolkit.Timeouter); ok {
+			d = to.Timeout(args)
+		}
+		sub, cancel = toolkit.WithDeadline(parent, d)
 	}
 	sub.AutoApproveBelow = a.Policy.AutoApproveBelow()
 	if a.Policy.ReadOnly() {
 		sub.Approver = toolkit.DenyApprover
 	}
 	return sub, cancel
+}
+
+// ruleGate applies name-level permission rules to registry tools that
+// don't gate themselves (general tools match rules on their own specs):
+// deny refuses, ask confirms first, allow skips the tool's local-change
+// prompt. Transactions keep their own approval regardless.
+func (a *Agent) ruleGate(c *toolkit.Context, t toolkit.Tool, shownArgs map[string]any) error {
+	if toolkit.IsAgentOnly(t) {
+		return nil
+	}
+	d, rule := a.Rules.Decide(toolkit.Request{Tool: t.Name()})
+	switch d {
+	case toolkit.DecideDeny:
+		return fmt.Errorf("denied by permission rule %s", rule)
+	case toolkit.DecideAsk:
+		return toolkit.RequireApproval(c, fmt.Sprintf("run %s %s", t.Name(), CompactArgs(shownArgs)), t.Tier(), map[string]any{"rule": rule})
+	case toolkit.DecideAllow:
+		c.AutoApproveBelow = toolkit.TierOnChain
+	}
+	return nil
 }
 
 // system returns the session's system prompt: instructions plus the live

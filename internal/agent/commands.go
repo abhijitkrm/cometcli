@@ -28,7 +28,7 @@ type CmdResult struct {
 }
 
 // CommandHelp lists the shared slash commands; front-ends append their own.
-const CommandHelp = `  /mode [ops|readonly]          show or set the approval posture
+const CommandHelp = `  /mode [ops|accept-edits|readonly|bypass]  show or set the approval posture
   /approve [local-change on|off] show or toggle autopilot (on-chain can never be autopiloted)
   /model [name | provider name] show or switch the LLM
   /runbook [name]               list runbooks, or have the agent run one
@@ -39,6 +39,8 @@ const CommandHelp = `  /mode [ops|readonly]          show or set the approval po
   /compact [focus]              summarize the conversation to free context
   /cost                         token usage for this session
   /effort [low|medium|high|xhigh|max|default]  show or set reasoning depth
+  /permissions                  show permission rules
+  /allow|/ask|/deny <rule>      add a rule for this session, e.g. /allow bash(docker logs:*)
   /sessions                     list saved sessions
   /resume <id>                  load a saved session into this one`
 
@@ -214,6 +216,37 @@ func RunCommand(a *Agent, c *toolkit.Context, reg *toolkit.Registry, line string
 			return CmdResult{Text: "effort: model default"}, nil
 		}
 		return CmdResult{Text: "effort: " + a.Effort}, nil
+
+	case "/permissions", "/rules":
+		if err := needAgent(); err != nil {
+			return CmdResult{}, err
+		}
+		allow, ask, deny := a.Rules.Lists()
+		var b strings.Builder
+		fmt.Fprintf(&b, "%s\n", a.Policy)
+		for _, l := range []struct {
+			name  string
+			rules []string
+		}{{"deny", deny}, {"ask", ask}, {"allow", allow}} {
+			if len(l.rules) > 0 {
+				fmt.Fprintf(&b, "%-5s %s\n", l.name, strings.Join(l.rules, ", "))
+			}
+		}
+		b.WriteString("always: transactions ask; key material and state resets are refused")
+		return CmdResult{Text: b.String()}, nil
+
+	case "/allow", "/ask", "/deny":
+		if err := needAgent(); err != nil {
+			return CmdResult{}, err
+		}
+		rule := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), f[0]))
+		if rule == "" {
+			return CmdResult{}, fmt.Errorf("usage: %s <rule> — e.g. bash(systemctl status:*), edit(./config/**), val.unjail", f[0])
+		}
+		if err := a.Rules.Add(f[0][1:], rule); err != nil {
+			return CmdResult{}, err
+		}
+		return CmdResult{Text: fmt.Sprintf("%s %s (this session; add it to agent.permissions in the profile to keep it)", f[0][1:], rule)}, nil
 
 	case "/sessions":
 		all, err := ListSessions()

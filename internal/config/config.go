@@ -126,6 +126,16 @@ type AgentConf struct {
 	// CompactAt is the prompt size in tokens that triggers summarizing
 	// the conversation (0 = 80% of the window, at most 200k).
 	CompactAt int `yaml:"compact_at,omitempty"`
+	// Permissions are allow/ask/deny rules, e.g. "bash(systemctl status:*)",
+	// "edit(./config/**)", "web_fetch(domain:github.com)", "val.unjail".
+	Permissions Permissions `yaml:"permissions,omitempty"`
+}
+
+// Permissions holds permission rule lists. Deny beats ask beats allow.
+type Permissions struct {
+	Allow []string `yaml:"allow,omitempty"`
+	Ask   []string `yaml:"ask,omitempty"`
+	Deny  []string `yaml:"deny,omitempty"`
 }
 
 // Alerts configures notification sinks for the monitor.

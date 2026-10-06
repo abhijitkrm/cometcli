@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Tier is the safety classification of a tool. It drives the approval
@@ -235,4 +236,40 @@ func RequireApproval(c *Context, prompt string, tier Tier, detail map[string]any
 		return fmt.Errorf("denied: %s", prompt)
 	}
 	return nil
+}
+
+// Dynamic is implemented by tools whose risk depends on their arguments
+// (a shell command, a file path). They gate themselves via Context.Check,
+// so the agent advertises them even in read-only mode.
+type Dynamic interface {
+	DynamicTier() bool
+}
+
+// IsDynamic reports whether t decides its tier per call.
+func IsDynamic(t Tool) bool {
+	d, ok := t.(Dynamic)
+	return ok && d.DynamicTier()
+}
+
+// AgentOnly is implemented by general-purpose tools (bash, read, edit…)
+// that exist for the agent loop only: they get no CLI subcommand and are
+// not exported over MCP, where the client has its own equivalents.
+type AgentOnly interface {
+	AgentOnly() bool
+}
+
+// IsAgentOnly reports whether t is agent-only.
+func IsAgentOnly(t Tool) bool {
+	a, ok := t.(AgentOnly)
+	return ok && a.AgentOnly()
+}
+
+// Timeouter lets a tool set its own deadline per call (the default is 90s).
+type Timeouter interface {
+	Timeout(args Args) time.Duration
+}
+
+// OutputLimiter lets a tool raise how much of its output reaches the model.
+type OutputLimiter interface {
+	OutputLimit() int
 }
