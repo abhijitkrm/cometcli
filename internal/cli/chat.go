@@ -15,7 +15,7 @@ import (
 	"github.com/abhijitkrm/cometcli/internal/audit"
 	"github.com/abhijitkrm/cometcli/internal/config"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
-	"github.com/abhijitkrm/cometcli/internal/tui"
+	"github.com/abhijitkrm/cometcli/internal/tui/chatui"
 )
 
 // maxStdin bounds piped input; larger input keeps its head and tail.
@@ -129,9 +129,20 @@ func runChat(cmd *cobra.Command, reg *toolkit.Registry, p *config.Profile, args 
 		}
 		return runPrint(cmd, c, reg, prompt)
 	}
-	return tui.RunAppWith(c, reg, 5*time.Second, prompt, func(a *agent.Agent) (string, error) {
-		return configureChatAgent(cmd, a)
-	})
+	a, err := agent.New(c, reg)
+	if err != nil {
+		return err
+	}
+	defer a.Close()
+	note, err := configureChatAgent(cmd, a)
+	if err != nil {
+		return err
+	}
+	var notes []string
+	if note != "" {
+		notes = append(notes, note)
+	}
+	return chatui.Run(chatui.Options{Agent: a, Prompt: prompt, Notes: notes})
 }
 
 // chatCtx builds the tool context for a chat session. Headless sessions

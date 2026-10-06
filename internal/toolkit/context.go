@@ -38,6 +38,8 @@ type Context struct {
 	AcceptEdits bool
 	// WorkRoot anchors relative rule patterns and accept-edits scope.
 	WorkRoot string
+	// ToolName is the tool being run (for approval rule suggestions).
+	ToolName string
 	// HookDecision is a PreToolUse hook's verdict for this call:
 	// "allow" skips the prompt, "ask" forces one ("" = no opinion).
 	HookDecision string
@@ -167,7 +169,7 @@ func WithDeadline(c *Context, timeout time.Duration) (*Context, context.CancelFu
 		Context: ctx, Profile: c.Profile, Cfg: c.Cfg, Out: c.Out,
 		Audit: c.Audit, Approver: c.Approver, AutoApproveBelow: c.AutoApproveBelow,
 		Session: c.Session, Rules: c.Rules, ReadOnly: c.ReadOnly,
-		AcceptEdits: c.AcceptEdits, WorkRoot: c.WorkRoot, HookDecision: c.HookDecision,
+		AcceptEdits: c.AcceptEdits, WorkRoot: c.WorkRoot, HookDecision: c.HookDecision, ToolName: c.ToolName,
 	}, cancel
 }
 
@@ -179,7 +181,7 @@ func WithCancel(c *Context) (*Context, context.CancelFunc) {
 		Context: ctx, Profile: c.Profile, Cfg: c.Cfg, Out: c.Out,
 		Audit: c.Audit, Approver: c.Approver, AutoApproveBelow: c.AutoApproveBelow,
 		Session: c.Session, Rules: c.Rules, ReadOnly: c.ReadOnly,
-		AcceptEdits: c.AcceptEdits, WorkRoot: c.WorkRoot, HookDecision: c.HookDecision,
+		AcceptEdits: c.AcceptEdits, WorkRoot: c.WorkRoot, HookDecision: c.HookDecision, ToolName: c.ToolName,
 	}, cancel
 }
 
@@ -232,6 +234,14 @@ func (c *Context) Check(g Gate) error {
 	}
 	if g.Root == "" {
 		g.Root = c.WorkRoot
+	}
+	if g.Tier < TierOnChain {
+		if g.Detail == nil {
+			g.Detail = map[string]any{}
+		}
+		if r := SuggestRule(g.Request); r != "" {
+			g.Detail[RuleHint] = r
+		}
 	}
 	d, rule := c.Rules.Decide(g.Request)
 	switch {

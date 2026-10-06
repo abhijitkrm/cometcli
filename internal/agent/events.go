@@ -45,6 +45,8 @@ type Event struct {
 	Err      string         `json:"error,omitempty"`
 	Approval *Approval      `json:"approval,omitempty"`
 	Todos    []Todo         `json:"todos,omitempty"`
+	// Output is a multi-line preview of a tool's result (EvToolResult).
+	Output string `json:"output,omitempty"`
 }
 
 // Approval is a pending human decision. Answer it exactly once.

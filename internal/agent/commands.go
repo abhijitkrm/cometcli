@@ -40,7 +40,8 @@ const CommandHelp = `  /mode [ops|accept-edits|readonly|bypass]  show or set the
   /one [profile|off]            switch to node mode for a profile, or back to general
   /profile                      active profile
   /audit                        audit log path + session id
-  /reset                        clear conversation, start a new audit session
+  /reset, /clear                clear conversation, start a new audit session
+  /status                       live node snapshot (node mode)
   /compact [focus]              summarize the conversation to free context
   /cost                         token usage for this session
   /effort [low|medium|high|xhigh|max|default]  show or set reasoning depth
@@ -68,6 +69,17 @@ func RunCommand(a *Agent, c *toolkit.Context, reg *toolkit.Registry, line string
 	switch f[0] {
 	case "/help":
 		return CmdResult{Text: HelpText(a)}, nil
+
+	case "/clear":
+		return RunCommand(a, c, reg, "/reset")
+
+	case "/status":
+		if a == nil || !a.Node() {
+			return CmdResult{Text: "general mode — /one <profile> for a node status"}, nil
+		}
+		return CmdResult{Text: "probing " + a.Ctx.Profile.Name + "…", Job: func(ctx context.Context) (string, error) {
+			return strings.TrimSpace(a.Redact.Text(SnapshotText(a.Ctx))), nil
+		}}, nil
 
 	case "/profile":
 		if c == nil || c.Profile == nil {

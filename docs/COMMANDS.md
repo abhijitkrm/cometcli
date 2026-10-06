@@ -36,6 +36,33 @@ node mode.
 `stream-json` prints a `system/init` line, then `assistant`, `tool_use`, `tool_result`,
 `notice` and `todos` events, then the same `result` object.
 
+### The interactive terminal
+
+`cometcli` and `cometcli one` open an inline chat: answers land in your normal
+scrollback (scroll, copy, search as usual); only the bottom area — streaming text,
+input, approval dialog, status line — redraws.
+
+| Key / prefix | Does |
+|---|---|
+| `enter` · `\`+`enter` / `ctrl+j` | send · new line |
+| `↑` `↓` | prompt history (or move in a menu) |
+| `/` | command menu as you type; `tab` completes, `enter` runs |
+| `@path` | file completion; the file's content is attached to your message |
+| `!cmd` | run `cmd` **in your terminal** — the UI steps aside, so prompts and passwords work (e.g. `!./upgrade/vote-upgrade.sh`). Output is never sent to the model; it's told the command and exit code. In node mode over SSH it runs on the node (`ssh -t`) |
+| `#text` | add a line to memory (`/remember`) |
+| `shift+tab` | cycle mode: ops → accept-edits → read-only (→ bypass, if started with it) |
+| `esc` | interrupt the running turn (or close a menu) |
+| `ctrl+c` | interrupt · clear input · twice to exit |
+| `ctrl+d` | exit (empty input) |
+| `?` | shortcut help |
+
+Messages typed while a turn runs are queued and sent when it ends. Approvals offer
+**Yes**, **Yes, and don't ask again for `<rule>`** (saved to the project's
+`.cometcli/settings.local.json`, or your user settings outside a project), and **No**
+(declines and interrupts so you can redirect). Transactions offer only Yes/No.
+
+`cometcli ui` still opens the full-screen dashboard (overview, fleet, logs, send).
+
 ## Setup
 
 ```bash

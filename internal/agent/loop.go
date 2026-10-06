@@ -609,7 +609,7 @@ func (a *Agent) execCall(ctx context.Context, call Call) Msg {
 		return a.toolErr(call, name, "error: "+err.Error()+postNote)
 	}
 	text += postNote
-	a.emit(Event{Kind: EvToolResult, Tool: name, Tier: t.Tier().String(), Text: firstLine(text)})
+	a.emit(Event{Kind: EvToolResult, Tool: name, Tier: t.Tier().String(), Text: firstLine(text), Output: preview(text)})
 	return Msg{Role: "tool", CallID: call.ID, ToolName: name, Text: text}
 }
 
@@ -637,6 +637,7 @@ func (a *Agent) toolCtx(ctx context.Context, t toolkit.Tool, args toolkit.Args) 
 		sub, cancel = toolkit.WithDeadline(parent, d)
 	}
 	sub.AutoApproveBelow = a.Policy.AutoApproveBelow()
+	sub.ToolName = t.Name()
 	if a.Policy.ReadOnly() {
 		sub.Approver = toolkit.DenyApprover
 	}
@@ -741,6 +742,20 @@ func (a *Agent) History() []Msg { return append([]Msg(nil), a.history...) }
 
 // ansiRe matches terminal escape sequences (colors, cursor moves).
 var ansiRe = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
+
+// preview is the first lines of tool output, for front-ends.
+func preview(s string) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	more := 0
+	if len(lines) > 8 {
+		more, lines = len(lines)-8, lines[:8]
+	}
+	out := safeCut(strings.Join(lines, "\n"), 1500)
+	if more > 0 {
+		out += fmt.Sprintf("\n… +%d lines", more)
+	}
+	return out
+}
 
 // clip bounds s to about limit bytes, keeping the head and the tail (log
 // tails usually hold the error) and cutting only at UTF-8 boundaries.

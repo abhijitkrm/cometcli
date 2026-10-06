@@ -226,6 +226,11 @@ func ResolveName(fnName string) string {
 	return strings.ReplaceAll(fnName, "__", ".")
 }
 
+// RuleHint is the approval-detail key carrying a suggested allow rule
+// for this kind of action. Keys starting with "_" are for front-ends, not
+// for display.
+const RuleHint = "_rule"
+
 // Approver asks the human for confirmation. It must return true to proceed.
 type Approver func(c *Context, prompt string, tier Tier, detail map[string]any) (bool, error)
 
@@ -239,6 +244,15 @@ func DenyApprover(_ *Context, _ string, tier Tier, _ map[string]any) (bool, erro
 func RequireApproval(c *Context, prompt string, tier Tier, detail map[string]any) error {
 	if c.Approver == nil {
 		return fmt.Errorf("approval required but no approver configured: %s", prompt)
+	}
+	// suggest an allow rule for "don't ask again" — never for transactions
+	if tier < TierOnChain && c.ToolName != "" {
+		if detail == nil {
+			detail = map[string]any{}
+		}
+		if _, ok := detail[RuleHint]; !ok {
+			detail[RuleHint] = c.ToolName
+		}
 	}
 	ok, err := c.Approver(c, prompt, tier, detail)
 	if err != nil {

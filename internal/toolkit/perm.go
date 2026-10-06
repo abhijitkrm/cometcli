@@ -291,6 +291,51 @@ func (r *Rules) Decide(req Request) (Decision, string) {
 	return DecideDefault, ""
 }
 
+// SuggestRule proposes an allow rule covering this kind of request, for a
+// "don't ask again" answer: the first two words of a shell command as a
+// prefix (docker compose:*), a file's directory, a URL's domain, or the
+// tool itself.
+func SuggestRule(req Request) string {
+	switch req.Kind {
+	case "command":
+		if len(req.Specs) == 0 {
+			return ""
+		}
+		w := strings.Fields(req.Specs[0])
+		for len(w) > 0 && strings.Contains(w[0], "=") {
+			w = w[1:] // VAR=value prefixes
+		}
+		if len(w) == 0 {
+			return ""
+		}
+		n := 1
+		if len(w) > 1 && !strings.HasPrefix(w[1], "-") && !strings.ContainsAny(w[1], "/.=") && (len(w) > 2 || !strings.HasPrefix(w[0], "./")) {
+			n = 2
+		}
+		return req.Tool + "(" + strings.Join(w[:n], " ") + ":*)"
+	case "path":
+		if len(req.Specs) == 0 {
+			return ""
+		}
+		dir := filepath.Dir(req.Specs[0])
+		if req.Root != "" {
+			if rel, err := filepath.Rel(req.Root, dir); err == nil && !strings.HasPrefix(rel, "..") {
+				if rel == "." {
+					return req.Tool + "(./**)"
+				}
+				return req.Tool + "(./" + rel + "/**)"
+			}
+		}
+		return req.Tool + "(" + dir + "/**)"
+	case "url":
+		if len(req.Specs) == 0 {
+			return ""
+		}
+		return req.Tool + "(domain:" + urlHost(req.Specs[0]) + ")"
+	}
+	return req.Tool
+}
+
 // MatchPathGlob matches a cleaned absolute path against a glob where *
 // and ? stay within one path segment and ** spans any number of them.
 func MatchPathGlob(pattern, path string) bool {

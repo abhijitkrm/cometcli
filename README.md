@@ -165,6 +165,11 @@ cometcli -c                                                # continue the last s
 cometcli -r <id>                                           # resume one (cometcli sessions)
 ```
 
+The terminal is an inline chat like Claude Code's — scrollback-friendly, `/` command
+menu, `@file` mentions, `!cmd` to run something interactive in your own terminal,
+`shift+tab` to change permission mode, approvals with "don't ask again".
+[Keys and prefixes](docs/COMMANDS.md#the-interactive-terminal).
+
 **General mode** is an SRE agent on your machine: `bash`, `read`/`write`/`edit`,
 `glob`/`grep`, `web_fetch`. **Node mode** (`cometcli one <profile>`, or `/one
 <profile>` mid-conversation) adds the node tools, runs the shell on the node's host

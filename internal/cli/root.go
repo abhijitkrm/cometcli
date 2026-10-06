@@ -245,7 +245,9 @@ func StdinApprover(in io.Reader) toolkit.Approver {
 		fmt.Fprintf(c.Out, "\n⚠  [%s] %s\n", tier, prompt)
 		keys := make([]string, 0, len(detail))
 		for k := range detail {
-			keys = append(keys, k)
+			if !strings.HasPrefix(k, "_") { // front-end hints, not for display
+				keys = append(keys, k)
+			}
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
