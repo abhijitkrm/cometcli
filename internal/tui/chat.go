@@ -160,7 +160,7 @@ func (m *AppModel) chatSubmit(s string) tea.Cmd {
 func (m *AppModel) startTurn(s string) tea.Cmd {
 	p := m.chat
 	if p.agent == nil {
-		p.append("info", "no agent provider — /run <tool> {json} works, or set agent.provider in the profile")
+		p.append("info", "no agent provider — /run <tool> {json} works; set one with: cometcli config set agent.provider groq")
 		m.syncChatView()
 		return nil
 	}

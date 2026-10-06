@@ -61,6 +61,9 @@ type Agent struct {
 	Tools *toolkit.Session
 	// WorkRoot anchors relative permission patterns and accept-edits.
 	WorkRoot string
+	// AppendSystem is operator text added to the system prompt
+	// (--append-system-prompt).
+	AppendSystem string
 
 	conf      config.AgentConf
 	id        string
@@ -78,11 +81,22 @@ type Agent struct {
 	total     Usage // session token totals
 	todos     []Todo
 	loaded    map[string]bool // tools loaded with tool_search
+	rounds    int             // model rounds in the latest Run
+	ownCtx    bool            // a.Ctx was built by SwitchScope
 }
 
-// New builds an agent for a context from the profile's agent config.
+// New builds an agent for a context. With a profile it runs in node mode
+// (node tools, validator rules, live snapshot); without one, in general
+// mode on the operator's machine. Agent settings come from the global
+// agent section overridden by the profile's.
 func New(c *toolkit.Context, reg *toolkit.Registry) (*Agent, error) {
-	ac := c.Profile.Agent
+	var ac config.AgentConf
+	switch {
+	case c.Cfg != nil:
+		ac = c.Cfg.AgentFor(c.Profile)
+	case c.Profile != nil:
+		ac = c.Profile.Agent
+	}
 	prov, err := NewProvider(ac)
 	if err != nil {
 		return nil, err
@@ -203,7 +217,7 @@ func (a *Agent) emit(e Event) {
 }
 
 func (a *Agent) profileName() string {
-	if a.Ctx != nil && a.Ctx.Profile != nil {
+	if a.Node() {
 		return a.Ctx.Profile.Name
 	}
 	return ""
@@ -272,7 +286,9 @@ func (a *Agent) run(ctx context.Context, input string) (string, error) {
 
 	var texts []string
 	conts, compacted := 0, false
+	a.rounds = 0
 	for i := 0; i < a.MaxIter; i++ {
+		a.rounds++
 		req := a.request()
 		resp, err := a.chat(ctx, req)
 		if err != nil && !compacted && isContextOverflow(err) {
@@ -398,7 +414,7 @@ func (a *Agent) chat(ctx context.Context, req *Request) (*Response, error) {
 	ctx = WithRetryNotice(ctx, func(attempt int, wait time.Duration, reason string) {
 		a.emit(Event{Kind: EvNotice, Text: fmt.Sprintf("%s: %s — retrying in %s (attempt %d)", a.Provider.Name(), reason, wait.Round(100*time.Millisecond), attempt+1)})
 	})
-	if s, ok := a.Provider.(Streamer); ok && a.Stream && a.OnEvent != nil {
+	if s, ok := a.Provider.(Streamer); ok && a.Stream {
 		return s.Stream(ctx, req, func(chunk string) {
 			a.emit(Event{Kind: EvDelta, Text: chunk})
 		})
@@ -555,10 +571,23 @@ func (a *Agent) ruleGate(c *toolkit.Context, t toolkit.Tool, shownArgs map[strin
 // invalidate replayed thinking. Later snapshots ride on user turns.
 func (a *Agent) system() string {
 	if a.sys == "" {
-		a.sys = a.Redact.Text(SystemPrompt(a.Ctx)) + a.toolCatalog() + a.snapshot()
+		if a.Node() {
+			a.sys = a.Redact.Text(SystemPrompt(a.Ctx)) + a.toolCatalog() + a.snapshot()
+		} else {
+			a.sys = a.Redact.Text(GeneralPrompt(a.Ctx, a.Tools.Cwd(a.WorkRoot)))
+		}
+		if a.AppendSystem != "" {
+			a.sys += "\n" + a.Redact.Text(a.AppendSystem) + "\n"
+		}
 	}
 	return a.sys
 }
+
+// Node reports whether the session is scoped to a node profile.
+func (a *Agent) Node() bool { return a.Ctx != nil && a.Ctx.Profile != nil }
+
+// Rounds is the number of model rounds the latest Run took.
+func (a *Agent) Rounds() int { return a.rounds }
 
 // snapshot probes the live node digest and records when.
 func (a *Agent) snapshot() string {
@@ -583,6 +612,9 @@ func (a *Agent) turnPrefix() string {
 	}
 	if a.sys == "" {
 		a.system() // first turn: the snapshot goes in the system prompt
+		return b.String()
+	}
+	if !a.Node() {
 		return b.String()
 	}
 	ttl := a.SnapshotTTL

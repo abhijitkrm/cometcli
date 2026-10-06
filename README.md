@@ -147,15 +147,34 @@ success — cometcli polls for the committed result and reports the real
 
 ## The agent
 
-`cometcli agent` (or `cometcli ask "why is my validator missing blocks?"`)
-runs an LLM in a loop over the same tool registry:
-
 ```bash
-cometcli profile add myval --agent-provider anthropic --agent-model claude-sonnet-4-5
-export ANTHROPIC_API_KEY=…          # or OPENAI_API_KEY, OLLAMA_API_KEY;
-                                    # COMETCLI_LLM_API_KEY is a universal fallback
-cometcli ask "summarize signing health and flag any exposure risks"
+cometcli config set agent.provider groq      # once; or per profile: profile add … --agent-provider
+export GROQ_API_KEY=…                        # or ANTHROPIC_/OPENAI_/GEMINI_API_KEY;
+                                             # COMETCLI_LLM_API_KEY is a universal fallback
+
+cometcli                                     # chat on this machine: shell, files, web
+cometcli "why is disk filling up on /var?"   # start with a prompt
+cometcli one myval                           # node mode: validator tools, rules, live snapshot
+cometcli one myval "why am I missing blocks?"
+
+cometcli -p "summarize docker container health"            # answer once, exit
+journalctl -u evmd -n 300 | cometcli one myval -p "why did it halt?"
+cometcli -p --output-format json "…"                       # result + usage as JSON
+cometcli -p --output-format stream-json "…"                # one JSON event per line
+cometcli -c                                                # continue the last session here
+cometcli -r <id>                                           # resume one (cometcli sessions)
 ```
+
+**General mode** is an SRE agent on your machine: `bash`, `read`/`write`/`edit`,
+`glob`/`grep`, `web_fetch`. **Node mode** (`cometcli one <profile>`, or `/one
+<profile>` mid-conversation) adds the node tools, runs the shell on the node's host
+(local or SSH), applies the validator safety rules, and keeps a live snapshot of the
+node in context. Every shell command is classified before it runs: reads run, changes
+ask, transactions always ask, and key material or state resets are refused. See
+[docs/COMMANDS.md](docs/COMMANDS.md#general-tools-and-permissions).
+
+`cometcli ask "…"`, `cometcli agent` and `cometcli ui` still work as before (node mode
+on the active profile).
 
 Providers: `anthropic`, `openai`, `groq` (`GROQ_API_KEY`, default model
 `llama-3.3-70b-versatile`), `gemini` (`GEMINI_API_KEY`, default model

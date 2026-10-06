@@ -29,34 +29,42 @@ var (
 // NewRoot builds the root command and registers all subcommands.
 func NewRoot(reg *toolkit.Registry, extra []*cobra.Command) *cobra.Command {
 	root := &cobra.Command{
-		Use:   "cometcli",
-		Short: "Agentic SRE terminal for Cosmos-EVM validators",
-		Long: `cometcli — an agentic SRE terminal for Cosmos-EVM validators.
+		Use:   "cometcli [prompt]",
+		Short: "Agentic SRE terminal — general ops, plus Cosmos-EVM validators",
+		Long: `cometcli — an agentic SRE terminal.
 
-Every capability is a deterministic subcommand (cometcli val status,
-cometcli doctor, cometcli tx unjail) AND a tool the agent can call.
-Run 'cometcli' with no arguments to open the chat terminal, 'cometcli
-ask "..."' for one-shot questions, or 'cometcli serve' for a local web chat.`,
+  cometcli                       chat on this machine (shell, files, web)
+  cometcli "why is disk full?"   start the chat with a prompt
+  cometcli -p "…"                answer once and exit (scripts, pipes, CI)
+  cmd | cometcli -p "…"          piped input becomes context
+  cometcli one [profile] […]     node mode: validator tools, rules, live snapshot
+
+Every node capability is also a deterministic subcommand (cometcli val
+status, cometcli doctor, cometcli tx unjail) and a tool the agent calls.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		Args:          cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			// Bare `cometcli` opens the chat TUI when there's a terminal and
-			// a profile; otherwise it's the classic help screen.
-			if !isTerminal(cmd.InOrStdin()) || !hasProfile() {
-				if isTerminal(cmd.InOrStdin()) {
-					fmt.Fprint(cmd.OutOrStdout(), "no profile yet — run `cometcli init` to connect a node, then `cometcli` opens the chat.\n\n")
+		Args:          cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// an explicit --profile means node mode, like `cometcli one`
+			var p *config.Profile
+			if cmd.Flags().Changed("profile") {
+				cfg, err := config.Load()
+				if err != nil {
+					return err
 				}
-				return cmd.Help()
+				if p, err = cfg.ActiveProfile(flagProfile); err != nil {
+					return err
+				}
 			}
-			return runUI(cmd, reg, 5*time.Second)
+			return runChat(cmd, reg, p, args)
 		},
 	}
 	pf := root.PersistentFlags()
 	pf.StringVar(&flagProfile, "profile", "", "profile to use (env COMETCLI_PROFILE)")
 	pf.BoolVar(&flagJSON, "json", false, "emit structured JSON")
 	pf.BoolVarP(&flagYes, "yes", "y", false, "auto-approve observe/diagnose prompts (never on-chain)")
-	sessionFlags(root)
+	agentFlags(root)
+	printFlags(root)
 	pf.Bool("debug", false, "log every LLM API attempt (status, timing, retries) to stderr")
 	root.PersistentPreRun = func(cmd *cobra.Command, _ []string) {
 		if d, _ := cmd.Flags().GetBool("debug"); d {
@@ -67,7 +75,7 @@ ask "..."' for one-shot questions, or 'cometcli serve' for a local web chat.`,
 	for _, c := range toolGroupCommands(reg) {
 		root.AddCommand(c)
 	}
-	root.AddCommand(profileCmd(), auditCmd(), versionCmd(), initCmd(), sessionsCmd())
+	root.AddCommand(profileCmd(), auditCmd(), versionCmd(), initCmd(), sessionsCmd(), oneCmd(reg), configCmd())
 	root.AddCommand(extra...)
 	return root
 }
@@ -228,16 +236,6 @@ func NewCtx(cmd *cobra.Command, requireProfile bool) (*toolkit.Context, error) {
 	}
 	c.Approver = StdinApprover(cmd.InOrStdin())
 	return c, nil
-}
-
-// hasProfile reports whether an active profile is configured.
-func hasProfile() bool {
-	cfg, err := config.Load()
-	if err != nil {
-		return false
-	}
-	p, err := cfg.ActiveProfile(flagProfile)
-	return err == nil && p != nil
 }
 
 // StdinApprover prompts y/N on the terminal.

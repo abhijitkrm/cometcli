@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/abhijitkrm/cometcli/internal/runbook"
@@ -33,6 +34,7 @@ const CommandHelp = `  /mode [ops|accept-edits|readonly|bypass]  show or set the
   /model [name | provider name] show or switch the LLM
   /runbook [name]               list runbooks, or have the agent run one
   /tools                        list tools with how this session treats each
+  /one [profile|off]            switch to node mode for a profile, or back to general
   /profile                      active profile
   /audit                        audit log path + session id
   /reset                        clear conversation, start a new audit session
@@ -56,7 +58,7 @@ func RunCommand(a *Agent, c *toolkit.Context, reg *toolkit.Registry, line string
 			if Offline() {
 				return ErrOffline
 			}
-			return fmt.Errorf("no agent configured — set agent.provider in the profile")
+			return fmt.Errorf("no agent provider — run `cometcli config set agent.provider <name>`")
 		}
 		return nil
 	}
@@ -174,6 +176,40 @@ func RunCommand(a *Agent, c *toolkit.Context, reg *toolkit.Registry, line string
 		}
 		a.Provider, a.Model, a.conf = p, modelOf(p), conf
 		return CmdResult{Text: fmt.Sprintf("switched to %s/%s (conversation kept)", p.Name(), a.Model)}, nil
+
+	case "/one", "/node":
+		if err := needAgent(); err != nil {
+			return CmdResult{}, err
+		}
+		if len(f) == 1 {
+			txt := "general mode — shell and files on this machine; /one <profile> for node work"
+			if a.Node() {
+				txt = "node mode: " + a.Ctx.Profile.Name + " — /one off for general mode"
+			}
+			if cfg := a.Ctx.Cfg; cfg != nil && len(cfg.Profiles) > 0 {
+				var names []string
+				for n := range cfg.Profiles {
+					names = append(names, n)
+				}
+				sort.Strings(names)
+				txt += "\nprofiles: " + strings.Join(names, ", ")
+			}
+			return CmdResult{Text: txt}, nil
+		}
+		if f[1] == "off" || f[1] == "general" {
+			a.SwitchScope(nil)
+			return CmdResult{Text: "general mode — node tools off; the shell runs on this machine"}, nil
+		}
+		if a.Ctx.Cfg == nil {
+			return CmdResult{}, fmt.Errorf("no config loaded")
+		}
+		p, ok := a.Ctx.Cfg.Profiles[f[1]]
+		if !ok {
+			return CmdResult{}, fmt.Errorf("no profile %q — /one lists them", f[1])
+		}
+		p.Name = f[1]
+		a.SwitchScope(p)
+		return CmdResult{Text: fmt.Sprintf("node mode: %s (%s, %s via %s) — conversation kept", p.Name, p.Role, p.ChainID, orNone(p.Transport.Type))}, nil
 
 	case "/compact":
 		if err := needAgent(); err != nil {

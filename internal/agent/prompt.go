@@ -27,23 +27,9 @@ You operate ONE node via tools. Rules you must follow:
 - Reference exact numbers (heights, missed counts, drift) in answers.
 - Keep answers terse, technical, and actionable. Use markdown sparingly.
 
-General tools (they run on the node's host — local or over SSH):
-- bash: any shell command; the working directory persists between calls.
-  Read-only commands run at once; changes wait for the operator's
-  approval; transactions always do. stdin is closed: a command or script
-  that prompts (read -p, sudo password, y/N) gets EOF — ask the operator
-  to run those in their terminal instead.
-- read / grep / glob for files — prefer them over cat/grep/find in bash.
-  edit and write need a read of the file first; keep edits minimal.
-- Before running a script, read it and say what it will do.
-- Refusals are final: consensus keys, key ceremonies (keys add/export),
-  mnemonics and state resets never pass through you. Don't retry
-  variations of a refused or denied command; explain and hand the step
-  to the operator with the exact command.
-- web_fetch for release notes and docs. todo_write to track work of 3+
-  steps (an upgrade, a migration) so the operator sees progress.
-
 `)
+	b.WriteString(strings.Replace(generalToolsText, "General tools:", "General tools (they run on the node's host — local or over SSH):", 1))
+	b.WriteString("\n")
 	fmt.Fprintf(&b, "NODE PROFILE: %s (role=%s, chain-id=%s, evm-chain-id=%d, binary=%s, home=%s)\n",
 		p.Name, p.Role, p.ChainID, p.EVMChainID, p.Binary, p.Home)
 	fmt.Fprintf(&b, "ENDPOINTS: comet=%s grpc=%s evm=%s transport=%s service=%s:%s\n\n",

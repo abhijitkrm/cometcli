@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"time"
 
@@ -32,8 +31,9 @@ func UICmd(reg *toolkit.Registry) *cobra.Command {
 	return cmd
 }
 
-func isTerminal(r io.Reader) bool {
-	f, ok := r.(*os.File)
+// isTerminal reports whether a stream (stdin or stdout) is a terminal.
+func isTerminal(s any) bool {
+	f, ok := s.(*os.File)
 	return ok && term.IsTerminal(int(f.Fd()))
 }
 

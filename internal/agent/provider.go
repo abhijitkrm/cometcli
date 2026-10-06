@@ -184,7 +184,7 @@ func NewProvider(ac config.AgentConf) (Provider, error) {
 			base:  base,
 		}, nil
 	case "off", "none", "":
-		return nil, fmt.Errorf("agent disabled — set agent.provider in the profile")
+		return nil, fmt.Errorf("no agent provider — run `cometcli config set agent.provider groq` (or gemini, anthropic, openai, openai-compat), or set one in a profile")
 	default:
 		return nil, fmt.Errorf("unknown agent.provider %q", ac.Provider)
 	}

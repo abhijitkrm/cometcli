@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/abhijitkrm/cometcli/internal/client/host"
+	"github.com/abhijitkrm/cometcli/internal/config"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
 	"github.com/abhijitkrm/cometcli/internal/tools/shell"
 )
@@ -176,5 +177,50 @@ func TestDeferredToolsLoadOnDemand(t *testing.T) {
 	}
 	if lt := a.LoadedTools(); len(lt) != 1 || lt[0] != "chain.gov" {
 		t.Fatalf("loaded = %v", lt)
+	}
+}
+
+func TestGeneralModeAndScopeSwitch(t *testing.T) {
+	prov := &mockProvider{responses: []*Response{{Text: "a", Done: true}, {Text: "b", Done: true}, {Text: "c", Done: true}}}
+	nodeTool := stubTool{name: "node.status", tier: toolkit.TierObserve, run: func(*toolkit.Context, toolkit.Args) (*toolkit.Result, error) { return &toolkit.Result{}, nil }}
+	a, _ := newShellAgent(t, prov, nodeTool)
+	prof := a.Ctx.Profile
+	prof.Role, prof.ChainID = "validator", "primium-1"
+	a.Ctx.Cfg = &config.Config{Profiles: map[string]*config.Profile{"testp": prof}}
+	a.SwitchScope(nil) // start in general mode
+	a.carry = ""
+	a.Run(context.Background(), "one")
+	r := prov.reqs[0]
+	if !strings.Contains(r.System, "working in the operator's terminal") || !strings.Contains(r.System, "testp (validator, primium-1)") {
+		t.Fatalf("general prompt = %q", r.System)
+	}
+	for _, td := range r.Tools {
+		if td.Name == "node__status" || td.Name == toolSearchName {
+			t.Fatalf("node tool %s advertised in general mode", td.Name)
+		}
+	}
+	if strings.Contains(r.System, "LIVE SNAPSHOT") {
+		t.Fatal("snapshot in general mode")
+	}
+
+	a.SwitchScope(prof)
+	a.Run(context.Background(), "two")
+	r = prov.reqs[1]
+	if !strings.Contains(r.System, "Cosmos-EVM validators") || !strings.Contains(r.System, "LIVE: height=42") {
+		t.Fatalf("node prompt = %q", r.System)
+	}
+	var names []string
+	for _, td := range r.Tools {
+		names = append(names, td.Name)
+	}
+	if !strings.Contains(strings.Join(names, ","), "node__status") {
+		t.Fatalf("node tools missing: %v", names)
+	}
+	last := r.Messages[len(r.Messages)-1].Text
+	if !strings.Contains(last, "switched this session to node mode for profile testp") || !strings.HasSuffix(last, "two") {
+		t.Fatalf("switch note missing: %q", last)
+	}
+	if len(r.Messages) != 3 {
+		t.Fatalf("conversation not kept: %d messages", len(r.Messages))
 	}
 }

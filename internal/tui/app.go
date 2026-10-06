@@ -89,6 +89,7 @@ type AppModel struct {
 
 	approver *tuiApprover
 	pending  *approvalReq
+	initial  string // prompt submitted on start
 
 	vp       viewport.Model
 	width    int
@@ -118,10 +119,19 @@ func (m *AppModel) waitApproval() tea.Cmd {
 }
 
 func (m *AppModel) Init() tea.Cmd {
-	return tea.Batch(m.collectSnap(), m.collectFleet(), tick(m.interval), m.waitApproval(), m.waitEvent())
+	cmds := []tea.Cmd{m.collectSnap(), m.collectFleet(), tick(m.interval), m.waitApproval(), m.waitEvent()}
+	if s := m.initial; s != "" {
+		m.initial = ""
+		m.chat.append("user", s)
+		cmds = append(cmds, m.startTurn(s))
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m *AppModel) collectSnap() tea.Cmd {
+	if m.c.Profile == nil {
+		return nil // general mode: no node to watch
+	}
 	return func() tea.Msg { return monitor.Collect(m.c) }
 }
 
@@ -393,7 +403,13 @@ func (m *AppModel) View() string {
 	if m.snap != nil {
 		clock = m.snap.TS.Format("15:04:05")
 	}
-	fmt.Fprintf(&b, "  %s  %s\n", headStyle.Render(m.c.Profile.Name), dim.Render(clock))
+	scope := "general"
+	if m.chat.agent != nil && m.chat.agent.Node() {
+		scope = m.chat.agent.Ctx.Profile.Name
+	} else if m.chat.agent == nil && m.c.Profile != nil {
+		scope = m.c.Profile.Name
+	}
+	fmt.Fprintf(&b, "  %s  %s\n", headStyle.Render(scope), dim.Render(clock))
 
 	if m.tab == tabChat {
 		b.WriteString(m.statusLine() + "\n")
@@ -580,7 +596,14 @@ func firstLine(s string) string {
 
 // RunApp starts the multi-pane TUI.
 func RunApp(c *toolkit.Context, reg *toolkit.Registry, interval time.Duration, setup ...AgentSetup) error {
-	p := tea.NewProgram(NewApp(c, reg, interval, setup...), tea.WithAltScreen())
+	return RunAppWith(c, reg, interval, "", setup...)
+}
+
+// RunAppWith starts the TUI and submits prompt (if any) right away.
+func RunAppWith(c *toolkit.Context, reg *toolkit.Registry, interval time.Duration, prompt string, setup ...AgentSetup) error {
+	m := NewApp(c, reg, interval, setup...)
+	m.initial = prompt
+	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err := p.Run()
 	return err
 }

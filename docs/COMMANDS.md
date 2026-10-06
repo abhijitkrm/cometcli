@@ -9,6 +9,31 @@ Global flags: `--profile <name>` · `--json` · `-y/--yes` (auto-approve
 observe/diagnose only — never on-chain) · `COMETCLI_PROFILE`,
 `COMETCLI_KEYRING_PASSWORD` env vars.
 
+## Chat
+
+```bash
+cometcli                               # general mode: SRE agent on this machine (TUI)
+cometcli "prompt"                      # same, starting with a prompt
+cometcli one [profile] ["prompt"]      # node mode for a profile (active profile if omitted)
+cometcli -p "prompt"                   # headless: print the answer and exit
+cmd | cometcli -p "prompt"             # piped input is attached as <stdin> context
+cometcli -c / -r <id>                  # continue the latest session here / resume one
+cometcli config show                   # global agent settings (general mode; profiles override)
+cometcli config set agent.provider groq
+```
+
+Headless flags: `--output-format text|json|stream-json`, `--include-partial-messages`
+(token deltas in stream-json), `--verbose` (tool calls on stderr in text mode),
+`--append-system-prompt "…"`, `--max-turns N`. Headless runs never read approvals from
+stdin: anything that needs approval is denied unless `--allowedTools` or
+`--permission-mode` allows it. An explicit `--profile` on bare `cometcli` also means
+node mode.
+
+`json` prints one object: `{"type":"result","subtype":"success|error","is_error",
+"result","session_id","num_turns","duration_ms","provider","model","mode","usage"}`.
+`stream-json` prints a `system/init` line, then `assistant`, `tool_use`, `tool_result`,
+`notice` and `todos` events, then the same `result` object.
+
 ## Setup
 
 ```bash
@@ -229,6 +254,7 @@ saved after each turn to `~/.cometcli/sessions/` (0600, already redacted).
 | `/effort [level\|default]` | show or set reasoning depth for the rest of the session |
 | `/sessions`, `/resume <id>` | list saved sessions, or load one into the current session |
 | `/permissions`, `/allow\|/ask\|/deny <rule>` | show rules; add one for this session |
+| `/one [profile\|off]` | switch the session to node mode for a profile, or back to general (conversation kept) |
 
 ### General tools and permissions
 

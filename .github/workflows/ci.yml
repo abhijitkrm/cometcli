@@ -21,7 +21,11 @@ jobs:
       - name: build
         run: go build -o cometcli ./cmd/cometcli
       - name: smoke
-        run: ./cometcli --help && ./cometcli doctor --help
+        run: |
+          ./cometcli --help && ./cometcli doctor --help && ./cometcli one --help
+          ./cometcli config show
+          # no provider configured: headless mode must fail fast, not hang
+          ! ./cometcli -p "hi" </dev/null
 
   lint:
     runs-on: ubuntu-latest

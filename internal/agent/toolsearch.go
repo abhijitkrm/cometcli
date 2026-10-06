@@ -30,12 +30,19 @@ var toolSearchDef = ToolDef{
 	}, "query"),
 }
 
-// deferred reports whether this session loads tools on demand.
-func (a *Agent) deferred() bool { return a.conf.Tools != "all" }
+// deferred reports whether this session loads node tools on demand.
+// General mode has no node tools to defer.
+func (a *Agent) deferred() bool { return a.conf.Tools != "all" && a.Node() }
 
 // advertised reports whether t goes into this request's tool list.
 func (a *Agent) advertised(t toolkit.Tool) bool {
-	if !a.deferred() || toolkit.IsAgentOnly(t) || coreTools[t.Name()] {
+	if toolkit.IsAgentOnly(t) {
+		return true
+	}
+	if !a.Node() {
+		return false // node tools need a node: /one <profile>
+	}
+	if !a.deferred() || coreTools[t.Name()] {
 		return true
 	}
 	return a.loaded[t.Name()]
@@ -169,5 +176,14 @@ func (a *Agent) LoadedTools() []string {
 		out = append(out, n)
 	}
 	sort.Strings(out)
+	return out
+}
+
+// ToolNames lists the tools the next request would advertise.
+func (a *Agent) ToolNames() []string {
+	var out []string
+	for _, d := range a.toolDefs() {
+		out = append(out, d.Name)
+	}
 	return out
 }

@@ -39,8 +39,76 @@ const configFile = "config.yaml"
 
 // Config is the root of ~/.cometcli/config.yaml.
 type Config struct {
-	Active   string              `yaml:"active"`
+	Active string `yaml:"active"`
+	// Agent is the default LLM setup, used on its own in general mode
+	// (no node) and as the base a profile's agent section overrides.
+	Agent    AgentConf           `yaml:"agent,omitempty"`
 	Profiles map[string]*Profile `yaml:"profiles"`
+}
+
+// AgentFor resolves the agent settings for a profile (nil = general
+// mode): the global agent section, overridden field by field by the
+// profile's. In general mode without a global provider, the active
+// profile's settings are used, so existing setups keep working.
+func (c *Config) AgentFor(p *Profile) AgentConf {
+	if c == nil {
+		if p != nil {
+			return p.Agent
+		}
+		return AgentConf{}
+	}
+	if p == nil {
+		if c.Agent.Provider != "" {
+			return c.Agent
+		}
+		if ap, err := c.ActiveProfile(""); err == nil && ap != nil {
+			return MergeAgent(c.Agent, ap.Agent)
+		}
+		return c.Agent
+	}
+	return MergeAgent(c.Agent, p.Agent)
+}
+
+// MergeAgent overlays o's set fields onto base. A different provider in o
+// drops base's model, endpoint and key (they belong to the old provider);
+// permission rules accumulate.
+func MergeAgent(base, o AgentConf) AgentConf {
+	r := base
+	if o.Provider != "" && o.Provider != base.Provider {
+		r.Provider, r.Model, r.BaseURL, r.APIKeyEnv = o.Provider, "", "", ""
+	}
+	str := func(dst *string, v string) {
+		if v != "" {
+			*dst = v
+		}
+	}
+	num := func(dst *int, v int) {
+		if v != 0 {
+			*dst = v
+		}
+	}
+	str(&r.Model, o.Model)
+	str(&r.BaseURL, o.BaseURL)
+	str(&r.APIKeyEnv, o.APIKeyEnv)
+	str(&r.Mode, o.Mode)
+	str(&r.Effort, o.Effort)
+	str(&r.Tools, o.Tools)
+	num(&r.MaxTokens, o.MaxTokens)
+	num(&r.MaxTurns, o.MaxTurns)
+	num(&r.ContextWindow, o.ContextWindow)
+	num(&r.CompactAt, o.CompactAt)
+	if len(o.Autopilot) > 0 {
+		r.Autopilot = o.Autopilot
+	}
+	r.RedactHosts = append(append([]string{}, base.RedactHosts...), o.RedactHosts...)
+	r.RedactEndpoints = base.RedactEndpoints || o.RedactEndpoints
+	r.NoStream = base.NoStream || o.NoStream
+	r.Permissions = Permissions{
+		Allow: append(append([]string{}, base.Permissions.Allow...), o.Permissions.Allow...),
+		Ask:   append(append([]string{}, base.Permissions.Ask...), o.Permissions.Ask...),
+		Deny:  append(append([]string{}, base.Permissions.Deny...), o.Permissions.Deny...),
+	}
+	return r
 }
 
 // Profile describes one managed node.

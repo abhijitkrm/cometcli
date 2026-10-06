@@ -105,9 +105,13 @@ func (r *REPL) Run() error {
 	pr := &Printer{Out: r.Out, MD: r.md}
 	a.OnEvent = pr.Handle
 
+	scope := "general"
+	if a.Node() {
+		scope = a.Ctx.Profile.Name
+	}
 	fmt.Fprintf(r.Out, "%s — %s/%s on %s · %s\n%s\n\n",
 		promptSt.Render("cometcli agent"), a.Provider.Name(), a.Model,
-		a.Ctx.Profile.Name, a.Policy, toolSt.Render("type /help for commands, ctrl+c cancels a running turn, /exit quits"))
+		scope, a.Policy, toolSt.Render("type /help for commands, ctrl+c cancels a running turn, /exit quits"))
 
 	sc := bufio.NewScanner(r.In)
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
