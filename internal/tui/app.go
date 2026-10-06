@@ -304,29 +304,17 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chat.append("info", v.text)
 		}
 		m.syncChatView()
-	case evText:
-		m.chat.append("agent", v.s)
-		m.syncChatView()
-		return m, m.waitEvent()
-	case evToolCall:
-		m.chat.append("call", v.name+" "+compactArgs(v.args))
-		m.syncChatView()
-		return m, m.waitEvent()
-	case evToolRes:
-		if v.err != nil {
-			m.chat.append("err", fmt.Sprintf("%s: %v", v.name, v.err))
-		} else {
-			m.chat.append("ok", v.name+" → "+firstLine(v.summary))
-		}
-		m.syncChatView()
+	case evAgent:
+		m.onAgentEvent(v.e)
 		return m, m.waitEvent()
 	case evDone:
 		m.chat.busy = false
+		m.chat.live, m.chat.liveText = -1, ""
 		if v.err != nil {
 			m.chat.append("err", "agent: "+v.err.Error())
 			m.syncChatView()
 		}
-		// text already streamed through OnText/evText
+		// text already streamed through evAgent
 		return m, m.waitEvent()
 	case tickMsg:
 		return m, tea.Batch(m.collectSnap(), m.collectFleet(), tick(m.interval))
@@ -414,18 +402,29 @@ func (m *AppModel) View() string {
 	// approval modal — blocks the UI until y/n
 	if m.pending != nil {
 		var det strings.Builder
-		for k, v := range m.pending.detail {
-			fmt.Fprintf(&det, "  %s: %v\n", k, v)
+		keys := make([]string, 0, len(m.pending.detail))
+		for k := range m.pending.detail {
+			keys = append(keys, k)
 		}
-		fmt.Fprintf(&b, "\n%s\n%s\n%s\n%s\n",
+		sort.Strings(keys)
+		for _, k := range keys {
+			v := fmt.Sprint(m.pending.detail[k])
+			if k == "diff" {
+				det.WriteString(renderDiff(v))
+				continue
+			}
+			if k == "doc" && strings.Contains(m.pending.prompt, v) {
+				continue // the tx doc is already part of the prompt
+			}
+			fmt.Fprintf(&det, "  %s: %s\n", k, v)
+		}
+		risk := ""
+		if m.pending.tier == toolkit.TierOnChain {
+			risk = bad.Render("on-chain — signs and broadcasts a real transaction") + "\n"
+		}
+		fmt.Fprintf(&b, "\n%s\n%s%s%s\n",
 			warn.Render(fmt.Sprintf("⚠ [%s] %s", m.pending.tier, m.pending.prompt)),
-			det.String(),
-			bad.Render("on-chain"+func() string {
-				if m.pending.tier == toolkit.TierOnChain {
-					return " — real funds"
-				}
-				return ""
-			}()),
+			det.String(), risk,
 			headStyle.Render("approve? [y/n]"))
 	}
 
@@ -440,13 +439,31 @@ func (m *AppModel) View() string {
 	return b.String()
 }
 
+// renderDiff colors a unified-style diff for the approval modal.
+func renderDiff(d string) string {
+	var b strings.Builder
+	for _, ln := range strings.Split(strings.TrimRight(d, "\n"), "\n") {
+		switch {
+		case strings.HasPrefix(ln, "+"):
+			b.WriteString("  " + ok.Render(ln) + "\n")
+		case strings.HasPrefix(ln, "-"):
+			b.WriteString("  " + bad.Render(ln) + "\n")
+		default:
+			b.WriteString("  " + dim.Render(ln) + "\n")
+		}
+	}
+	return b.String()
+}
+
 // statusLine is the chat-pane header: provider, mode, live height.
 func (m *AppModel) statusLine() string {
 	prov := "no agent"
 	if m.chat.agent != nil {
 		prov = fmt.Sprintf("%s/%s", m.chat.agent.Provider.Name(), m.chat.agent.Model)
-		if m.chat.agent.Safe {
-			prov += " [safe]"
+		if pol := m.chat.agent.Policy; pol.ReadOnly() {
+			prov += " [readonly]"
+		} else if pol.AutoLocal {
+			prov += " [autopilot: local-change]"
 		}
 	}
 	live := "offline"

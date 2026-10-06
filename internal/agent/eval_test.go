@@ -45,7 +45,9 @@ func runScenario(t *testing.T, sc evalScenario, tools ...toolkit.Tool) *Agent {
 	}
 	prov := &mockProvider{responses: sc.script}
 	a := newTestAgent(t, prov, wrapped...)
-	a.Safe = sc.safe
+	if sc.safe {
+		a.Policy.Mode = ModeReadOnly
+	}
 	a.MaxCalls = sc.maxCalls
 	a.MaxIter = 8
 

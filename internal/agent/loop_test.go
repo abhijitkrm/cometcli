@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/abhijitkrm/cometcli/internal/audit"
 	"github.com/abhijitkrm/cometcli/internal/config"
@@ -70,7 +71,8 @@ func newTestAgent(t *testing.T, prov Provider, tools ...toolkit.Tool) *Agent {
 		Audit:            aud,
 		AutoApproveBelow: toolkit.TierOnChain, // observe/diagnose/local-change auto-run
 	}
-	return &Agent{Provider: prov, Model: "mock-1", Reg: reg, Ctx: ctx, MaxIter: 4}
+	return &Agent{Provider: prov, Model: "mock-1", Reg: reg, Ctx: ctx, MaxIter: 4,
+		SnapshotFn: func(*toolkit.Context) string { return "LIVE: height=42" }}
 }
 
 func TestLoop_ToolCallRoundTrip(t *testing.T) {
@@ -212,5 +214,73 @@ func TestLoop_AuditTrail(t *testing.T) {
 		if !strings.Contains(string(b), want) {
 			t.Fatalf("audit log missing %s:\n%s", want, b)
 		}
+	}
+}
+
+// watcherTool never returns until ctx is cancelled — like mon.watch.
+type watcherTool struct{ ran *bool }
+
+func (w watcherTool) Name() string           { return "mon.watch" }
+func (w watcherTool) Desc() string           { return "watch forever" }
+func (w watcherTool) Schema() map[string]any { return toolkit.ObjSchema(map[string]any{}) }
+func (w watcherTool) Tier() toolkit.Tier     { return toolkit.TierObserve }
+func (w watcherTool) LongRunning() bool      { return true }
+func (w watcherTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
+	*w.ran = true
+	<-c.Done() // never returns on its own
+	return nil, c.Err()
+}
+
+func TestLoop_LongRunningNotAdvertised(t *testing.T) {
+	ran := false
+	a := newTestAgent(t, &mockProvider{}, watcherTool{ran: &ran},
+		stubTool{name: "node.status", tier: toolkit.TierObserve, run: func(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
+			return &toolkit.Result{Text: "ok"}, nil
+		}})
+	defs := a.toolDefs()
+	for _, d := range defs {
+		if d.Name == "mon__watch" {
+			t.Fatalf("long-running tool advertised: %+v", d)
+		}
+	}
+	found := false
+	for _, d := range defs {
+		if d.Name == "node__status" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("normal tool missing from advertised set")
+	}
+}
+
+func TestLoop_LongRunningCallRefused(t *testing.T) {
+	// A provider can still name the tool even though it wasn't advertised —
+	// the loop must refuse it instead of blocking on the watcher.
+	ran := false
+	prov := &mockProvider{responses: []*Response{
+		{Calls: []Call{{ID: "c1", Name: "mon__watch", Args: json.RawMessage(`{}`)}}},
+		{Text: "declined", Done: true},
+	}}
+	a := newTestAgent(t, prov, watcherTool{ran: &ran})
+	done := make(chan error, 1)
+	go func() {
+		_, err := a.Run(context.Background(), "watch the node")
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("turn hung on a long-running tool")
+	}
+	if ran {
+		t.Fatal("watcher body executed — must be refused before Run")
+	}
+	toolMsg := a.history[2]
+	if toolMsg.Role != "tool" || !strings.Contains(toolMsg.Text, "long-running") {
+		t.Fatalf("expected refusal in tool result, got %q", toolMsg.Text)
 	}
 }

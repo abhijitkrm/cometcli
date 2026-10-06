@@ -34,10 +34,22 @@ func NewRoot(reg *toolkit.Registry, extra []*cobra.Command) *cobra.Command {
 
 Every capability is a deterministic subcommand (cometcli val status,
 cometcli doctor, cometcli tx unjail) AND a tool the agent can call.
-Run 'cometcli agent' for the AI SRE, or 'cometcli ask "..."' for
-one-shot questions.`,
+Run 'cometcli' with no arguments to open the chat terminal, 'cometcli
+ask "..."' for one-shot questions, or 'cometcli serve' for a local web chat.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		Args:          cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Bare `cometcli` opens the chat TUI when there's a terminal and
+			// a profile; otherwise it's the classic help screen.
+			if !isTerminal(cmd.InOrStdin()) || !hasProfile() {
+				if isTerminal(cmd.InOrStdin()) {
+					fmt.Fprint(cmd.OutOrStdout(), "no profile yet — run `cometcli init` to connect a node, then `cometcli` opens the chat.\n\n")
+				}
+				return cmd.Help()
+			}
+			return runUI(cmd, reg, 5*time.Second)
+		},
 	}
 	pf := root.PersistentFlags()
 	pf.StringVar(&flagProfile, "profile", "", "profile to use (env COMETCLI_PROFILE)")
@@ -210,13 +222,36 @@ func NewCtx(cmd *cobra.Command, requireProfile bool) (*toolkit.Context, error) {
 	return c, nil
 }
 
+// hasProfile reports whether an active profile is configured.
+func hasProfile() bool {
+	cfg, err := config.Load()
+	if err != nil {
+		return false
+	}
+	p, err := cfg.ActiveProfile(flagProfile)
+	return err == nil && p != nil
+}
+
 // StdinApprover prompts y/N on the terminal.
 func StdinApprover(in io.Reader) toolkit.Approver {
 	reader := bufio.NewReader(in)
 	return func(c *toolkit.Context, prompt string, tier toolkit.Tier, detail map[string]any) (bool, error) {
 		fmt.Fprintf(c.Out, "\n⚠  [%s] %s\n", tier, prompt)
-		for k, v := range detail {
-			fmt.Fprintf(c.Out, "   %s: %v\n", k, v)
+		keys := make([]string, 0, len(detail))
+		for k := range detail {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			v := fmt.Sprint(detail[k])
+			switch {
+			case k == "doc" && strings.Contains(prompt, v):
+				// tx doc already printed as part of the prompt
+			case strings.Contains(v, "\n"):
+				fmt.Fprintf(c.Out, "   %s:\n      %s\n", k, strings.ReplaceAll(v, "\n", "\n      "))
+			default:
+				fmt.Fprintf(c.Out, "   %s: %s\n", k, v)
+			}
 		}
 		fmt.Fprint(c.Out, "Proceed? [y/N] ")
 		line, err := reader.ReadString('\n')

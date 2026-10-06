@@ -103,6 +103,17 @@ type AgentConf struct {
 	Model     string `yaml:"model,omitempty"`
 	BaseURL   string `yaml:"base_url,omitempty"`
 	APIKeyEnv string `yaml:"api_key_env,omitempty"`
+	// Mode is the default approval posture: ops (default) | readonly.
+	Mode string `yaml:"mode,omitempty"`
+	// Autopilot lists tiers that run without a confirm prompt. Only
+	// local-change is accepted; on-chain can never be autopiloted.
+	Autopilot []string `yaml:"autopilot,omitempty"`
+	// RedactHosts are hostnames/IPs masked before any text reaches the LLM.
+	RedactHosts []string `yaml:"redact_hosts,omitempty"`
+	// RedactEndpoints also masks the profile's own endpoint/SSH hosts.
+	RedactEndpoints bool `yaml:"redact_endpoints,omitempty"`
+	// NoStream disables token streaming for endpoints that mishandle it.
+	NoStream bool `yaml:"no_stream,omitempty"`
 }
 
 // Alerts configures notification sinks for the monitor.

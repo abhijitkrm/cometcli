@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -24,22 +25,18 @@ type chatPane struct {
 	blocks []string // rendered transcript blocks
 	busy   bool
 	cancel context.CancelFunc
-	events chan tea.Msg // agent callbacks → Update
+	events chan tea.Msg // agent events → Update
+
+	// streaming: index of the block being filled by deltas (-1 = none)
+	live     int
+	liveText string
 
 	md  *glamour.TermRenderer
 	mdW int
 }
 
 // agent events pumped into the bubbletea loop
-type evText struct{ s string }
-type evToolCall struct {
-	name string
-	args map[string]any
-}
-type evToolRes struct {
-	name, summary string
-	err           error
-}
+type evAgent struct{ e agent.Event }
 type evDone struct {
 	text string
 	err  error
@@ -67,7 +64,7 @@ func newChatPane(c *toolkit.Context, reg *toolkit.Registry, appr *tuiApprover) *
 	ta.CharLimit = 0
 	ta.KeyMap.InsertNewline.SetEnabled(false)
 
-	p := &chatPane{ta: ta, events: make(chan tea.Msg)}
+	p := &chatPane{ta: ta, events: make(chan tea.Msg), live: -1}
 	// the agent's context uses the app-level approval bridge — tool prompts
 	// surface as the in-app modal, never stdin (bubbletea owns it raw).
 	sub := &toolkit.Context{
@@ -77,12 +74,11 @@ func newChatPane(c *toolkit.Context, reg *toolkit.Registry, appr *tuiApprover) *
 	}
 	p.blocks = append(p.blocks, dimSt.Render("cometcli — ask anything about your node, drive tools with /run, /help for commands"))
 	if ag, err := agent.New(sub, reg); err != nil {
-		p.blocks = append(p.blocks, dimSt.Render("agent.provider not configured — /run <tool> {json-args} works without one"))
+		p.blocks = append(p.blocks, dimSt.Render("no agent: "+err.Error()+" — /run <tool> {json-args} still works"))
 	} else {
-		ag.OnText = func(t string) { p.push(evText{t}) }
-		ag.OnToolCall = func(n string, a map[string]any) { p.push(evToolCall{n, a}) }
-		ag.OnToolResult = func(n, s string, e error) { p.push(evToolRes{n, s, e}) }
+		ag.OnEvent = func(e agent.Event) { p.push(evAgent{e}) }
 		p.agent = ag
+		p.blocks = append(p.blocks, dimSt.Render(fmt.Sprintf("%s/%s · %s · session %s", ag.Provider.Name(), ag.Model, ag.Policy, ag.ID())))
 	}
 	return p
 }
@@ -135,6 +131,13 @@ func (m *AppModel) chatSubmit(s string) tea.Cmd {
 	}
 	p.append("user", s)
 	m.syncChatView()
+	return m.startTurn(s)
+}
+
+// startTurn runs one agent turn in the background; events stream back
+// through p.events.
+func (m *AppModel) startTurn(s string) tea.Cmd {
+	p := m.chat
 	if p.agent == nil {
 		p.append("info", "no agent provider — /run <tool> {json} works, or set agent.provider in the profile")
 		m.syncChatView()
@@ -169,44 +172,10 @@ func (m *AppModel) chatSlash(s string) tea.Cmd {
 		m.quitting = true
 		return tea.Quit
 	case "/help":
-		return add("info", `commands:
-  /run <tool> {"args"}   run a tool directly (e.g. /run node.logs {"lines":50})
-  /tools                 list the registry
-  /safe                  toggle read-only agent mode
-  /mode                  approval posture
-  /profile               active profile
-  /audit                 audit log path
-  /reset                 clear agent memory + transcript
-  /exit                  quit
-anything else is sent to the agent — "send 1uatom to cosmos1…", "why is disk high", "unjail" all work`)
-	case "/tools":
-		var b strings.Builder
-		for _, t := range m.reg.All() {
-			fmt.Fprintf(&b, "%-24s [%s] %s\n", t.Name(), t.Tier(), t.Desc())
-		}
-		return add("info", strings.TrimRight(b.String(), "\n"))
-	case "/safe":
-		if p.agent == nil {
-			return add("err", "no agent configured")
-		}
-		p.agent.Safe = !p.agent.Safe
-		return add("info", fmt.Sprintf("safe mode %v — mutating tools refused", p.agent.Safe))
-	case "/mode":
-		return add("info", "approvals: observe/diagnose auto · local-change prompts · on-chain always prompts (in-app modal)")
-	case "/profile":
-		pr := m.c.Profile
-		return add("info", fmt.Sprintf("%s (%s, chain %s, role %s)", pr.Name, pr.Transport.Type, pr.ChainID, pr.Role))
-	case "/audit":
-		if m.c.Audit != nil {
-			return add("info", m.c.Audit.Path())
-		}
-		return add("info", "audit disabled")
-	case "/reset":
-		p.blocks = nil
-		if p.agent != nil {
-			p.agent.Reset()
-		}
-		return add("info", "cleared")
+		return add("info", "commands:\n"+agent.CommandHelp+`
+  /run <tool> {"args"}          run a tool directly (e.g. /run node.logs {"lines":50})
+  /exit                         quit
+anything else is sent to the agent — "why is disk high", "unjail", "send 1uatom to …" all work`)
 	case "/run":
 		if len(f) < 2 {
 			return add("err", "usage: /run <tool> {json-args}")
@@ -238,8 +207,58 @@ anything else is sent to the agent — "send 1uatom to cosmos1…", "why is disk
 			return runResMsg{name: name, text: txt}
 		}
 	default:
-		return add("err", "unknown command: "+f[0]+" — /help")
+		if p.busy {
+			return add("info", "a turn is running — esc to cancel it before changing session settings")
+		}
+		res, err := agent.RunCommand(p.agent, m.c, m.reg, s)
+		switch {
+		case errors.Is(err, agent.ErrUnknownCommand):
+			return add("err", "unknown command: "+f[0]+" — /help")
+		case err != nil:
+			return add("err", err.Error())
+		}
+		if res.Text != "" {
+			p.append("info", res.Text)
+			m.syncChatView()
+		}
+		if res.Prompt != "" {
+			p.append("user", res.Prompt)
+			m.syncChatView()
+			return m.startTurn(res.Prompt)
+		}
+		return nil
 	}
+}
+
+// onAgentEvent renders one streamed agent event into the transcript.
+func (m *AppModel) onAgentEvent(e agent.Event) {
+	p := m.chat
+	switch e.Kind {
+	case agent.EvDelta:
+		p.liveText += e.Text
+		if p.live < 0 {
+			p.blocks = append(p.blocks, "")
+			p.live = len(p.blocks) - 1
+		}
+		p.blocks[p.live] = p.liveText
+	case agent.EvText:
+		final := renderBlock("agent", e.Text, p.mdW, &p.md)
+		if p.live >= 0 {
+			p.blocks[p.live] = final
+		} else {
+			p.blocks = append(p.blocks, final)
+		}
+		p.live, p.liveText = -1, ""
+	case agent.EvToolStart:
+		p.append("call", fmt.Sprintf("%s %s %s", e.Tool, dimSt.Render("["+e.Tier+"]"), agent.CompactArgs(e.Args)))
+	case agent.EvToolResult:
+		if e.Err != "" {
+			p.append("err", e.Err)
+		} else {
+			p.append("ok", e.Text)
+		}
+	}
+	m.syncChatView()
 }
 
 // syncChatView pushes the transcript into the viewport and scrolls down.
@@ -279,17 +298,4 @@ func (m *AppModel) chatKey(v tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func compactArgs(args map[string]any) string {
-	if len(args) == 0 {
-		return ""
-	}
-	var parts []string
-	for k, v := range args {
-		parts = append(parts, fmt.Sprintf("%s=%v", k, v))
-	}
-	s := strings.Join(parts, " ")
-	if len(s) > 100 {
-		return s[:100] + "…"
-	}
-	return s
-}
+func compactArgs(args map[string]any) string { return agent.CompactArgs(args) }

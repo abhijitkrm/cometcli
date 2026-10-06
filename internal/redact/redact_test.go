@@ -130,3 +130,61 @@ func TestSensitiveName(t *testing.T) {
 		t.Fatal("config.toml should not be sensitive")
 	}
 }
+
+func TestProseIsNotAMnemonic(t *testing.T) {
+	q := "why is my validator missing blocks and what should i do about it right now please"
+	if out := Text(q); out != q {
+		t.Fatalf("plain question mangled: %q", out)
+	}
+}
+
+func TestMnemonicInsideProse(t *testing.T) {
+	m := "legal winner thank year wave sausage worth useful legal winner thank yellow"
+	out := Text("my seed is " + m + " is that ok")
+	if strings.Contains(out, "sausage") || !strings.Contains(out, "[REDACTED_MNEMONIC]") {
+		t.Fatalf("mnemonic not redacted: %q", out)
+	}
+	if !strings.HasPrefix(out, "my seed is ") || !strings.HasSuffix(out, " is that ok") {
+		t.Fatalf("surrounding prose lost: %q", out)
+	}
+	// multi-line / double-spaced mnemonics too
+	if out := Text(strings.ReplaceAll(m, " ", "\n  ")); strings.Contains(out, "sausage") {
+		t.Fatalf("multiline mnemonic leaked: %q", out)
+	}
+}
+
+func TestRedactorHosts(t *testing.T) {
+	r := NewRedactor("val.internal", "10.0.4.7", "localhost", "")
+	in := "ssh ops@val.internal; peer abc@10.0.4.7:26656; rpc localhost:26657; val.internal.example stays? 110.0.4.71 stays"
+	out := r.Text(in)
+	for _, leak := range []string{"ops@val.internal;", "@10.0.4.7:"} {
+		if strings.Contains(out, leak) {
+			t.Fatalf("host leaked (%s): %q", leak, out)
+		}
+	}
+	if !strings.Contains(out, "localhost:26657") || !strings.Contains(out, "110.0.4.71") {
+		t.Fatalf("over-redacted: %q", out)
+	}
+	if got := r.Args(map[string]any{"h": "val.internal"})["h"]; got != "[REDACTED_HOST]" {
+		t.Fatalf("args not host-redacted: %v", got)
+	}
+	var nilR *Redactor
+	if nilR.Text("x") != "x" {
+		t.Fatal("nil redactor must behave like Text")
+	}
+}
+
+func TestHostOf(t *testing.T) {
+	for in, want := range map[string]string{
+		"tcp://10.1.2.3:26657":      "10.1.2.3",
+		"val.internal:9090":         "val.internal",
+		"https://rpc.example.com/x": "rpc.example.com",
+		"http://u:p@node.lan:8545":  "node.lan",
+		"[fd00::1]:9090":            "fd00::1",
+		"":                          "",
+	} {
+		if got := HostOf(in); got != want {
+			t.Errorf("HostOf(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

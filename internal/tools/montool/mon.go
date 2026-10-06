@@ -131,7 +131,7 @@ func triageFunc(c *toolkit.Context, reg *toolkit.Registry, enabled bool) func(st
 		fmt.Fprintf(c.Out, "triage unavailable (alerting continues without it): %v\n", err)
 		return nil
 	}
-	ag.Safe = true // diagnose only — never mutate from an alert
+	ag.Policy = agent.Policy{Mode: agent.ModeReadOnly} // diagnose only — never mutate from an alert
 	ag.MaxIter = 6
 	ag.MaxCalls = 8
 	return func(rule, msg string) string {

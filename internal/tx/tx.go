@@ -5,6 +5,7 @@ package tx
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -308,7 +309,8 @@ func (b *Builder) Broadcast(ctx context.Context, txBytes []byte) (hash string, c
 	}
 	r := res.TxResponse
 	if b.audit != nil {
-		b.audit.Tx(b.profile.Name, "broadcast", map[string]any{"hash": r.Txhash, "code": r.Code, "raw_log": r.RawLog})
+		b.audit.Tx(b.profile.Name, "broadcast", map[string]any{"hash": r.Txhash, "code": r.Code, "raw_log": r.RawLog,
+			"tx_bytes": base64.StdEncoding.EncodeToString(txBytes)})
 	}
 	return r.Txhash, r.Code, r.RawLog, nil
 }

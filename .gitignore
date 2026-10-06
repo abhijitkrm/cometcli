@@ -1,4 +1,5 @@
 /cometcli
+/bin/
 /dist/
 *.test
 *.out

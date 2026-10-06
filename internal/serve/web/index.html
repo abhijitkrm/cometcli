@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cometcli</title>
+<style>
+:root {
+  --bg: #f7f7f5; --panel: #ffffff; --ink: #1d1d1b; --dim: #6b6b66; --line: #e4e3df;
+  --accent: #5b4fd6; --ok: #1f8a4c; --warn: #b26a00; --bad: #c0392b;
+  --code: #f0efeb; --user: #ecebff;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #141413; --panel: #1c1c1a; --ink: #ecebe6; --dim: #9a9993; --line: #2e2d2a;
+    --accent: #9d93ff; --ok: #4cc082; --warn: #e2a33b; --bad: #ff6b5e;
+    --code: #252522; --user: #26244a;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+  display: flex; flex-direction: column;
+}
+header {
+  display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+  padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel);
+}
+header .brand { font-weight: 650; letter-spacing: -0.01em; }
+header .chip {
+  font: 12px var(--mono); color: var(--dim); border: 1px solid var(--line);
+  border-radius: 999px; padding: 2px 9px; white-space: nowrap;
+}
+header .chip.ro { color: var(--ok); border-color: var(--ok); }
+header .chip.auto { color: var(--warn); border-color: var(--warn); }
+header .spacer { flex: 1; }
+#status { font: 12px var(--mono); color: var(--dim); }
+#status .bad { color: var(--bad); font-weight: 600; }
+#status .ok { color: var(--ok); }
+main { flex: 1; overflow-y: auto; }
+#log { max-width: 860px; margin: 0 auto; padding: 20px 16px 8px; }
+.msg { margin: 0 0 14px; }
+.user {
+  background: var(--user); border-radius: 12px; padding: 9px 13px;
+  margin-left: auto; width: fit-content; max-width: 85%; white-space: pre-wrap;
+}
+.agent p { margin: 0 0 8px; }
+.agent pre, .info pre {
+  background: var(--code); border-radius: 8px; padding: 10px 12px;
+  overflow-x: auto; font: 13px/1.45 var(--mono); margin: 6px 0 10px;
+}
+.agent code { font: 13px var(--mono); background: var(--code); padding: 1px 5px; border-radius: 4px; }
+.agent pre code { background: none; padding: 0; }
+.agent h1, .agent h2, .agent h3 { font-size: 15px; margin: 12px 0 6px; }
+.agent ul, .agent ol { margin: 4px 0 8px; padding-left: 22px; }
+.tool {
+  font: 13px var(--mono); color: var(--dim); border-left: 2px solid var(--line);
+  padding: 3px 10px; margin: 0 0 6px;
+}
+.tool .name { color: var(--accent); }
+.tool .tier { opacity: .75; }
+.tool.ok::before { content: "✓ "; color: var(--ok); }
+.tool.err { color: var(--bad); border-color: var(--bad); }
+.tool.err::before { content: "✗ "; }
+.tool.run::before { content: "◐ "; }
+.info { color: var(--dim); font-size: 13px; white-space: pre-wrap; }
+.info pre { white-space: pre; color: var(--ink); }
+.error { color: var(--bad); font-size: 13px; }
+.cursor::after { content: "▍"; animation: blink 1s steps(1) infinite; color: var(--accent); }
+@keyframes blink { 50% { opacity: 0; } }
+footer { border-top: 1px solid var(--line); background: var(--panel); }
+form { max-width: 860px; margin: 0 auto; padding: 12px 16px; display: flex; gap: 8px; }
+textarea {
+  flex: 1; resize: none; min-height: 44px; max-height: 180px;
+  font: inherit; color: inherit; background: var(--bg);
+  border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
+}
+textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+button {
+  font: inherit; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--panel); color: var(--ink); padding: 0 16px; cursor: pointer;
+}
+button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+button:disabled { opacity: .5; cursor: default; }
+.hint { max-width: 860px; margin: -6px auto 0; padding: 0 16px 10px; font-size: 12px; color: var(--dim); }
+dialog {
+  border: 1px solid var(--line); border-radius: 14px; padding: 0;
+  background: var(--panel); color: var(--ink); width: min(720px, calc(100vw - 32px));
+}
+dialog::backdrop { background: rgba(0,0,0,.45); }
+dialog .hd { padding: 14px 18px; border-bottom: 1px solid var(--line); font-weight: 600; }
+dialog .hd .tier { font: 12px var(--mono); color: var(--warn); margin-right: 6px; }
+dialog .hd .tier.on-chain { color: var(--bad); }
+dialog .bd { padding: 12px 18px; max-height: 60vh; overflow: auto; }
+dialog pre { font: 12.5px/1.45 var(--mono); background: var(--code); border-radius: 8px; padding: 10px; overflow-x: auto; white-space: pre; }
+dialog .add { color: var(--ok); } dialog .del { color: var(--bad); }
+dialog .risk { color: var(--bad); font-size: 13px; margin: 8px 0 0; }
+dialog .ft { display: flex; gap: 8px; justify-content: flex-end; padding: 12px 18px; border-top: 1px solid var(--line); }
+dialog .ft button { padding: 8px 16px; }
+button.approve { background: var(--ok); border-color: var(--ok); color: #fff; }
+button.approve.on-chain { background: var(--bad); border-color: var(--bad); }
+dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-size: 13px; }
+dt { color: var(--dim); font-family: var(--mono); } dd { margin: 0; word-break: break-word; }
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">cometcli</span>
+  <span class="chip" id="profile">…</span>
+  <span class="chip" id="model">…</span>
+  <span class="chip" id="mode">…</span>
+  <span class="spacer"></span>
+  <span id="status">probing node…</span>
+</header>
+<main id="scroller"><div id="log"></div></main>
+<footer>
+  <form id="f">
+    <textarea id="q" rows="1" placeholder="Ask about your node — or /help" autofocus></textarea>
+    <button type="submit" class="primary" id="send">Send</button>
+    <button type="button" id="stop" hidden>Stop</button>
+  </form>
+  <div class="hint">Enter to send · Shift+Enter for a newline · tool calls run against your node with the same approval gates as the CLI</div>
+</footer>
+
+<dialog id="approval">
+  <div class="hd"><span class="tier" id="ap-tier"></span><span id="ap-prompt"></span></div>
+  <div class="bd" id="ap-body"></div>
+  <div class="ft">
+    <button type="button" id="ap-deny">Deny</button>
+    <button type="button" class="approve" id="ap-ok">Approve</button>
+  </div>
+</dialog>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const log = $("log"), scroller = $("scroller"), q = $("q");
+let busy = false, live = null, liveText = "";
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// Minimal, safe markdown: everything is escaped first, then a few
+// constructs are re-introduced. No raw HTML from the model ever renders.
+function md(src) {
+  const blocks = [];
+  src = src.replace(/```[^\n]*\n([\s\S]*?)```/g, (_, code) => {
+    blocks.push("<pre><code>" + esc(code.replace(/\n$/, "")) + "</code></pre>");
+    return "\u0000" + (blocks.length - 1) + "\u0000";
+  });
+  const inline = (t) => esc(t)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, "$1<em>$2</em>");
+  const out = [];
+  let list = null;
+  for (const raw of src.split("\n")) {
+    const line = raw.trimEnd();
+    const m = line.match(/^\s*(?:[-*]|(\d+)\.)\s+(.*)$/);
+    if (m) {
+      const kind = m[1] ? "ol" : "ul";
+      if (list !== kind) { if (list) out.push("</" + list + ">"); out.push("<" + kind + ">"); list = kind; }
+      out.push("<li>" + inline(m[2]) + "</li>");
+      continue;
+    }
+    if (list) { out.push("</" + list + ">"); list = null; }
+    const h = line.match(/^(#{1,3})\s+(.*)$/);
+    if (h) { out.push("<h3>" + inline(h[2]) + "</h3>"); continue; }
+    if (/^\u0000\d+\u0000$/.test(line)) { out.push(line); continue; }
+    if (line === "") { out.push(""); continue; }
+    out.push("<p>" + inline(line) + "</p>");
+  }
+  if (list) out.push("</" + list + ">");
+  return out.join("\n").replace(/\u0000(\d+)\u0000/g, (_, i) => blocks[+i]);
+}
+
+function add(cls, html) {
+  const d = document.createElement("div");
+  d.className = "msg " + cls;
+  d.innerHTML = html;
+  log.appendChild(d);
+  scroller.scrollTop = scroller.scrollHeight;
+  return d;
+}
+const info = (t) => add("info", esc(t));
+const error = (t) => add("error", esc(t));
+
+function setBusy(b) {
+  busy = b;
+  $("send").disabled = b;
+  $("stop").hidden = !b;
+}
+
+async function api(path, body) {
+  const r = await fetch(path, {
+    method: body === undefined ? "GET" : "POST",
+    headers: body === undefined ? {} : { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const ct = r.headers.get("content-type") || "";
+  const data = ct.includes("json") ? await r.json() : { error: await r.text() };
+  if (!r.ok) throw new Error(data.error || r.statusText);
+  return data;
+}
+
+async function refreshInfo() {
+  try {
+    const i = await api("/api/info");
+    $("profile").textContent = `${i.profile} · ${i.chain_id || "?"} · ${i.role || "?"}`;
+    $("model").textContent = i.provider ? `${i.provider}/${i.model}` : "no agent";
+    const mode = $("mode");
+    mode.className = "chip";
+    if (!i.provider) { mode.textContent = i.agent_error || "agent off"; }
+    else if (i.mode === "readonly") { mode.textContent = "readonly"; mode.classList.add("ro"); }
+    else if (i.autopilot_local) { mode.textContent = "ops · autopilot local-change"; mode.classList.add("auto"); }
+    else { mode.textContent = "ops"; }
+    mode.title = i.policy || "";
+    return i;
+  } catch (e) { error("info: " + e.message); }
+}
+
+async function refreshStatus() {
+  try {
+    const s = await api("/api/status");
+    const el = $("status");
+    if (!s.reachable) { el.innerHTML = '<span class="bad">node unreachable</span>'; return; }
+    const parts = [`h=${s.height}`, `peers=${s.peers}`];
+    if (s.catching_up) parts.push('<span class="bad">catching up</span>');
+    if (s.window) parts.push(`missed ${s.missed}/${s.window}`);
+    if (s.tombstoned) parts.push('<span class="bad">TOMBSTONED</span>');
+    else if (s.jailed) parts.push('<span class="bad">JAILED</span>');
+    else if (s.window) parts.push('<span class="ok">signing</span>');
+    if (s.disk_used_pct) parts.push(`disk ${Math.round(s.disk_used_pct)}%`);
+    el.innerHTML = parts.join(" · ");
+  } catch (e) { $("status").textContent = "status unavailable"; }
+}
+
+function diffHTML(d) {
+  return d.split("\n").map((l) =>
+    l.startsWith("+") ? `<span class="add">${esc(l)}</span>` :
+    l.startsWith("-") ? `<span class="del">${esc(l)}</span>` : esc(l)).join("\n");
+}
+
+function askApproval(ap) {
+  const dlg = $("approval");
+  const tier = $("ap-tier");
+  tier.textContent = "[" + ap.tier + "]";
+  tier.className = "tier " + ap.tier;
+  const [title, ...rest] = ap.prompt.split("\n");
+  $("ap-prompt").textContent = title;
+  let body = "";
+  if (rest.length) body += `<pre>${esc(rest.join("\n"))}</pre>`;
+  const det = ap.detail || {};
+  if (det.diff) body += `<pre>${diffHTML(det.diff)}</pre>`;
+  const keys = Object.keys(det).filter((k) => k !== "diff" && !(k === "doc" && ap.prompt.includes(det[k]))).sort();
+  if (keys.length) {
+    body += "<dl>" + keys.map((k) => `<dt>${esc(k)}</dt><dd>${esc(typeof det[k] === "object" ? JSON.stringify(det[k]) : det[k])}</dd>`).join("") + "</dl>";
+  }
+  if (ap.tier === "on-chain") body += '<p class="risk">This signs and broadcasts a real transaction with your ops key.</p>';
+  $("ap-body").innerHTML = body;
+  const ok = $("ap-ok");
+  ok.className = "approve " + ap.tier;
+  ok.textContent = ap.tier === "on-chain" ? "Sign & broadcast" : "Approve";
+  const answer = async (yes) => {
+    dlg.close();
+    add("info", (yes ? "approved: " : "denied: ") + esc(title));
+    try { await api("/api/approve", { id: ap.id, ok: yes }); } catch (e) { error(e.message); }
+  };
+  ok.onclick = () => answer(true);
+  $("ap-deny").onclick = () => answer(false);
+  dlg.oncancel = (e) => { e.preventDefault(); answer(false); };
+  dlg.showModal();
+  $("ap-deny").focus(); // the safe choice has focus
+}
+
+function onEvent(e) {
+  switch (e.kind) {
+    case "delta":
+      if (!live) { live = add("agent cursor", ""); liveText = ""; }
+      liveText += e.text;
+      live.textContent = liveText;
+      scroller.scrollTop = scroller.scrollHeight;
+      break;
+    case "text":
+      if (live) { live.className = "msg agent"; live.innerHTML = md(e.text); live = null; }
+      else add("agent", md(e.text));
+      break;
+    case "tool_start":
+      add("tool run", `<span class="name">${esc(e.tool)}</span> <span class="tier">[${esc(e.tier)}]</span> ${esc(fmtArgs(e.args))}`);
+      break;
+    case "tool_result":
+      if (e.error) add("tool err", esc(e.error));
+      else add("tool ok", esc(e.text || e.tool));
+      break;
+    case "approval":
+      askApproval(e.approval);
+      break;
+    case "error":
+      if (live) { live.className = "msg agent"; live = null; }
+      if (e.error === "cancelled") info("(cancelled)"); else error(e.error);
+      break;
+    case "done":
+      if (live) { live.className = "msg agent"; live = null; }
+      break;
+  }
+}
+
+function fmtArgs(a) {
+  if (!a) return "";
+  const s = Object.keys(a).sort().map((k) => `${k}=${typeof a[k] === "object" ? JSON.stringify(a[k]) : a[k]}`).join(" ");
+  return s.length > 120 ? s.slice(0, 120) + "…" : s;
+}
+
+async function runTurn(text) {
+  setBusy(true);
+  try {
+    const r = await fetch("/api/chat", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      throw new Error(d.error || r.statusText);
+    }
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n\n")) >= 0) {
+        const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
+        const data = chunk.split("\n").filter((l) => l.startsWith("data:")).map((l) => l.slice(5).trimStart()).join("\n");
+        if (data) onEvent(JSON.parse(data));
+      }
+    }
+  } catch (e) {
+    error(e.message);
+  } finally {
+    if (live) { live.className = "msg agent"; live = null; }
+    setBusy(false);
+    refreshInfo();
+    q.focus();
+  }
+}
+
+async function submit(text) {
+  text = text.trim();
+  if (!text) return;
+  if (text === "/stop") { await api("/api/cancel", {}); return; }
+  if (text.startsWith("/")) {
+    add("user", esc(text));
+    try {
+      const r = await api("/api/command", { line: text });
+      if (r.text) add("info", "<pre>" + esc(r.text) + "</pre>");
+      refreshInfo();
+      if (r.prompt) { add("user", esc(r.prompt)); await runTurn(r.prompt); }
+    } catch (e) { error(e.message); }
+    return;
+  }
+  if (busy) { info("a turn is running — press Stop first"); return; }
+  add("user", esc(text));
+  await runTurn(text);
+}
+
+$("f").addEventListener("submit", (e) => { e.preventDefault(); const t = q.value; q.value = ""; autosize(); submit(t); });
+q.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("f").requestSubmit(); }
+});
+function autosize() { q.style.height = "auto"; q.style.height = Math.min(q.scrollHeight, 180) + "px"; }
+q.addEventListener("input", autosize);
+$("stop").addEventListener("click", () => api("/api/cancel", {}).catch((e) => error(e.message)));
+
+refreshInfo().then((i) => {
+  if (!i) return;
+  if (i.provider) info(`session ${i.session} · ${i.policy}\nEverything here is audited to ${i.audit || "(audit disabled)"}.`);
+  else info((i.agent_error || "no agent configured") + " — slash commands like /tools and /profile still work.");
+});
+refreshStatus();
+setInterval(refreshStatus, 15000);
+</script>
+</body>
+</html>

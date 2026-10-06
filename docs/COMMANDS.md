@@ -184,16 +184,55 @@ cometcli runbook run coordinated-upgrade
 ## Interfaces
 
 ```bash
-cometcli ui                            # chat-first TUI (Claude Code style): ask in natural
-                                       # language, /run tools, approvals in-app, txs broadcast
+cometcli                               # bare command = chat TUI (when a profile exists)
+cometcli ui                            # chat-first TUI (Claude Code style): streamed answers,
+                                       # /run tools, approval modals with diffs, txs broadcast
                                        # from the chat. Overview/fleet/logs/send panes on tabs
-cometcli agent                         # interactive AI SRE (needs ANTHROPIC_API_KEY or Ollama)
+cometcli serve --open                  # same agent in a local web chat (127.0.0.1 only,
+                                       # token link printed at start; approvals as modals)
+cometcli agent                         # line-mode REPL (needs ANTHROPIC_API_KEY, Groq, or Ollama)
 cometcli agent --task "check fleet"    # headless one-shot task (cron/CI)
-cometcli agent --task "audit exposure" --safe --budget 6 --max-iter 4
-cometcli ask "is my validator healthy" # one-shot agent question
+cometcli agent --task "audit exposure" --mode readonly --budget 6 --max-iter 4
+cometcli ask "is my validator healthy" # one-shot agent question (streams)
 cometcli ask "why is disk at 88%"      # chains tools: doctor → df → verdict
+cometcli ask "add peer …" --autopilot local-change   # skip local-change confirms (never on-chain)
 cometcli mcp                           # serve all tools over MCP (stdio) for external agents
-cometcli audit                         # today's audit log (tools, shells, txs, approvals)
+cometcli audit                         # today's audit log (prompts, LLM turns, tools, txs, approvals)
+cometcli audit sessions [--all]        # agent sessions recorded in the log
+cometcli audit replay <session-id>     # reproduce a session offline: recorded LLM turns +
+                                       # tool output re-driven through the agent loop
 cometcli completion zsh                # shell completion
 cometcli version
 ```
+
+Agent flags (`agent`, `ask`, `serve`): `--mode ops|readonly`, `--safe` (=readonly),
+`--autopilot local-change`, `--budget N` tool calls per turn, `--max-iter N`, `--no-stream`.
+
+### Agent session commands (TUI, REPL, web)
+
+| Command | Effect |
+|---|---|
+| `/mode [ops\|readonly]` | show or set the approval posture; readonly hides mutating tools from the model |
+| `/approve local-change on\|off` | autopilot local-change tools; on-chain can never be autopiloted |
+| `/model [name \| provider name]` | show or switch the LLM mid-conversation |
+| `/runbook [name]` | list runbooks, or have the agent run one through the normal approval gate |
+| `/tools` | every tool with its tier and how this session treats it (auto/confirm/deny) |
+| `/profile`, `/audit`, `/reset` | profile + policy, audit path + session id, new session |
+
+### Agent config (per profile)
+
+```yaml
+agent:
+  provider: anthropic            # anthropic | openai | groq | openai-compat/ollama | off
+  model: claude-sonnet-4-5
+  mode: ops                      # ops (default) | readonly
+  autopilot: [local-change]      # optional; on-chain is rejected
+  redact_hosts: [val.internal]   # masked before any text reaches the LLM
+  redact_endpoints: true         # also mask this profile's endpoint/SSH hosts
+  no_stream: false               # set true for endpoints that mishandle streaming
+```
+
+`COMETCLI_OFFLINE=1` disables the agent entirely (ask/agent/serve chat refuse); every
+tool subcommand and `cometcli mcp` keep working. Mnemonics (checked against the BIP-39
+wordlist), hex/base64 key material, tokens and URL credentials are scrubbed from user
+input, the live snapshot, and tool output before they reach the model.

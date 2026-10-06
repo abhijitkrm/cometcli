@@ -6,6 +6,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/abhijitkrm/cometcli/internal/agent"
 )
 
 // TestChatLayout asserts the chat pane composes status, transcript, input.
@@ -15,9 +17,9 @@ func TestChatLayout(t *testing.T) {
 	m = mm.(*AppModel)
 	m.chatSubmit("is my validator healthy?")
 	for _, ev := range []tea.Msg{
-		evText{"Checking node status…"},
-		evToolCall{name: "node.status", args: map[string]any{}},
-		evToolRes{name: "node.status", summary: "h=20496 catching_up=false"},
+		evAgent{agent.Event{Kind: agent.EvText, Text: "Checking node status…"}},
+		evAgent{agent.Event{Kind: agent.EvToolStart, Tool: "node.status", Tier: "observe"}},
+		evAgent{agent.Event{Kind: agent.EvToolResult, Tool: "node.status", Text: "h=20496 catching_up=false"}},
 		evDone{},
 	} {
 		mm, _ := m.Update(ev)

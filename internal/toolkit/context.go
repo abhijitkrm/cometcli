@@ -154,6 +154,16 @@ func WithDeadline(c *Context, timeout time.Duration) (*Context, context.CancelFu
 	}, cancel
 }
 
+// WithCancel is WithDeadline without a timeout — for long-running tools
+// that still need their own lazy clients and a cancel hook.
+func WithCancel(c *Context) (*Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(c.Context)
+	return &Context{
+		Context: ctx, Profile: c.Profile, Cfg: c.Cfg, Out: c.Out,
+		Audit: c.Audit, Approver: c.Approver, AutoApproveBelow: c.AutoApproveBelow,
+	}, cancel
+}
+
 // LogShell records a host command in the audit log.
 func (c *Context) LogShell(cmd string, code int) {
 	if c.Audit != nil {
@@ -181,7 +191,7 @@ func (c *Context) Close() {
 	if c.grpc != nil {
 		c.grpc.Close()
 	}
-	if h, ok := c.host.(io.Closer); ok {
+	if h, ok := c.host.(io.Closer); ok && c.hostErr == nil {
 		h.Close()
 	}
 }

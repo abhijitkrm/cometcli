@@ -8,7 +8,10 @@ import (
 
 // agentFlags wires the bounded-run flags shared by agent and ask.
 func agentFlags(cmd *cobra.Command) {
-	cmd.Flags().Bool("safe", false, "read-only mode: observe/diagnose tools only — mutating tools are refused")
+	cmd.Flags().String("mode", "", "approval posture: ops | readonly (default from profile agent.mode)")
+	cmd.Flags().Bool("safe", false, "shorthand for --mode readonly: observe/diagnose tools only")
+	cmd.Flags().StringSlice("autopilot", nil, "tiers that skip the confirm prompt (only local-change; on-chain never)")
+	cmd.Flags().Bool("no-stream", false, "disable token streaming")
 	cmd.Flags().Int("budget", 0, "max tool calls per turn (0 = unlimited)")
 	cmd.Flags().Int("max-iter", 0, "max model iterations per turn (default 16)")
 }

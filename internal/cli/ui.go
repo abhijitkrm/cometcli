@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -22,17 +23,28 @@ func UICmd(reg *toolkit.Registry) *cobra.Command {
 		Use:   "ui",
 		Short: "Terminal app — chat with the agent, dashboards on tabs",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if f, ok := cmd.InOrStdin().(*os.File); !ok || !term.IsTerminal(int(f.Fd())) {
-				return fmt.Errorf("cometcli ui needs an interactive terminal — run it in a real shell (or use --json commands for scripting)")
-			}
-			c, err := NewCtx(cmd, true)
-			if err != nil {
-				return err
-			}
-			defer c.Close()
-			return tui.RunApp(c, reg, time.Duration(interval)*time.Second)
+			return runUI(cmd, reg, time.Duration(interval)*time.Second)
 		},
 	}
 	cmd.Flags().IntVar(&interval, "interval", 5, "refresh interval seconds")
 	return cmd
+}
+
+func isTerminal(r io.Reader) bool {
+	f, ok := r.(*os.File)
+	return ok && term.IsTerminal(int(f.Fd()))
+}
+
+// runUI opens the chat-first TUI (shared by `cometcli ui` and bare `cometcli`).
+func runUI(cmd *cobra.Command, reg *toolkit.Registry, interval time.Duration) error {
+	if !isTerminal(cmd.InOrStdin()) {
+		return fmt.Errorf("cometcli ui needs an interactive terminal — run it in a real shell (or use --json commands for scripting)")
+	}
+	c, err := NewCtx(cmd, true)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	defer c.Audit.Close()
+	return tui.RunApp(c, reg, interval)
 }

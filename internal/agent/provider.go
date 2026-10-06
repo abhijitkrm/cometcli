@@ -4,9 +4,13 @@
 package agent
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"strings"
 
@@ -60,9 +64,31 @@ type Provider interface {
 	Name() string
 }
 
+// Streamer is implemented by providers that can stream assistant text as
+// it is generated. onText receives each text chunk; the returned Response
+// is the same as Chat's (full text + tool calls).
+type Streamer interface {
+	Stream(ctx context.Context, r *Request, onText func(string)) (*Response, error)
+}
+
+// ErrOffline is returned when COMETCLI_OFFLINE disables the agent.
+var ErrOffline = errors.New("agent disabled by COMETCLI_OFFLINE — the CLI, `cometcli mcp`, and all tool subcommands still work")
+
+// Offline reports whether COMETCLI_OFFLINE is set to a truthy value.
+func Offline() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("COMETCLI_OFFLINE"))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
+}
+
 // NewProvider builds the provider from profile agent config.
 // Env fallback: COMETCLI_LLM_API_KEY, then provider-specific vars.
 func NewProvider(ac config.AgentConf) (Provider, error) {
+	if Offline() {
+		return nil, ErrOffline
+	}
 	key := func(env string) string {
 		if ac.APIKeyEnv != "" {
 			return os.Getenv(ac.APIKeyEnv)
@@ -115,4 +141,53 @@ func def(v, d string) string {
 		return d
 	}
 	return v
+}
+
+// readSSE parses a text/event-stream body, invoking fn with each event's
+// joined data payload. Comment and event-name lines are ignored.
+func readSSE(r io.Reader, fn func(data string) error) error {
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 64<<10), 8<<20)
+	var data []string
+	dispatch := func() error {
+		if len(data) == 0 {
+			return nil
+		}
+		d := strings.Join(data, "\n")
+		data = data[:0]
+		return fn(d)
+	}
+	for sc.Scan() {
+		line := sc.Text()
+		switch {
+		case line == "":
+			if err := dispatch(); err != nil {
+				return err
+			}
+		case strings.HasPrefix(line, "data:"):
+			data = append(data, strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " "))
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return err
+	}
+	return dispatch()
+}
+
+// apiError extracts {"error":{"message":…}} from a non-2xx response body.
+func apiError(prefix string, resp *http.Response) error {
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	var e struct {
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(raw, &e) == nil && e.Error != nil && e.Error.Message != "" {
+		return fmt.Errorf("%s: %s (HTTP %d)", prefix, e.Error.Message, resp.StatusCode)
+	}
+	msg := strings.TrimSpace(string(raw))
+	if len(msg) > 300 {
+		msg = msg[:300] + "…"
+	}
+	return fmt.Errorf("%s: HTTP %d %s", prefix, resp.StatusCode, msg)
 }
