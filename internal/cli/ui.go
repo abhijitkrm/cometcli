@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/abhijitkrm/cometcli/internal/agent"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
 	"github.com/abhijitkrm/cometcli/internal/tui"
 )
@@ -27,6 +28,7 @@ func UICmd(reg *toolkit.Registry) *cobra.Command {
 		},
 	}
 	cmd.Flags().IntVar(&interval, "interval", 5, "refresh interval seconds")
+	sessionFlags(cmd)
 	return cmd
 }
 
@@ -46,5 +48,7 @@ func runUI(cmd *cobra.Command, reg *toolkit.Registry, interval time.Duration) er
 	}
 	defer c.Close()
 	defer c.Audit.Close()
-	return tui.RunApp(c, reg, interval)
+	return tui.RunApp(c, reg, interval, func(a *agent.Agent) (string, error) {
+		return applyAgentFlags(cmd, a)
+	})
 }

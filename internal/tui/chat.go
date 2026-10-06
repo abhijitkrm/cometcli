@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
@@ -30,6 +31,9 @@ type chatPane struct {
 	// streaming: index of the block being filled by deltas (-1 = none)
 	live     int
 	liveText string
+	// thinking: index of the reasoning block being streamed (-1 = none)
+	think     int
+	thinkText string
 
 	md  *glamour.TermRenderer
 	mdW int
@@ -41,6 +45,13 @@ type evDone struct {
 	text string
 	err  error
 }
+
+// jobDoneMsg reports a slash command's background job (e.g. /compact).
+type jobDoneMsg struct {
+	text string
+	err  error
+}
+
 type runResMsg struct {
 	name, text string
 	err        error
@@ -54,7 +65,7 @@ var (
 	approveSt = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
 )
 
-func newChatPane(c *toolkit.Context, reg *toolkit.Registry, appr *tuiApprover) *chatPane {
+func newChatPane(c *toolkit.Context, reg *toolkit.Registry, appr *tuiApprover, setup ...AgentSetup) *chatPane {
 	ta := textarea.New()
 	ta.Placeholder = "ask about your node, or /help"
 	ta.Prompt = "❯ "
@@ -64,7 +75,7 @@ func newChatPane(c *toolkit.Context, reg *toolkit.Registry, appr *tuiApprover) *
 	ta.CharLimit = 0
 	ta.KeyMap.InsertNewline.SetEnabled(false)
 
-	p := &chatPane{ta: ta, events: make(chan tea.Msg), live: -1}
+	p := &chatPane{ta: ta, events: make(chan tea.Msg), live: -1, think: -1}
 	// the agent's context uses the app-level approval bridge — tool prompts
 	// surface as the in-app modal, never stdin (bubbletea owns it raw).
 	sub := &toolkit.Context{
@@ -78,7 +89,17 @@ func newChatPane(c *toolkit.Context, reg *toolkit.Registry, appr *tuiApprover) *
 	} else {
 		ag.OnEvent = func(e agent.Event) { p.push(evAgent{e}) }
 		p.agent = ag
+		var notes []string
+		for _, fn := range setup {
+			note, err := fn(ag)
+			if err != nil {
+				notes = append(notes, errStl.Render(err.Error()))
+			} else if note != "" {
+				notes = append(notes, dimSt.Render(note))
+			}
+		}
 		p.blocks = append(p.blocks, dimSt.Render(fmt.Sprintf("%s/%s · %s · session %s", ag.Provider.Name(), ag.Model, ag.Policy, ag.ID())))
+		p.blocks = append(p.blocks, notes...)
 	}
 	return p
 }
@@ -221,6 +242,14 @@ anything else is sent to the agent — "why is disk high", "unjail", "send 1uato
 			p.append("info", res.Text)
 			m.syncChatView()
 		}
+		if res.Job != nil {
+			p.busy = true
+			job, ctx := res.Job, m.c.Context
+			return func() tea.Msg {
+				txt, err := job(ctx)
+				return jobDoneMsg{txt, err}
+			}
+		}
 		if res.Prompt != "" {
 			p.append("user", res.Prompt)
 			m.syncChatView()
@@ -233,7 +262,26 @@ anything else is sent to the agent — "why is disk high", "unjail", "send 1uato
 // onAgentEvent renders one streamed agent event into the transcript.
 func (m *AppModel) onAgentEvent(e agent.Event) {
 	p := m.chat
+	if e.Kind != agent.EvThinking {
+		p.think, p.thinkText = -1, ""
+	}
 	switch e.Kind {
+	case agent.EvThinking:
+		p.thinkText += e.Text
+		if p.think < 0 {
+			p.blocks = append(p.blocks, "")
+			p.think = len(p.blocks) - 1
+		}
+		t := strings.Join(strings.Fields(p.thinkText), " ")
+		if len(t) > 240 { // show the tail: what it's thinking about now
+			t = "…" + t[len(t)-240:]
+			for len(t) > 3 && !utf8.RuneStart(t[3]) {
+				t = "…" + t[4:]
+			}
+		}
+		p.blocks[p.think] = dimSt.Render("∴ " + t)
+	case agent.EvNotice:
+		p.append("info", e.Text)
 	case agent.EvDelta:
 		p.liveText += e.Text
 		if p.live < 0 {

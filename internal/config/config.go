@@ -114,6 +114,18 @@ type AgentConf struct {
 	RedactEndpoints bool `yaml:"redact_endpoints,omitempty"`
 	// NoStream disables token streaming for endpoints that mishandle it.
 	NoStream bool `yaml:"no_stream,omitempty"`
+	// Effort is the reasoning depth: low | medium | high | xhigh | max
+	// (empty = model default). Mapped to each provider's own control.
+	Effort string `yaml:"effort,omitempty"`
+	// MaxTokens caps output tokens per model round (0 = provider default).
+	MaxTokens int `yaml:"max_tokens,omitempty"`
+	// MaxTurns bounds model rounds per prompt (0 = 50).
+	MaxTurns int `yaml:"max_turns,omitempty"`
+	// ContextWindow overrides the model's context size in tokens.
+	ContextWindow int `yaml:"context_window,omitempty"`
+	// CompactAt is the prompt size in tokens that triggers summarizing
+	// the conversation (0 = 80% of the window, at most 200k).
+	CompactAt int `yaml:"compact_at,omitempty"`
 }
 
 // Alerts configures notification sinks for the monitor.

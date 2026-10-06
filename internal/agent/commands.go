@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -21,6 +22,9 @@ type CmdResult struct {
 	// /runbook <name> so the run goes through the normal approval gate and
 	// streams like any other request.
 	Prompt string
+	// Job, when set, is slow work (a model call) the front-end runs off
+	// its UI loop; its returned text is shown like Text.
+	Job func(context.Context) (string, error)
 }
 
 // CommandHelp lists the shared slash commands; front-ends append their own.
@@ -31,7 +35,12 @@ const CommandHelp = `  /mode [ops|readonly]          show or set the approval po
   /tools                        list tools with how this session treats each
   /profile                      active profile
   /audit                        audit log path + session id
-  /reset                        clear conversation, start a new audit session`
+  /reset                        clear conversation, start a new audit session
+  /compact [focus]              summarize the conversation to free context
+  /cost                         token usage for this session
+  /effort [low|medium|high|xhigh|max|default]  show or set reasoning depth
+  /sessions                     list saved sessions
+  /resume <id>                  load a saved session into this one`
 
 // RunCommand executes a shared slash command. a may be nil when no LLM
 // provider is configured — commands that need the agent say so.
@@ -164,6 +173,81 @@ func RunCommand(a *Agent, c *toolkit.Context, reg *toolkit.Registry, line string
 		a.Provider, a.Model, a.conf = p, modelOf(p), conf
 		return CmdResult{Text: fmt.Sprintf("switched to %s/%s (conversation kept)", p.Name(), a.Model)}, nil
 
+	case "/compact":
+		if err := needAgent(); err != nil {
+			return CmdResult{}, err
+		}
+		focus := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "/compact"))
+		return CmdResult{Text: "compacting…", Job: func(ctx context.Context) (string, error) {
+			if err := a.Compact(ctx, focus); err != nil {
+				return "", err
+			}
+			return "compacted — the summary is attached to your next message", nil
+		}}, nil
+
+	case "/cost", "/usage":
+		if err := needAgent(); err != nil {
+			return CmdResult{}, err
+		}
+		u, last := a.Usage()
+		txt := fmt.Sprintf("input %s (cached %s) · output %s", humanTok(u.Input), humanTok(u.CacheRead), humanTok(u.Output))
+		if last > 0 {
+			txt += fmt.Sprintf("\ncontext %s of %s — auto-compacts at %s", humanTok(last), humanTok(a.contextWindow()), humanTok(a.compactThreshold()))
+		}
+		return CmdResult{Text: txt}, nil
+
+	case "/effort":
+		if err := needAgent(); err != nil {
+			return CmdResult{}, err
+		}
+		if len(f) > 1 {
+			e := strings.ToLower(f[1])
+			if e == "default" || e == "auto" {
+				e = ""
+			}
+			if err := ValidEffort(e); err != nil {
+				return CmdResult{}, err
+			}
+			a.Effort = e
+		}
+		if a.Effort == "" {
+			return CmdResult{Text: "effort: model default"}, nil
+		}
+		return CmdResult{Text: "effort: " + a.Effort}, nil
+
+	case "/sessions":
+		all, err := ListSessions()
+		if err != nil {
+			return CmdResult{}, err
+		}
+		if len(all) == 0 {
+			return CmdResult{Text: "no saved sessions"}, nil
+		}
+		var b strings.Builder
+		for i, s := range all {
+			if i == 20 {
+				fmt.Fprintf(&b, "… %d more\n", len(all)-20)
+				break
+			}
+			fmt.Fprintf(&b, "%s  %s  %-10s %s\n", s.ID, s.Updated.Local().Format("Jan 02 15:04"), s.Profile, s.Title)
+		}
+		b.WriteString("resume with /resume <id> (a prefix is enough)")
+		return CmdResult{Text: b.String()}, nil
+
+	case "/resume":
+		if err := needAgent(); err != nil {
+			return CmdResult{}, err
+		}
+		if len(f) < 2 {
+			return RunCommand(a, c, reg, "/sessions")
+		}
+		sf, err := LoadSession(f[1])
+		if err != nil {
+			return CmdResult{}, err
+		}
+		a.Restore(sf)
+		return CmdResult{Text: fmt.Sprintf("resumed %s — %s (%d messages)", sf.ID, sf.Title, len(sf.History))}, nil
+
 	case "/runbook", "/runbooks":
 		if len(f) == 1 {
 			var b strings.Builder
@@ -192,4 +276,15 @@ func RunCommand(a *Agent, c *toolkit.Context, reg *toolkit.Registry, line string
 		}, nil
 	}
 	return CmdResult{}, ErrUnknownCommand
+}
+
+// humanTok renders a token count compactly: 950, 12.3k, 1.2M.
+func humanTok(n int) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1e6)
+	case n >= 1000:
+		return fmt.Sprintf("%.1fk", float64(n)/1e3)
+	}
+	return fmt.Sprint(n)
 }

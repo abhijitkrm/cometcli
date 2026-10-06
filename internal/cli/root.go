@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -55,11 +56,18 @@ ask "..."' for one-shot questions, or 'cometcli serve' for a local web chat.`,
 	pf.StringVar(&flagProfile, "profile", "", "profile to use (env COMETCLI_PROFILE)")
 	pf.BoolVar(&flagJSON, "json", false, "emit structured JSON")
 	pf.BoolVarP(&flagYes, "yes", "y", false, "auto-approve observe/diagnose prompts (never on-chain)")
+	sessionFlags(root)
+	pf.Bool("debug", false, "log every LLM API attempt (status, timing, retries) to stderr")
+	root.PersistentPreRun = func(cmd *cobra.Command, _ []string) {
+		if d, _ := cmd.Flags().GetBool("debug"); d {
+			_ = os.Setenv("COMETCLI_DEBUG", "1")
+		}
+	}
 
 	for _, c := range toolGroupCommands(reg) {
 		root.AddCommand(c)
 	}
-	root.AddCommand(profileCmd(), auditCmd(), versionCmd(), initCmd())
+	root.AddCommand(profileCmd(), auditCmd(), versionCmd(), initCmd(), sessionsCmd())
 	root.AddCommand(extra...)
 	return root
 }

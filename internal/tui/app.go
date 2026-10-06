@@ -7,11 +7,13 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/abhijitkrm/cometcli/internal/agent"
 	"github.com/abhijitkrm/cometcli/internal/config"
 	"github.com/abhijitkrm/cometcli/internal/monitor"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
@@ -94,13 +96,17 @@ type AppModel struct {
 	quitting bool
 }
 
+// AgentSetup adjusts the chat agent after it is built (CLI flags,
+// session resume). The returned text, if any, is shown in the transcript.
+type AgentSetup func(*agent.Agent) (string, error)
+
 // NewApp creates the app model.
-func NewApp(c *toolkit.Context, reg *toolkit.Registry, interval time.Duration) *AppModel {
+func NewApp(c *toolkit.Context, reg *toolkit.Registry, interval time.Duration, setup ...AgentSetup) *AppModel {
 	vp := viewport.New(80, 20)
 	appr := &tuiApprover{req: make(chan approvalReq)}
 	return &AppModel{
 		c: c, reg: reg, interval: interval, vp: vp,
-		chat:     newChatPane(c, reg, appr),
+		chat:     newChatPane(c, reg, appr, setup...),
 		approver: appr, txGas: "1e9",
 	}
 }
@@ -301,6 +307,14 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chat.append("err", fmt.Sprintf("%s: %v", v.name, v.err))
 		} else {
 			m.chat.append("ok", v.name)
+			m.chat.append("info", v.text)
+		}
+		m.syncChatView()
+	case jobDoneMsg:
+		m.chat.busy = false
+		if v.err != nil {
+			m.chat.append("err", v.err.Error())
+		} else if v.text != "" {
 			m.chat.append("info", v.text)
 		}
 		m.syncChatView()
@@ -555,14 +569,18 @@ func firstLine(s string) string {
 		s = s[:i]
 	}
 	if len(s) > 120 {
-		s = s[:120] + "…"
+		n := 120
+		for n > 0 && !utf8.RuneStart(s[n]) {
+			n--
+		}
+		s = s[:n] + "…"
 	}
 	return s
 }
 
 // RunApp starts the multi-pane TUI.
-func RunApp(c *toolkit.Context, reg *toolkit.Registry, interval time.Duration) error {
-	p := tea.NewProgram(NewApp(c, reg, interval), tea.WithAltScreen())
+func RunApp(c *toolkit.Context, reg *toolkit.Registry, interval time.Duration, setup ...AgentSetup) error {
+	p := tea.NewProgram(NewApp(c, reg, interval, setup...), tea.WithAltScreen())
 	_, err := p.Run()
 	return err
 }

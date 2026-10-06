@@ -21,6 +21,12 @@ const (
 	EvToolStart EventKind = "tool_start"
 	// EvToolResult fires after a tool runs (Err set on failure).
 	EvToolResult EventKind = "tool_result"
+	// EvThinking is streamed model reasoning (a summary, where the
+	// provider exposes one). Front-ends may show it dimmed or hide it.
+	EvThinking EventKind = "thinking"
+	// EvNotice is a status line from the loop itself: continuation after
+	// an output cutoff, compaction, a refusal, a failed session save.
+	EvNotice EventKind = "notice"
 	// EvApproval asks the human to approve a gated action; answer it via
 	// Approval.Answer. Only emitted when the context uses EventApprover.
 	EvApproval EventKind = "approval"

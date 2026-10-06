@@ -201,12 +201,18 @@ cometcli audit                         # today's audit log (prompts, LLM turns, 
 cometcli audit sessions [--all]        # agent sessions recorded in the log
 cometcli audit replay <session-id>     # reproduce a session offline: recorded LLM turns +
                                        # tool output re-driven through the agent loop
+cometcli sessions [--all]              # saved agent conversations, newest first
 cometcli completion zsh                # shell completion
 cometcli version
 ```
 
 Agent flags (`agent`, `ask`, `serve`): `--mode ops|readonly`, `--safe` (=readonly),
-`--autopilot local-change`, `--budget N` tool calls per turn, `--max-iter N`, `--no-stream`.
+`--autopilot local-change`, `--budget N` tool calls per turn, `--max-iter N` (default 50), `--no-stream`.
+
+Session flags (bare `cometcli`, `ui`, `agent`, `ask`): `-c/--continue` resumes the latest
+session started in this directory, `-r/--resume <id>` a specific one (an id prefix works),
+`--model`, `--effort low|medium|high|xhigh|max`, `--max-tokens N`. Every conversation is
+saved after each turn to `~/.cometcli/sessions/` (0600, already redacted).
 
 ### Agent session commands (TUI, REPL, web)
 
@@ -218,19 +224,38 @@ Agent flags (`agent`, `ask`, `serve`): `--mode ops|readonly`, `--safe` (=readonl
 | `/runbook [name]` | list runbooks, or have the agent run one through the normal approval gate |
 | `/tools` | every tool with its tier and how this session treats it (auto/confirm/deny) |
 | `/profile`, `/audit`, `/reset` | profile + policy, audit path + session id, new session |
+| `/compact [focus]` | summarize the conversation to free context (also automatic near the limit) |
+| `/cost` | session token usage, cache hits, and current context size |
+| `/effort [level\|default]` | show or set reasoning depth for the rest of the session |
+| `/sessions`, `/resume <id>` | list saved sessions, or load one into the current session |
 
 ### Agent config (per profile)
 
 ```yaml
 agent:
   provider: anthropic            # anthropic | openai | groq | gemini | openai-compat/ollama | off
-  model: claude-sonnet-4-5
+  model: claude-opus-5-5         # default per provider when omitted
   mode: ops                      # ops (default) | readonly
   autopilot: [local-change]      # optional; on-chain is rejected
   redact_hosts: [val.internal]   # masked before any text reaches the LLM
   redact_endpoints: true         # also mask this profile's endpoint/SSH hosts
   no_stream: false               # set true for endpoints that mishandle streaming
+  effort: medium                 # reasoning depth; mapped per provider (see below)
+  max_tokens: 0                  # output cap per round; 0 = provider default
+  max_turns: 50                  # model rounds per prompt
+  context_window: 0              # override the model's context size (tokens)
+  compact_at: 0                  # prompt size that triggers auto-compaction; 0 = 80% of window, ≤200k
 ```
+
+`effort` maps to each provider's own control: Anthropic `output_config.effort`, OpenAI
+and Groq `reasoning_effort` (`xhigh`/`max` → `high`; reasoning models only), Gemini
+`generation_config.thinking_level`. Leave it unset for models without a reasoning knob.
+
+Long sessions stay healthy on every provider: transient API failures (429, 5xx,
+overloaded) are retried with backoff honoring `Retry-After`; a reply cut off at the
+output limit is continued automatically; the system prompt is frozen per session (later
+node snapshots ride on your messages) so provider prompt caches stay warm; and when
+the prompt nears `compact_at`, the conversation is summarized at the next turn boundary.
 
 `COMETCLI_OFFLINE=1` disables the agent entirely (ask/agent/serve chat refuse); every
 tool subcommand and `cometcli mcp` keep working. Mnemonics (checked against the BIP-39

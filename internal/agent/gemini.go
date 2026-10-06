@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -58,7 +57,7 @@ func gemInput(msgs []Msg) []json.RawMessage {
 				{"type": "text", "text": m.Text},
 			}})
 		case "assistant":
-			if len(m.RawSteps) > 0 {
+			if len(m.RawSteps) > 0 && (m.RawProvider == "" || m.RawProvider == "gemini") {
 				var steps []json.RawMessage
 				if json.Unmarshal(m.RawSteps, &steps) == nil {
 					out = append(out, steps...)
@@ -108,8 +107,16 @@ func (g *gemini) body(r *Request, stream bool) map[string]any {
 	if len(tools) > 0 {
 		b["tools"] = tools
 	}
+	gc := map[string]any{}
 	if r.MaxTok > 0 {
-		b["generation_config"] = map[string]any{"max_output_tokens": r.MaxTok}
+		gc["max_output_tokens"] = r.MaxTok
+	}
+	if r.Effort != "" {
+		gc["thinking_level"] = gemEffort(r.Effort)
+		gc["thinking_summaries"] = "auto"
+	}
+	if len(gc) > 0 {
+		b["generation_config"] = gc
 	}
 	if stream {
 		b["stream"] = true
@@ -117,18 +124,58 @@ func (g *gemini) body(r *Request, stream bool) map[string]any {
 	return b
 }
 
+// gemEffort maps the neutral effort scale onto thinking_level
+// (minimal | low | medium | high).
+func gemEffort(e string) string {
+	switch e {
+	case "xhigh", "max":
+		return "high"
+	}
+	return e
+}
+
+// gemUsage is the Interaction usage object.
+type gemUsage struct {
+	Input   int `json:"total_input_tokens"`
+	Cached  int `json:"total_cached_tokens"`
+	Output  int `json:"total_output_tokens"`
+	Thought int `json:"total_thought_tokens"`
+}
+
+func (u gemUsage) usage() Usage {
+	return Usage{Input: u.Input, Output: u.Output + u.Thought, CacheRead: u.Cached}
+}
+
+func gemStop(status string, calls int) StopReason {
+	switch status {
+	case "incomplete":
+		return StopMaxTokens
+	case "requires_action":
+		return StopToolUse
+	case "completed":
+		if calls > 0 {
+			return StopToolUse
+		}
+		return StopEnd
+	}
+	return ""
+}
+
 func (g *gemini) post(ctx context.Context, body map[string]any) (*http.Response, error) {
-	raw, _ := json.Marshal(body)
-	url := strings.TrimSuffix(g.base, "/") + "/v1beta/interactions"
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(raw))
+	raw, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("content-type", "application/json")
-	if g.key != "" {
-		req.Header.Set("x-goog-api-key", g.key)
+	resp, err := doHTTP(ctx, g.client(), strings.TrimSuffix(g.base, "/")+"/v1beta/interactions", raw,
+		map[string]string{"x-goog-api-key": g.key})
+	if err != nil {
+		return nil, err
 	}
-	return g.client().Do(req)
+	if resp.StatusCode/100 != 2 {
+		defer resp.Body.Close()
+		return nil, apiError(g.Name(), resp)
+	}
+	return resp, nil
 }
 
 // gemStepText extracts assistant text from a parsed step.
@@ -160,6 +207,8 @@ func gemResponse(steps []json.RawMessage, outputText string) *Response {
 			continue
 		}
 		switch st.Type {
+		case "thought":
+			res.Thinking += gemThoughtText(s)
 		case "function_call":
 			args := st.Arguments
 			if len(args) == 0 {
@@ -183,18 +232,42 @@ func gemResponse(steps []json.RawMessage, outputText string) *Response {
 	return res
 }
 
+// gemThoughtText pulls readable text out of a thought step's summary.
+func gemThoughtText(raw json.RawMessage) string {
+	var t struct {
+		Summary json.RawMessage `json:"summary"`
+	}
+	if json.Unmarshal(raw, &t) != nil || len(t.Summary) == 0 {
+		return ""
+	}
+	var parts []struct {
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(t.Summary, &parts) == nil {
+		var b strings.Builder
+		for _, p := range parts {
+			b.WriteString(p.Text)
+		}
+		return b.String()
+	}
+	var str string
+	if json.Unmarshal(t.Summary, &str) == nil {
+		return str
+	}
+	return ""
+}
+
 func (g *gemini) Chat(ctx context.Context, r *Request) (*Response, error) {
 	resp, err := g.post(ctx, g.body(r, false))
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode/100 != 2 {
-		return nil, apiError(g.Name(), resp)
-	}
 	var out struct {
 		OutputText string            `json:"output_text"`
 		Steps      []json.RawMessage `json:"steps"`
+		Status     string            `json:"status"`
+		Usage      gemUsage          `json:"usage"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, err
@@ -202,7 +275,9 @@ func (g *gemini) Chat(ctx context.Context, r *Request) (*Response, error) {
 	if len(out.Steps) == 0 && out.OutputText == "" {
 		return nil, fmt.Errorf("%s: empty interaction", g.Name())
 	}
-	return gemResponse(out.Steps, out.OutputText), nil
+	res := gemResponse(out.Steps, out.OutputText)
+	res.Stop, res.Usage = gemStop(out.Status, len(res.Calls)), out.Usage.usage()
+	return res, nil
 }
 
 // gemEvent is one SSE data payload from the Interactions stream.
@@ -218,6 +293,8 @@ type gemEvent struct {
 	Interaction struct {
 		Steps      []json.RawMessage `json:"steps"`
 		OutputText string            `json:"output_text"`
+		Status     string            `json:"status"`
+		Usage      gemUsage          `json:"usage"`
 	} `json:"interaction"`
 }
 
@@ -226,6 +303,8 @@ type gemStreamState struct {
 	steps  map[int]*json.RawMessage // index → assembled step
 	order  []int
 	argBuf map[int]*strings.Builder
+	status string
+	usage  gemUsage
 }
 
 func newGemStream() *gemStreamState {
@@ -266,6 +345,7 @@ func (s *gemStreamState) handle(ev *gemEvent, onText func(string)) (completed *R
 			}
 		}
 	case "interaction.completed", "interaction.complete":
+		s.status, s.usage = ev.Interaction.Status, ev.Interaction.Usage
 		if len(ev.Interaction.Steps) > 0 {
 			return &Response{RawSteps: mustJSON(ev.Interaction.Steps), Text: ev.Interaction.OutputText}, nil
 		}
@@ -310,9 +390,6 @@ func (g *gemini) Stream(ctx context.Context, r *Request, onText func(string)) (*
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode/100 != 2 {
-		return nil, apiError(g.Name(), resp)
-	}
 	st := newGemStream()
 	var text strings.Builder
 	var completed *Response
@@ -339,12 +416,13 @@ func (g *gemini) Stream(ctx context.Context, r *Request, onText func(string)) (*
 	if err != nil {
 		return nil, err
 	}
+	var res *Response
 	if completed != nil && len(completed.RawSteps) > 0 {
-		res := gemResponse(mustUnmarshalSteps(completed.RawSteps), firstNonEmpty(completed.Text, text.String()))
-		return res, nil
+		res = gemResponse(mustUnmarshalSteps(completed.RawSteps), firstNonEmpty(completed.Text, text.String()))
+	} else {
+		res = gemResponse(st.assemble(), text.String())
 	}
-	steps := st.assemble()
-	res := gemResponse(steps, text.String())
+	res.Stop, res.Usage = gemStop(st.status, len(res.Calls)), st.usage.usage()
 	return res, nil
 }
 

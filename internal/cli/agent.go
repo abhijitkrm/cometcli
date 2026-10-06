@@ -13,7 +13,18 @@ func agentFlags(cmd *cobra.Command) {
 	cmd.Flags().StringSlice("autopilot", nil, "tiers that skip the confirm prompt (only local-change; on-chain never)")
 	cmd.Flags().Bool("no-stream", false, "disable token streaming")
 	cmd.Flags().Int("budget", 0, "max tool calls per turn (0 = unlimited)")
-	cmd.Flags().Int("max-iter", 0, "max model iterations per turn (default 16)")
+	cmd.Flags().Int("max-iter", 0, "max model iterations per turn (default 50)")
+	sessionFlags(cmd)
+}
+
+// sessionFlags wires model and session options shared by every agent
+// front-end, bare `cometcli` included.
+func sessionFlags(cmd *cobra.Command) {
+	cmd.Flags().BoolP("continue", "c", false, "resume the most recent session started in this directory")
+	cmd.Flags().StringP("resume", "r", "", "resume a saved `id` (list them with: cometcli sessions)")
+	cmd.Flags().String("model", "", "model for this session (overrides the profile)")
+	cmd.Flags().String("effort", "", "reasoning depth: low | medium | high | xhigh | max")
+	cmd.Flags().Int("max-tokens", 0, "max output tokens per model round")
 }
 
 // AgentCmd opens the agentic REPL. Implemented in internal/agent.

@@ -44,11 +44,28 @@ type Printer struct {
 	Out      io.Writer
 	MD       *glamour.TermRenderer
 	streamed bool
+	thinking bool
 }
 
 // Handle renders one event.
 func (p *Printer) Handle(e Event) {
+	if p.thinking && e.Kind != EvThinking {
+		fmt.Fprintln(p.Out)
+		p.thinking = false
+	}
 	switch e.Kind {
+	case EvThinking:
+		if !p.thinking {
+			fmt.Fprint(p.Out, toolSt.Render("∴ "))
+			p.thinking = true
+		}
+		fmt.Fprint(p.Out, toolSt.Render(e.Text))
+	case EvNotice:
+		if p.streamed {
+			fmt.Fprintln(p.Out)
+			p.streamed = false
+		}
+		fmt.Fprintf(p.Out, "%s %s\n", toolSt.Render("·"), toolSt.Render(e.Text))
 	case EvDelta:
 		p.streamed = true
 		fmt.Fprint(p.Out, e.Text)
@@ -155,6 +172,13 @@ func (r *REPL) slash(cmd string) (prompt string, quit bool) {
 		if res.Text != "" {
 			fmt.Fprintln(r.Out, toolSt.Render(res.Text))
 		}
+		if res.Job != nil {
+			if txt, err := res.Job(r.Agent.Ctx); err != nil {
+				fmt.Fprintln(r.Out, errSt.Render(err.Error()))
+			} else if txt != "" {
+				fmt.Fprintln(r.Out, toolSt.Render(txt))
+			}
+		}
 	}
 	return res.Prompt, false
 }
@@ -175,7 +199,7 @@ func CompactArgs(args map[string]any) string {
 	}
 	s := strings.Join(parts, " ")
 	if len(s) > 100 {
-		s = s[:100] + "…"
+		s = safeCut(s, 100) + "…"
 	}
 	return s
 }

@@ -36,7 +36,7 @@ page. To reach it from another machine, tunnel it: ssh -L 8765:127.0.0.1:8765 ho
 			defer c.Audit.Close()
 			a, agentErr := agent.New(c, reg)
 			if agentErr == nil {
-				if err := applyAgentFlags(cmd, a); err != nil {
+				if _, err := applyAgentFlags(cmd, a); err != nil {
 					return err
 				}
 			}
