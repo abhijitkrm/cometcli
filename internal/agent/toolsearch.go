@@ -52,7 +52,7 @@ func (a *Agent) deferrable(t toolkit.Tool) bool {
 	if isMCP(t) {
 		return true
 	}
-	return a.Node() && !toolkit.IsAgentOnly(t) && !coreTools[t.Name()] && !toolkit.IsLongRunning(t) && strings.Contains(t.Name(), ".")
+	return a.Node() && !toolkit.IsAgentOnly(t) && !coreTools[t.Name()] && !toolkit.IsLongRunning(t) && !toolkit.IsOperatorOnly(t) && strings.Contains(t.Name(), ".")
 }
 
 // advertised reports whether t goes into this request's tool list.

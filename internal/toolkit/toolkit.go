@@ -306,3 +306,17 @@ type Timeouter interface {
 type OutputLimiter interface {
 	OutputLimit() int
 }
+
+// OperatorOnly is implemented by tools the agent must never call — key
+// management, whose output (a generated mnemonic) or input (a mnemonic
+// read from stdin) must stay between the operator and their terminal.
+// They remain CLI subcommands.
+type OperatorOnly interface {
+	OperatorOnly() bool
+}
+
+// IsOperatorOnly reports whether t is operator-only.
+func IsOperatorOnly(t Tool) bool {
+	o, ok := t.(OperatorOnly)
+	return ok && o.OperatorOnly()
+}

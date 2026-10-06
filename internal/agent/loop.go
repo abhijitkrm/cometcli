@@ -253,8 +253,8 @@ func (a *Agent) profileName() string {
 func (a *Agent) toolDefs() []ToolDef {
 	var out []ToolDef
 	for _, t := range a.Reg.All() {
-		if toolkit.IsLongRunning(t) {
-			continue // watchers never return inside a turn
+		if toolkit.IsLongRunning(t) || toolkit.IsOperatorOnly(t) {
+			continue // watchers never return inside a turn; key management is the operator's
 		}
 		if !a.Policy.Allows(t.Tier()) && !toolkit.IsDynamic(t) {
 			continue
@@ -531,6 +531,9 @@ func (a *Agent) execCall(ctx context.Context, call Call) Msg {
 	}
 	shownArgs := a.Redact.Args(args)
 	a.emit(Event{Kind: EvToolStart, Tool: name, Tier: t.Tier().String(), Args: shownArgs})
+	if toolkit.IsOperatorOnly(t) {
+		return a.toolErr(call, name, "refused: "+name+" handles key material and is operator-only — give the operator the command: cometcli "+strings.ReplaceAll(name, ".", " "))
+	}
 	if toolkit.IsLongRunning(t) {
 		return a.toolErr(call, name, "refused: "+name+" is a long-running watcher and cannot finish inside an agent turn — suggest `cometcli "+strings.ReplaceAll(name, ".", " ")+"` to the operator")
 	}

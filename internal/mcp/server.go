@@ -135,7 +135,7 @@ func (s *Server) handle(ctx context.Context, raw []byte) *response {
 func (s *Server) toolList() []map[string]any {
 	var out []map[string]any
 	for _, t := range s.Reg.All() {
-		if toolkit.IsLongRunning(t) || toolkit.IsAgentOnly(t) {
+		if toolkit.IsLongRunning(t) || toolkit.IsAgentOnly(t) || toolkit.IsOperatorOnly(t) {
 			continue // watchers never return; bash/read/edit are the client's own job
 		}
 		d := map[string]any{
@@ -186,7 +186,7 @@ func (s *Server) callTool(ctx context.Context, name string, args map[string]any)
 	if toolkit.IsLongRunning(t) {
 		return callResult{text: name + " is a long-running watcher — not callable over MCP; use the CLI"}, true
 	}
-	if toolkit.IsAgentOnly(t) {
+	if toolkit.IsAgentOnly(t) || toolkit.IsOperatorOnly(t) {
 		return callResult{text: name + " is not exported over MCP"}, true
 	}
 	runCtx, cancel := toolkit.WithDeadline(s.Ctx, 120*time.Second)

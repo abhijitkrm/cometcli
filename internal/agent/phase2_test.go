@@ -224,3 +224,30 @@ func TestGeneralModeAndScopeSwitch(t *testing.T) {
 		t.Fatalf("conversation not kept: %d messages", len(r.Messages))
 	}
 }
+
+type opOnly struct{ stubTool }
+
+func (opOnly) OperatorOnly() bool { return true }
+
+func TestOperatorOnlyToolsNeverReachTheAgent(t *testing.T) {
+	ran := false
+	keyAdd := opOnly{stubTool{name: "keys.add", tier: toolkit.TierLocalChange, run: func(*toolkit.Context, toolkit.Args) (*toolkit.Result, error) {
+		ran = true
+		return &toolkit.Result{Text: "mnemonic: …"}, nil
+	}}}
+	prov := &mockProvider{responses: []*Response{
+		{Calls: []Call{{ID: "c1", Name: "keys__add", Args: json.RawMessage(`{"name":"x"}`)}}},
+		{Text: "ok", Done: true},
+	}}
+	a, _ := newShellAgent(t, prov, keyAdd)
+	a.conf.Tools = "all"
+	a.Run(context.Background(), "make me a key")
+	for _, td := range prov.reqs[0].Tools {
+		if td.Name == "keys__add" {
+			t.Fatal("operator-only tool advertised")
+		}
+	}
+	if ran || !strings.Contains(lastToolText(a), "operator-only") {
+		t.Fatalf("ran=%v result=%q", ran, lastToolText(a))
+	}
+}
