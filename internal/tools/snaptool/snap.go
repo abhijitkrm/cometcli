@@ -4,6 +4,7 @@ package snaptool
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/abhijitkrm/cometcli/internal/client/comet"
@@ -95,70 +96,83 @@ trust_period = "%s"
 			"diff": toolkit.Diff(path, string(raw), updated)}); err != nil {
 		return nil, err
 	}
-	if err := h.WriteFile(c, path, []byte(updated), 0o644); err != nil {
+	mode := os.FileMode(0o600)
+	if fi, err := h.Stat(c, path); err == nil {
+		mode = fi.Mode().Perm()
+	}
+	if err := h.WriteFile(c, path, []byte(updated), mode); err != nil {
 		return nil, err
 	}
 	return &toolkit.Result{Text: fmt.Sprintf("statesync config applied (trust_height=%d)\n\n%s", height, cfg),
 		Data: map[string]any{"applied": true, "trust_height": height}}, nil
 }
 
-// patchStatesync rewrites the [statesync] section of config.toml in place.
+// patchStatesync sets the statesync keys in config.toml: in place inside
+// an existing [statesync] section (other keys and comments untouched),
+// adding any that are missing at the section's end — or appending the
+// whole section when the file has none.
 func patchStatesync(cfg, rpcs string, height int64, hash, trustPeriod string) string {
+	want := []struct{ key, val string }{
+		{"enable", "true"},
+		{"rpc_servers", `"` + rpcs + `"`},
+		{"trust_height", fmt.Sprint(height)},
+		{"trust_hash", `"` + hash + `"`},
+		{"trust_period", `"` + trustPeriod + `"`},
+	}
+	vals := map[string]string{}
+	for _, w := range want {
+		vals[w.key] = w.val
+	}
 	lines := strings.Split(cfg, "\n")
 	var out []string
-	inSS := false
-	setKeys := map[string]bool{}
-	put := func(key, val string) {
-		out = append(out, fmt.Sprintf("%s = %s", key, val))
-		setKeys[key] = true
+	inSS, found := false, false
+	set := map[string]bool{}
+	flush := func() {
+		for _, w := range want {
+			if !set[w.key] {
+				out = append(out, w.key+" = "+w.val)
+				set[w.key] = true
+			}
+		}
 	}
 	for _, ln := range lines {
 		t := strings.TrimSpace(ln)
 		if strings.HasPrefix(t, "[") {
 			if inSS {
-				// flush unset keys before leaving the section
-				if !setKeys["rpc_servers"] {
-					put("rpc_servers", `"`+rpcs+`"`)
-				}
-				if !setKeys["trust_height"] {
-					put("trust_height", fmt.Sprint(height))
-				}
-				if !setKeys["trust_hash"] {
-					put("trust_hash", `"`+hash+`"`)
-				}
-				if !setKeys["trust_period"] {
-					put("trust_period", `"`+trustPeriod+`"`)
-				}
+				flush()
 			}
 			inSS = t == "[statesync]"
+			found = found || inSS
 			out = append(out, ln)
 			continue
 		}
-		if inSS {
-			switch {
-			case strings.HasPrefix(t, "enable"):
-				out = append(out, "enable = true")
-				setKeys["enable"] = true
-				continue
-			case strings.HasPrefix(t, "rpc_servers"):
-				out = append(out, fmt.Sprintf(`rpc_servers = "%s"`, rpcs))
-				setKeys["rpc_servers"] = true
-				continue
-			case strings.HasPrefix(t, "trust_height"):
-				out = append(out, fmt.Sprintf("trust_height = %d", height))
-				setKeys["trust_height"] = true
-				continue
-			case strings.HasPrefix(t, "trust_hash"):
-				out = append(out, fmt.Sprintf(`trust_hash = "%s"`, hash))
-				setKeys["trust_hash"] = true
-				continue
-			case strings.HasPrefix(t, "trust_period"):
-				out = append(out, fmt.Sprintf(`trust_period = "%s"`, trustPeriod))
-				setKeys["trust_period"] = true
-				continue
+		if inSS && !strings.HasPrefix(t, "#") {
+			if k, _, ok := strings.Cut(t, "="); ok {
+				k = strings.TrimSpace(k)
+				if v, ok := vals[k]; ok {
+					out = append(out, k+" = "+v)
+					set[k] = true
+					continue
+				}
 			}
 		}
 		out = append(out, ln)
+	}
+	if inSS {
+		// [statesync] was the last section: keep a trailing newline last
+		for len(out) > 0 && strings.TrimSpace(out[len(out)-1]) == "" {
+			out = out[:len(out)-1]
+		}
+		flush()
+		out = append(out, "")
+	}
+	if !found {
+		for len(out) > 0 && strings.TrimSpace(out[len(out)-1]) == "" {
+			out = out[:len(out)-1]
+		}
+		out = append(out, "", "[statesync]")
+		flush()
+		out = append(out, "")
 	}
 	return strings.Join(out, "\n")
 }
