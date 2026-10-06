@@ -158,8 +158,10 @@ cometcli ask "summarize signing health and flag any exposure risks"
 ```
 
 Providers: `anthropic`, `openai`, `groq` (`GROQ_API_KEY`, default model
-`llama-3.3-70b-versatile`), `openai-compat` (Ollama, vLLM, LM Studio —
-any OpenAI-shaped endpoint via `--agent-base-url`), or `off`.
+`llama-3.3-70b-versatile`), `gemini` (`GEMINI_API_KEY`, default model
+`gemini-3.8-flash` — Interactions API, `store=false` so nothing is kept
+server-side), `openai-compat` (Ollama, vLLM, LM Studio — any OpenAI-shaped
+endpoint via `--agent-base-url`), or `off`.
 
 The model sees tool calls as function calls; every on-chain or local-change
 call still goes through the same approval gate — **the model can propose,

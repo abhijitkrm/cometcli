@@ -223,7 +223,7 @@ Agent flags (`agent`, `ask`, `serve`): `--mode ops|readonly`, `--safe` (=readonl
 
 ```yaml
 agent:
-  provider: anthropic            # anthropic | openai | groq | openai-compat/ollama | off
+  provider: anthropic            # anthropic | openai | groq | gemini | openai-compat/ollama | off
   model: claude-sonnet-4-5
   mode: ops                      # ops (default) | readonly
   autopilot: [local-change]      # optional; on-chain is rejected

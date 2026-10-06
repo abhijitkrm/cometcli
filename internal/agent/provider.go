@@ -26,6 +26,9 @@ type Msg struct {
 	ToolName string          // for role=tool
 	IsError  bool            // tool result flagged error
 	JSONArgs json.RawMessage // for role=assistant with calls
+	// RawSteps carries a provider's verbatim turn steps (Gemini Interactions
+	// echoes them back in stateless mode, preserving thought signatures).
+	RawSteps json.RawMessage
 }
 
 // Call is a tool invocation requested by the model.
@@ -56,6 +59,8 @@ type Response struct {
 	Text  string
 	Calls []Call
 	Done  bool // true when the model finished (no tool calls pending)
+	// RawSteps is the provider's raw step list for this turn (Gemini only).
+	RawSteps json.RawMessage
 }
 
 // Provider talks to an LLM API.
@@ -118,6 +123,13 @@ func NewProvider(ac config.AgentConf) (Provider, error) {
 			key:   key("GROQ_API_KEY"),
 			model: def(ac.Model, "llama-3.3-70b-versatile"),
 			base:  def(ac.BaseURL, "https://api.groq.com/openai"),
+		}, nil
+	case "gemini", "google":
+		// Gemini Interactions API — https://aistudio.google.com/apikey
+		return &gemini{
+			key:   key("GEMINI_API_KEY"),
+			model: def(ac.Model, "gemini-3.8-flash"),
+			base:  def(ac.BaseURL, "https://generativelanguage.googleapis.com"),
 		}, nil
 	case "openai-compat", "ollama", "local", "vllm":
 		base := ac.BaseURL

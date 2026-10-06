@@ -188,7 +188,7 @@ func (a *Agent) Run(ctx context.Context, input string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		a.history = append(a.history, Msg{Role: "assistant", Text: resp.Text, Calls: resp.Calls})
+		a.history = append(a.history, Msg{Role: "assistant", Text: resp.Text, Calls: resp.Calls, RawSteps: resp.RawSteps})
 		a.logLLM(i, resp)
 		shown := a.Redact.Text(resp.Text)
 		if shown != "" {
