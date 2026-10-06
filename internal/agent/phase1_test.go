@@ -462,6 +462,7 @@ func TestToolSetChangeDropsBoundThinking(t *testing.T) {
 	ro := stubTool{name: "node.status", tier: toolkit.TierObserve, run: func(*toolkit.Context, toolkit.Args) (*toolkit.Result, error) { return &toolkit.Result{}, nil }}
 	rw := stubTool{name: "node.restart", tier: toolkit.TierLocalChange, run: func(*toolkit.Context, toolkit.Args) (*toolkit.Result, error) { return &toolkit.Result{}, nil }}
 	a := newTestAgent(t, prov, ro, rw)
+	a.conf.Tools = "all"
 	a.Run(context.Background(), "one")
 	a.history[1].RawSteps, a.history[1].RawProvider = json.RawMessage(`[{"type":"thinking","signature":"s"}]`), "anthropic"
 	a.Policy.Mode = ModeReadOnly // hides node.restart → tool set changes

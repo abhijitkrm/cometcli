@@ -284,7 +284,13 @@ agent:
   max_turns: 50                  # model rounds per prompt
   context_window: 0              # override the model's context size (tokens)
   compact_at: 0                  # prompt size that triggers auto-compaction; 0 = 80% of window, ≤200k
+  tools: ""                      # "all" sends every tool schema each request; default loads on demand
 ```
+
+Each request carries a core tool set (the general tools plus node.status/health/logs and
+val.status/signing) and a catalog of the rest by name; the model loads others with
+`tool_search` as it needs them. That keeps a request near 2.5k tokens instead of ~7.5k —
+small enough for free-tier per-minute limits — and cheaper on every provider.
 
 `effort` maps to each provider's own control: Anthropic `output_config.effort`, OpenAI
 and Groq `reasoning_effort` (`xhigh`/`max` → `high`; reasoning models only), Gemini

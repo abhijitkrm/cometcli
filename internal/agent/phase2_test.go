@@ -136,3 +136,45 @@ func TestBashOutputUsesToolLimit(t *testing.T) {
 		t.Fatalf("bash output length %d — should keep up to 30k", n)
 	}
 }
+
+func TestDeferredToolsLoadOnDemand(t *testing.T) {
+	gov := stubTool{name: "chain.gov", tier: toolkit.TierObserve, run: func(*toolkit.Context, toolkit.Args) (*toolkit.Result, error) {
+		return &toolkit.Result{Text: "proposal 3 voting"}, nil
+	}}
+	core := stubTool{name: "node.status", tier: toolkit.TierObserve, run: func(*toolkit.Context, toolkit.Args) (*toolkit.Result, error) {
+		return &toolkit.Result{}, nil
+	}}
+	prov := &mockProvider{responses: []*Response{
+		{Calls: []Call{{ID: "c1", Name: "tool_search", Args: json.RawMessage(`{"query":"select:chain.gov"}`)}}},
+		{Calls: []Call{{ID: "c2", Name: "chain__gov", Args: json.RawMessage(`{}`)}}},
+		{Text: "ok", Done: true},
+	}}
+	a, _ := newShellAgent(t, prov, gov, core)
+	a.Run(context.Background(), "any proposals?")
+	names := func(r *Request) string {
+		var n []string
+		for _, td := range r.Tools {
+			n = append(n, td.Name)
+		}
+		return strings.Join(n, ",")
+	}
+	if first := names(prov.reqs[0]); strings.Contains(first, "chain__gov") || !strings.Contains(first, "node__status") || !strings.Contains(first, "tool_search") {
+		t.Fatalf("first request tools = %s", first)
+	}
+	if !strings.Contains(prov.reqs[0].System, "- chain: gov") {
+		t.Fatalf("catalog missing from system prompt: %q", prov.reqs[0].System)
+	}
+	if second := names(prov.reqs[1]); !strings.Contains(second, "chain__gov") {
+		t.Fatalf("loaded tool not advertised: %s", second)
+	}
+	if !strings.Contains(lastToolText(a), "proposal 3") {
+		t.Fatalf("loaded tool didn't run: %q", lastToolText(a))
+	}
+	// keyword search ranks by name/description
+	if got := a.searchTools("governance gov proposals", 3); len(got) == 0 || got[0].Name() != "chain.gov" {
+		t.Fatalf("search = %v", got)
+	}
+	if lt := a.LoadedTools(); len(lt) != 1 || lt[0] != "chain.gov" {
+		t.Fatalf("loaded = %v", lt)
+	}
+}

@@ -126,6 +126,9 @@ type AgentConf struct {
 	// CompactAt is the prompt size in tokens that triggers summarizing
 	// the conversation (0 = 80% of the window, at most 200k).
 	CompactAt int `yaml:"compact_at,omitempty"`
+	// Tools is "all" to send every tool schema on every request; the
+	// default loads non-core tools on demand via tool_search.
+	Tools string `yaml:"tools,omitempty"`
 	// Permissions are allow/ask/deny rules, e.g. "bash(systemctl status:*)",
 	// "edit(./config/**)", "web_fetch(domain:github.com)", "val.unjail".
 	Permissions Permissions `yaml:"permissions,omitempty"`

@@ -35,8 +35,9 @@ type SessionFile struct {
 	Carry   string `json:"carry,omitempty"`
 	History []Msg  `json:"history"`
 	// ShellCwd is the bash tool's working directory; Todos the checklist.
-	ShellCwd string `json:"shell_cwd,omitempty"`
-	Todos    []Todo `json:"todos,omitempty"`
+	ShellCwd string   `json:"shell_cwd,omitempty"`
+	Todos    []Todo   `json:"todos,omitempty"`
+	Loaded   []string `json:"loaded_tools,omitempty"`
 }
 
 const sessionVersion = 1
@@ -79,7 +80,7 @@ func (a *Agent) Save() error {
 		Title: a.title(), Cwd: cwd, Profile: a.profileName(),
 		Provider: a.Provider.Name(), Model: a.Model, Usage: a.total,
 		System: a.sys, ToolSig: a.toolSig, Carry: a.carry, History: a.history,
-		ShellCwd: a.Tools.Cwd(""), Todos: a.todos,
+		ShellCwd: a.Tools.Cwd(""), Todos: a.todos, Loaded: a.LoadedTools(),
 	}
 	raw, err := json.Marshal(sf)
 	if err != nil {
@@ -124,6 +125,10 @@ func (a *Agent) Restore(sf *SessionFile) {
 	a.history, a.sys, a.toolSig, a.carry = sf.History, sf.System, sf.ToolSig, sf.Carry
 	a.total = sf.Usage
 	a.todos = sf.Todos
+	a.loaded = map[string]bool{}
+	for _, n := range sf.Loaded {
+		a.loaded[n] = true
+	}
 	a.Tools = toolkit.NewSession(sf.ShellCwd)
 	// the frozen system prompt carries the old snapshot: force a refresh
 	// onto the next turn

@@ -139,5 +139,6 @@ func isContextOverflow(err error) bool {
 		strings.Contains(s, "context length") ||
 		strings.Contains(s, "context window") ||
 		strings.Contains(s, "maximum context") ||
+		strings.Contains(s, "request too large") || // Groq 413: prompt exceeds the per-minute token budget
 		(strings.Contains(s, "too many tokens") && strings.Contains(s, "input"))
 }

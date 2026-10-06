@@ -77,6 +77,7 @@ type Agent struct {
 	lastIn    int   // prompt tokens of the latest round (0 = unknown)
 	total     Usage // session token totals
 	todos     []Todo
+	loaded    map[string]bool // tools loaded with tool_search
 }
 
 // New builds an agent for a context from the profile's agent config.
@@ -187,7 +188,7 @@ func (a *Agent) Reset() {
 	a.snap, a.sys, a.toolSig, a.carry = "", "", "", ""
 	a.lastIn, a.total = 0, Usage{}
 	a.created = time.Time{}
-	a.todos = nil
+	a.todos, a.loaded = nil, nil
 	a.Tools = toolkit.NewSession("")
 }
 
@@ -219,13 +220,20 @@ func (a *Agent) toolDefs() []ToolDef {
 		if !a.Policy.Allows(t.Tier()) && !toolkit.IsDynamic(t) {
 			continue
 		}
+		if !a.advertised(t) {
+			continue
+		}
 		out = append(out, ToolDef{
 			Name:   toolFnName(t.Name()),
 			Desc:   fmt.Sprintf("[%s] %s", t.Tier(), t.Desc()),
 			Schema: t.Schema(),
 		})
 	}
-	return append(out, todoToolDef)
+	out = append(out, todoToolDef)
+	if a.deferred() {
+		out = append(out, toolSearchDef)
+	}
+	return out
 }
 
 func toolFnName(n string) string { return strings.ReplaceAll(n, ".", "__") }
@@ -426,8 +434,11 @@ func (a *Agent) execCall(ctx context.Context, call Call) Msg {
 	if err := json.Unmarshal(call.Args, &args); err != nil {
 		return a.toolErr(call, name, "bad args: "+err.Error())
 	}
-	if name == todoToolName {
+	switch name {
+	case todoToolName:
 		return a.todoWrite(call, args)
+	case toolSearchName:
+		return a.toolSearch(call, args)
 	}
 	t, ok := a.Reg.Get(name)
 	if !ok {
@@ -544,7 +555,7 @@ func (a *Agent) ruleGate(c *toolkit.Context, t toolkit.Tool, shownArgs map[strin
 // invalidate replayed thinking. Later snapshots ride on user turns.
 func (a *Agent) system() string {
 	if a.sys == "" {
-		a.sys = a.Redact.Text(SystemPrompt(a.Ctx)) + a.snapshot()
+		a.sys = a.Redact.Text(SystemPrompt(a.Ctx)) + a.toolCatalog() + a.snapshot()
 	}
 	return a.sys
 }
