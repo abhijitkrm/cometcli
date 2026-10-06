@@ -150,6 +150,9 @@ func (a *Agent) profileName() string {
 func (a *Agent) toolDefs() []ToolDef {
 	var out []ToolDef
 	for _, t := range a.Reg.All() {
+		if toolkit.IsLongRunning(t) {
+			continue // watchers never return inside a turn
+		}
 		if !a.Policy.Allows(t.Tier()) {
 			continue
 		}
@@ -248,6 +251,9 @@ func (a *Agent) execCall(ctx context.Context, call Call) Msg {
 	}
 	shownArgs := a.Redact.Args(args)
 	a.emit(Event{Kind: EvToolStart, Tool: name, Tier: t.Tier().String(), Args: shownArgs})
+	if toolkit.IsLongRunning(t) {
+		return a.toolErr(call, name, "refused: "+name+" is a long-running watcher and cannot finish inside an agent turn — suggest `cometcli "+strings.ReplaceAll(name, ".", " ")+"` to the operator")
+	}
 	if !a.Policy.Allows(t.Tier()) {
 		msg := fmt.Sprintf("blocked: %s is a %s tool and the session is in readonly mode — recommend it to the operator instead", name, t.Tier())
 		a.Audit().ToolSeen(a.profileName(), name, t.Tier().String(), shownArgs, nil, fmt.Errorf("%s", msg), "")

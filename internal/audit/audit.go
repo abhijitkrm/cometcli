@@ -88,7 +88,7 @@ func (l *Logger) Session() string {
 
 // Log records one event. Failures are intentionally non-fatal but reported.
 func (l *Logger) Log(kind Kind, profile string, detail map[string]any) error {
-	if l == nil {
+	if l == nil || l.sink == nil {
 		return nil
 	}
 	l.sink.mu.Lock()
@@ -98,7 +98,7 @@ func (l *Logger) Log(kind Kind, profile string, detail map[string]any) error {
 
 // Path returns the current audit file path.
 func (l *Logger) Path() string {
-	if l == nil {
+	if l == nil || l.sink == nil {
 		return ""
 	}
 	return l.sink.path
@@ -106,7 +106,7 @@ func (l *Logger) Path() string {
 
 // Close flushes and closes the file (shared by every WithSession child).
 func (l *Logger) Close() error {
-	if l == nil || l.sink.file == nil {
+	if l == nil || l.sink == nil || l.sink.file == nil {
 		return nil
 	}
 	return l.sink.file.Close()

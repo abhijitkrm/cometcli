@@ -108,7 +108,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 		<-ctx.Done()
 		sh, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		srv.Shutdown(sh)
+		_ = srv.Shutdown(sh)
 	}()
 	err := srv.Serve(ln)
 	if errors.Is(err, http.ErrServerClosed) {
@@ -192,13 +192,13 @@ func loopbackHost(hostport string) bool {
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(v)
+	_ = json.NewEncoder(w).Encode(v)
 }
 
 func (s *Server) index(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:")
-	w.Write(indexHTML)
+	_, _ = w.Write(indexHTML)
 }
 
 func (s *Server) info(w http.ResponseWriter, _ *http.Request) {
