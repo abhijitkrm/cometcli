@@ -1,0 +1,23 @@
+
+● Bash(docker ps --format '{{.Names}}')
+  ⎿  primium-validator0
+     primium-validator1
+
+● Update(config/app.toml)
+  ⎿  --- config/app.toml
+       [api]
+     - swagger = true
+     + swagger = false
+
+● ↳ Grep(panic in /var/log)
+  ⎿  no matches for panic under /var/log
+
+● Update todos
+  ⎿  ☒ stop node
+     ☐ swap binary
+     ☐ start node
+
+● Both validators are up.
+
+  • validator0: height 162248
+  • validator1: height 162248

@@ -1,0 +1,12 @@
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ Transaction                                                                  │
+│                                                                              │
+│ broadcast transaction                                                        │
+│ {"chain_id": "primium-1", "messages": ["/cosmos.gov.v1.MsgVote {proposalId:3 │
+│ option:VOTE_OPTION_YES}"], "fee": "140000000000000adex"}                     │
+│ action: gov-vote                                                             │
+│                                                                              │
+│ This broadcasts a transaction. Do you want to proceed?                       │
+│ ❯ 1. Yes                                                                     │
+│   2. No, and tell cometcli what to do differently (esc)                      │
+╰──────────────────────────────────────────────────────────────────────────────╯

@@ -55,21 +55,22 @@ func key(m *model, k tea.KeyType) tea.Cmd {
 
 func TestApprovalYesAlwaysNo(t *testing.T) {
 	m, _ := newTestModel(t)
-	var got tea.Msg
-	m.send = func(msg tea.Msg) { got = msg }
+	sent := make(chan tea.Msg, 1)
+	m.send = func(msg tea.Msg) { sent <- msg }
 	ctx := &toolkit.Context{Context: context.Background()}
 
 	ask := func(detail map[string]any, tier toolkit.Tier) chan approvalResult {
 		done := make(chan approvalResult, 1)
-		got = nil
 		go func() {
 			ok, err := m.approve(ctx, "run: docker compose up -d", tier, detail)
 			done <- approvalResult{ok, err}
 		}()
-		for i := 0; got == nil && i < 200; i++ {
-			time.Sleep(5 * time.Millisecond)
+		select {
+		case msg := <-sent:
+			m.Update(msg)
+		case <-time.After(2 * time.Second):
+			t.Fatal("approval request never arrived")
 		}
-		m.Update(got)
 		return done
 	}
 

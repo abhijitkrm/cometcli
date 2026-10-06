@@ -1,0 +1,12 @@
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ Bash command                                                                 │
+│                                                                              │
+│   docker compose up -d                                                       │
+│   start the validator stack                                                  │
+│ why: changes containers (docker compose up)                                  │
+│                                                                              │
+│ Do you want to proceed?                                                      │
+│ ❯ 1. Yes                                                                     │
+│   2. Yes, and don't ask again for bash(docker compose:*)                     │
+│   3. No, and tell cometcli what to do differently (esc)                      │
+╰──────────────────────────────────────────────────────────────────────────────╯
