@@ -40,8 +40,8 @@ type Facts struct {
 	FeeDenom          string
 	FeeBalance        string
 
-	Height      int64
-	BlockTime   time.Time
+	Height    int64
+	BlockTime time.Time
 	// NodeConsHex is the consensus address the node itself signs with.
 	NodeConsHex []byte
 	CatchingUp  bool
