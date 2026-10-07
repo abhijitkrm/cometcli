@@ -248,16 +248,16 @@ var (
 // Forensics is what the node's own logs and process state show around
 // the jailing.
 type Forensics struct {
-	JailLines  []string
-	Causes     map[string][]string // cause → sample lines
-	Counts     map[string]int
-	Process    string // container/service state (restarts, OOM kills)
+	JailLines []string
+	Causes    map[string][]string // cause → sample lines
+	Counts    map[string]int
+	Process   string // container/service state (restarts, OOM kills)
 	// Lifecycle is the supervisor's record of stops, kills, deaths and
 	// starts since the window opened (docker events) — who stopped it.
 	Lifecycle []string
 	// Gaps are silences in the node's log (it logs every block): when it
 	// was down, and the last thing it said before.
-	Gaps []string
+	Gaps       []string
 	Disk       string
 	LogsSource string
 	Err        string

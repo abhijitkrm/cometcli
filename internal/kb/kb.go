@@ -30,8 +30,8 @@ type Case struct {
 	Severity string   `yaml:"severity"`         // critical | high | medium | low
 	// Kind is "incident" (default: something is wrong now) or "advisory"
 	// (hardening/hygiene — listed separately, never outranks an incident).
-	Kind     string   `yaml:"kind,omitempty"`
-	Symptoms string   `yaml:"symptoms"`
+	Kind     string `yaml:"kind,omitempty"`
+	Symptoms string `yaml:"symptoms"`
 	Match    struct {
 		All []string `yaml:"all,omitempty"`
 		Any []string `yaml:"any,omitempty"`
