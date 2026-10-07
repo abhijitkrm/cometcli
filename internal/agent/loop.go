@@ -9,6 +9,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -24,6 +25,10 @@ import (
 // session: it owns the conversation, the approval policy, the redactor, and
 // a session id stamped on every audit event.
 type Agent struct {
+	// steer holds operator messages typed mid-turn (see Steer).
+	steerMu sync.Mutex
+	steer   []string
+
 	Provider Provider
 	Model    string
 	Reg      *toolkit.Registry
@@ -421,6 +426,9 @@ func (a *Agent) run(ctx context.Context, input string) (string, error) {
 		}
 		if err := ctx.Err(); err != nil {
 			return "", err
+		}
+		if a.parent == nil {
+			a.deliverSteer() // what the operator typed meanwhile reaches the next step
 		}
 	}
 	return "", fmt.Errorf("agent exceeded %d iterations", a.MaxIter)

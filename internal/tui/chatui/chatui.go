@@ -151,7 +151,6 @@ type model struct {
 	started time.Time
 	live    strings.Builder
 	think   string
-	queue   []string
 
 	history []string
 	histIdx int
@@ -183,6 +182,7 @@ type model struct {
 	thoughts   []string      // finished thinking, newest last (ctrl+o)
 	lastFull   string        // the last collapsed tool output (ctrl+r)
 	verb       string        // this turn's spinner verb
+	steering   bool          // a message typed mid-turn is waiting
 	started2   bool          // banner printed
 }
 
@@ -507,8 +507,10 @@ func (m *model) submit(raw string) tea.Cmd {
 		return m.command(text)
 	}
 	if m.running {
-		m.queue = append(m.queue, text)
-		return m.print(userLine(text), result(dim.Render("queued — sent when the current turn ends")))
+		// steer: delivered at the agent's next step, not after the turn
+		m.a.Steer(m.a.ExpandMentions(text))
+		m.steering = true
+		return m.print(userLine(text), result(dim.Render("cometcli will see this after the current step · ")+bold.Render("esc")+dim.Render(" to interrupt and send it now")))
 	}
 	m.ta.Placeholder = "" // the example is for an empty session only
 	return tea.Sequence(m.print(userLine(text)), m.startTurn(m.a.ExpandMentions(text)))
@@ -674,6 +676,9 @@ func (m *model) onEvent(e agent.Event) tea.Cmd {
 		}
 		return m.print("", bullet+" "+toolHeader(start), result(m.toolBody(start, e)))
 	case agent.EvNotice:
+		if e.Text == "your message reached the agent" {
+			m.steering = false
+		}
 		return m.print(result(dim.Render(e.Text)))
 	case agent.EvProgress:
 		m.progress = e.Text
@@ -763,18 +768,21 @@ func (m *model) onDone(v doneMsg) tea.Cmd {
 	}
 	m.pending = nil
 	m.live.Reset()
+	pending := m.a.TakeSteer() // typed mid-turn and not yet delivered
+	m.steering = false
 	switch {
 	case v.err == nil:
 	case errors.Is(v.err, context.Canceled):
-		cmds = append(cmds, m.print(result(errSt.Render("Interrupted")+dim.Render(" · What should cometcli do instead?"))))
-		m.queue = nil
+		if len(pending) > 0 {
+			cmds = append(cmds, m.print(result(errSt.Render("Interrupted")+dim.Render(" · sending your message"))))
+		} else {
+			cmds = append(cmds, m.print(result(errSt.Render("Interrupted")+dim.Render(" · What should cometcli do instead?"))))
+		}
 	default:
 		cmds = append(cmds, m.print(result(errSt.Render(v.err.Error()))))
 	}
-	if len(m.queue) > 0 {
-		next := strings.Join(m.queue, "\n\n")
-		m.queue = nil
-		cmds = append(cmds, m.startTurn(m.a.ExpandMentions(next)))
+	if len(pending) > 0 {
+		cmds = append(cmds, m.startTurn(strings.Join(pending, "\n\n")))
 	}
 	return tea.Sequence(cmds...)
 }
@@ -1013,6 +1021,9 @@ func (m *model) View() string {
 			u, _ := m.a.Usage()
 			fmt.Fprintf(&b, "\n%s %s %s\n", m.sp.View(), accentSt.Render(verb+"…"),
 				dim.Render(fmt.Sprintf("(%s · ↑ %s tokens · esc to interrupt)", time.Since(m.started).Round(time.Second), humanTok(u.Input+u.Output))))
+			if m.steering {
+				b.WriteString(faint.Render("  ⎿  ") + dim.Render("your message goes in after this step · esc to send it now") + "\n")
+			}
 		}
 	}
 	b.WriteString("\n")
