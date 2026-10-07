@@ -282,7 +282,16 @@ func (t *stdioTransport) roundTrip(ctx context.Context, id int64, method string,
 	t.wait[string(rid)] = ch
 	t.pmu.Unlock()
 	if err := t.write(rpcMsg{JSONRPC: "2.0", ID: &rid, Method: method, Params: params}); err != nil {
-		return nil, err
+		// a server that died before reading (bad config, missing token)
+		// breaks the pipe first: report why it exited, not the pipe
+		select {
+		case <-t.done:
+			return nil, t.exited()
+		case <-time.After(2 * time.Second):
+			return nil, err
+		case <-ctx.Done():
+			return nil, err
+		}
 	}
 	select {
 	case m := <-ch:
@@ -291,18 +300,23 @@ func (t *stdioTransport) roundTrip(ctx context.Context, id int64, method string,
 		}
 		return m.Result, nil
 	case <-t.done:
-		t.reap() // stderr is fully copied once the process is reaped
-		msg := strings.TrimSpace(t.stderr.String())
-		if msg == "" && t.err != nil {
-			msg = t.err.Error()
-		}
-		return nil, fmt.Errorf("server exited: %s", lastLines(msg, 3))
+		return nil, t.exited()
 	case <-ctx.Done():
 		t.pmu.Lock()
 		delete(t.wait, string(rid))
 		t.pmu.Unlock()
 		return nil, ctx.Err()
 	}
+}
+
+// exited explains a server that went away, from its stderr.
+func (t *stdioTransport) exited() error {
+	t.reap() // stderr is fully copied once the process is reaped
+	msg := strings.TrimSpace(t.stderr.String())
+	if msg == "" && t.err != nil {
+		msg = t.err.Error()
+	}
+	return fmt.Errorf("server exited: %s", lastLines(msg, 3))
 }
 
 func (t *stdioTransport) notify(_ context.Context, method string, params any) error {
