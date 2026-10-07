@@ -6,9 +6,11 @@ package cli
 import (
 	"bufio"
 	"fmt"
+	"golang.org/x/term"
 	"io"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -234,13 +236,37 @@ func NewCtx(cmd *cobra.Command, requireProfile bool) (*toolkit.Context, error) {
 	if flagYes {
 		c.AutoApproveBelow = toolkit.TierLocalChange
 	}
-	c.Approver = StdinApprover(cmd.InOrStdin())
+	c.Approver, c.Chooser = StdinPrompts(cmd.InOrStdin())
+	c.Secret = TTYSecret
 	return c, nil
 }
 
 // StdinApprover prompts y/N on the terminal.
 func StdinApprover(in io.Reader) toolkit.Approver {
+	a, _ := StdinPrompts(in)
+	return a
+}
+
+// StdinPrompts returns a y/N approver and a numbered chooser sharing one
+// reader (two readers on one stdin would steal each other's input).
+func StdinPrompts(in io.Reader) (toolkit.Approver, toolkit.Chooser) {
 	reader := bufio.NewReader(in)
+	choose := func(c *toolkit.Context, prompt string, options []string) (int, error) {
+		fmt.Fprintf(c.Out, "\n%s\n", prompt)
+		for i, o := range options {
+			fmt.Fprintf(c.Out, "  %d. %s\n", i+1, o)
+		}
+		fmt.Fprintf(c.Out, "Choose [1-%d]: ", len(options))
+		line, err := reader.ReadString('\n')
+		if err != nil && strings.TrimSpace(line) == "" {
+			return 0, fmt.Errorf("no choice made: stdin closed")
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(line))
+		if err != nil || n < 1 || n > len(options) {
+			return 0, fmt.Errorf("invalid choice %q", strings.TrimSpace(line))
+		}
+		return n - 1, nil
+	}
 	return func(c *toolkit.Context, prompt string, tier toolkit.Tier, detail map[string]any) (bool, error) {
 		fmt.Fprintf(c.Out, "\n⚠  [%s] %s\n", tier, prompt)
 		keys := make([]string, 0, len(detail))
@@ -271,5 +297,21 @@ func StdinApprover(in io.Reader) toolkit.Approver {
 			return false, err
 		}
 		return strings.EqualFold(strings.TrimSpace(line), "y"), nil
+	}, choose
+}
+
+// TTYSecret reads a secret from the controlling terminal with echo off.
+func TTYSecret(c *toolkit.Context, prompt string) (string, error) {
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		return "", fmt.Errorf("%s: no terminal available", prompt)
 	}
+	defer tty.Close()
+	fmt.Fprintf(tty, "%s: ", prompt)
+	b, err := term.ReadPassword(int(tty.Fd()))
+	fmt.Fprintln(tty)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }

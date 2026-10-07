@@ -160,11 +160,14 @@ func chatCtx(cmd *cobra.Command, p *config.Profile, headless bool) (*toolkit.Con
 	lg, _ := audit.Open(name)
 	c := &toolkit.Context{
 		Context: cmd.Context(), Profile: p, Cfg: cfg, Out: cmd.OutOrStdout(), Audit: lg,
-		Approver: StdinApprover(cmd.InOrStdin()),
 	}
+	c.Approver, c.Chooser = StdinPrompts(cmd.InOrStdin())
+	c.Secret = TTYSecret
 	if headless {
+		// never read prompts from stdin (it may be the piped input); a
+		// secret still comes from the terminal or the env var
 		c.Out = cmd.ErrOrStderr()
-		c.Approver = headlessApprover
+		c.Approver, c.Chooser = headlessApprover, nil
 	}
 	if flagYes {
 		c.AutoApproveBelow = toolkit.TierLocalChange

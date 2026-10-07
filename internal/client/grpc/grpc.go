@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	authv1beta1 "cosmossdk.io/api/cosmos/auth/v1beta1"
 	bankv1beta1 "cosmossdk.io/api/cosmos/bank/v1beta1"
@@ -83,6 +84,19 @@ func Dial(ctx context.Context, endpoint string) (*Conn, error) {
 func (c *Conn) RawConn() *grpc.ClientConn { return c.cc }
 
 func (c *Conn) Close() error { return c.cc.Close() }
+
+// AccountPubKey returns the public key the chain has on record for an
+// address (nil if it never signed).
+func (c *Conn) AccountPubKey(ctx context.Context, bech32Addr string) (*anypb.Any, error) {
+	res, err := c.Auth.Account(ctx, &authv1beta1.QueryAccountRequest{Address: bech32Addr})
+	if err != nil {
+		return nil, err
+	}
+	if res.Account == nil {
+		return nil, nil
+	}
+	return DecodeAccountPubKey(res.Account.TypeUrl, res.Account.Value)
+}
 
 // Account fetches account_number/sequence for an address. Cosmos-EVM chains
 // may return either BaseAccount or EthAccount; both are handled.

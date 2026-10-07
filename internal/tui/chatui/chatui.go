@@ -17,6 +17,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/glamour/styles"
@@ -40,6 +41,8 @@ func Run(o Options) error {
 	m.send = p.Send
 	o.Agent.OnEvent = func(e agent.Event) { p.Send(eventMsg{e}) }
 	o.Agent.Ctx.Approver = m.approve
+	o.Agent.Ctx.Chooser = m.choose
+	o.Agent.Ctx.Secret = m.secret
 	_, err := p.Run()
 	if m.a.Persist && len(m.a.History()) > 0 {
 		fmt.Printf("\n%s\n", dim.Render("resume this session with: cometcli -r "+m.a.ID()))
@@ -64,6 +67,31 @@ type execDoneMsg struct {
 	code int
 }
 type approvalMsg struct{ p *pendingApproval }
+type choiceMsg struct{ p *pendingChoice }
+type secretMsg struct{ p *pendingSecret }
+
+type pendingChoice struct {
+	prompt  string
+	options []string
+	sel     int
+	resp    chan choiceResult
+}
+
+type choiceResult struct {
+	i   int
+	err error
+}
+
+type pendingSecret struct {
+	prompt string
+	input  textinput.Model
+	resp   chan secretResult
+}
+
+type secretResult struct {
+	s   string
+	err error
+}
 
 type approvalResult struct {
 	ok  bool
@@ -127,6 +155,8 @@ type model struct {
 	files   []string
 
 	approval  *pendingApproval
+	choice    *pendingChoice
+	secretReq *pendingSecret
 	quitArmed time.Time
 	hint      string // transient message in the footer
 	baseMode  agent.Mode
@@ -208,6 +238,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case approvalMsg:
 		m.approval = v.p
 		return m, nil
+	case choiceMsg:
+		m.choice = v.p
+		return m, nil
+	case secretMsg:
+		m.secretReq = v.p
+		return m, textinput.Blink
 	case doneMsg:
 		return m, m.onDone(v)
 	case jobDoneMsg:
@@ -218,6 +254,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case execDoneMsg:
 		return m, m.onExecDone(v)
 	case tea.KeyMsg:
+		switch {
+		case m.secretReq != nil:
+			return m, m.secretKey(v)
+		case m.choice != nil:
+			return m, m.choiceKey(v)
+		}
 		if m.approval != nil {
 			return m, m.approvalKey(v)
 		}
@@ -641,6 +683,82 @@ func (m *model) answer(kind string) tea.Cmd {
 	return nil
 }
 
+// --- choices and secrets ---------------------------------------------------
+
+// choose is the toolkit.Chooser: it parks the tool until the operator picks.
+func (m *model) choose(c *toolkit.Context, prompt string, options []string) (int, error) {
+	p := &pendingChoice{prompt: prompt, options: options, resp: make(chan choiceResult, 1)}
+	m.send(choiceMsg{p})
+	select {
+	case r := <-p.resp:
+		return r.i, r.err
+	case <-c.Done():
+		return 0, c.Err()
+	}
+}
+
+func (m *model) choiceKey(k tea.KeyMsg) tea.Cmd {
+	p := m.choice
+	switch k.String() {
+	case "up", "k":
+		p.sel = (p.sel - 1 + len(p.options)) % len(p.options)
+	case "down", "j", "tab":
+		p.sel = (p.sel + 1) % len(p.options)
+	case "enter":
+		m.choice = nil
+		p.resp <- choiceResult{i: p.sel}
+	case "esc", "ctrl+c":
+		m.choice = nil
+		p.resp <- choiceResult{err: errors.New("cancelled by the operator")}
+	default:
+		if n, err := strconv.Atoi(k.String()); err == nil && n >= 1 && n <= len(p.options) {
+			m.choice = nil
+			p.resp <- choiceResult{i: n - 1}
+		}
+	}
+	return nil
+}
+
+// secret is the toolkit.SecretFunc: a masked input that is never printed,
+// stored in history, or sent anywhere but the waiting tool.
+func (m *model) secret(c *toolkit.Context, prompt string) (string, error) {
+	in := textinput.New()
+	in.EchoMode = textinput.EchoPassword
+	in.EchoCharacter = '•'
+	in.Prompt = ""
+	in.Focus()
+	p := &pendingSecret{prompt: prompt, input: in, resp: make(chan secretResult, 1)}
+	m.send(secretMsg{p})
+	select {
+	case r := <-p.resp:
+		return r.s, r.err
+	case <-c.Done():
+		return "", c.Err()
+	}
+}
+
+func (m *model) secretKey(k tea.KeyMsg) tea.Cmd {
+	p := m.secretReq
+	switch k.String() {
+	case "enter":
+		m.secretReq = nil
+		p.resp <- secretResult{s: p.input.Value()}
+		return nil
+	case "esc", "ctrl+c":
+		m.secretReq = nil
+		p.resp <- secretResult{err: errors.New("cancelled by the operator")}
+		return nil
+	}
+	var cmd tea.Cmd
+	p.input, cmd = p.input.Update(k)
+	return cmd
+}
+
+func (m *model) dialogView(w int, title, body string) string {
+	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("214")).Width(w-2).Padding(0, 1)
+	return box.Render(bold.Render(title)+"\n\n"+body) + "\n"
+}
+
 // --- suggestions -----------------------------------------------------------
 
 // currentToken is the word under the cursor (the input's last word).
@@ -706,7 +824,23 @@ func (m *model) View() string {
 		fmt.Fprintf(&b, "\n%s %s %s\n", m.sp.View(), accentSt.Render(working(m.started)),
 			dim.Render(fmt.Sprintf("(%s · ↑ %s tokens · esc to interrupt)", time.Since(m.started).Round(time.Second), humanTok(u.Input+u.Output))))
 	}
-	if m.approval != nil {
+	switch {
+	case m.secretReq != nil:
+		b.WriteString(m.dialogView(w, m.secretReq.prompt, m.secretReq.input.View()+"\n"+dim.Render("enter to submit · esc to cancel · never stored or sent to the model")))
+		return b.String()
+	case m.choice != nil:
+		var lines []string
+		for i, o := range m.choice.options {
+			prefix := "  "
+			label := fmt.Sprintf("%d. %s", i+1, o)
+			if i == m.choice.sel {
+				prefix, label = accentSt.Render("❯ "), accentSt.Render(fmt.Sprintf("%d. ", i+1))+o
+			}
+			lines = append(lines, prefix+label)
+		}
+		b.WriteString(m.dialogView(w, m.choice.prompt, strings.Join(lines, "\n")))
+		return b.String()
+	case m.approval != nil:
 		b.WriteString(m.approvalView(w))
 		return b.String()
 	}

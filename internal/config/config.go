@@ -163,6 +163,16 @@ type Signer struct {
 	CoinType uint32 `yaml:"coin_type,omitempty"`
 	Account  uint32 `yaml:"account,omitempty"`
 	Index    uint32 `yaml:"index,omitempty"`
+	// Mode picks the signer when both are available: "" asks at signing
+	// time, "local" uses cometcli's keyring, "container" the node's.
+	Mode string `yaml:"mode,omitempty"`
+	// Container signing: the key lives in the node container's own
+	// keyring and evmd signs there (`docker exec … evmd tx sign`).
+	Container        string `yaml:"container,omitempty"`         // default: service.unit for docker services
+	ContainerKey     string `yaml:"container_key,omitempty"`     // default: key
+	ContainerKeyring string `yaml:"container_keyring,omitempty"` // test | file (default: detect)
+	ContainerHome    string `yaml:"container_home,omitempty"`    // evmd --home inside the container
+	ContainerBinary  string `yaml:"container_binary,omitempty"`  // default: the profile binary
 }
 
 // AgentConf configures the LLM backend for agent mode.

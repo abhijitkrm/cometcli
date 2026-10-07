@@ -75,6 +75,7 @@ func (a *Agent) SwitchScope(p *config.Profile) {
 	c := &toolkit.Context{
 		Context: old.Context, Profile: p, Cfg: old.Cfg, Out: old.Out,
 		Audit: old.Audit, Approver: old.Approver, AutoApproveBelow: old.AutoApproveBelow,
+		Chooser: old.Chooser, Secret: old.Secret,
 	}
 	if a.ownCtx {
 		old.Close()

@@ -131,7 +131,7 @@ func TxOpts(a toolkit.Args) tx.Options {
 // The tx Doc (decoded messages, fee, gas) is always shown before approval.
 func BroadcastMsgs(c *toolkit.Context, msgs tx.Msgs, memo string, meta map[string]string, opt tx.Options) (*toolkit.Result, error) {
 	opt.Memo = memo
-	tb, err := c.Tx()
+	tb, err := c.TxSigner()
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +140,7 @@ func BroadcastMsgs(c *toolkit.Context, msgs tx.Msgs, memo string, meta map[strin
 	// One automatic rebuild+retry with a fresh seq heals it — the doc is
 	// re-approved since its bytes changed.
 	for attempt := 0; ; attempt++ {
-		built, err := tb.Build(c, msgs, opt)
+		prep, err := tb.Prepare(c, msgs, opt)
 		if err != nil {
 			if retrySeq(err.Error(), attempt, &opt) {
 				fmt.Fprintln(os.Stderr, "sequence drifted at simulation — rebuilding with fresh seq")
@@ -148,11 +148,17 @@ func BroadcastMsgs(c *toolkit.Context, msgs tx.Msgs, memo string, meta map[strin
 			}
 			return nil, err
 		}
+		built := &tx.Built{Doc: prep.Doc}
 		detail := map[string]any{"doc": built.Doc.String()}
 		for k, v := range meta {
 			detail[k] = v
 		}
 		if err := c.Approve("broadcast transaction\n"+built.Doc.String(), toolkit.TierOnChain, detail); err != nil {
+			return nil, err
+		}
+		// sign only after approval: a container keyring asks for its
+		// password here, never for a transaction that was declined
+		if built.TxBytes, err = tb.Sign(c, prep); err != nil {
 			return nil, err
 		}
 		hash, code, rawLog, err := tb.Broadcast(c, built.TxBytes)

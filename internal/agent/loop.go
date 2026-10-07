@@ -623,7 +623,7 @@ func (a *Agent) execCall(ctx context.Context, call Call) Msg {
 func (a *Agent) toolCtx(ctx context.Context, t toolkit.Tool, args toolkit.Args) (*toolkit.Context, context.CancelFunc) {
 	parent := &toolkit.Context{
 		Context: ctx, Profile: a.Ctx.Profile, Cfg: a.Ctx.Cfg, Out: a.Ctx.Out,
-		Audit: a.Audit(), Approver: a.Ctx.Approver,
+		Audit: a.Audit(), Approver: a.Ctx.Approver, Chooser: a.Ctx.Chooser, Secret: a.Ctx.Secret,
 		Session: a.Tools, Rules: a.Rules, WorkRoot: a.WorkRoot,
 		ReadOnly: a.Policy.ReadOnly(), AcceptEdits: a.Policy.AcceptEdits(),
 	}

@@ -40,6 +40,10 @@ type Context struct {
 	WorkRoot string
 	// ToolName is the tool being run (for approval rule suggestions).
 	ToolName string
+	// Chooser and Secret let tools ask the operator to pick an option or
+	// type a secret (e.g. which key signs; a container keyring password).
+	Chooser Chooser
+	Secret  SecretFunc
 	// HookDecision is a PreToolUse hook's verdict for this call:
 	// "allow" skips the prompt, "ask" forces one ("" = no opinion).
 	HookDecision string
@@ -141,8 +145,8 @@ func (c *Context) Tx() (*tx.Builder, error) {
 	if c.Profile == nil {
 		return nil, errNoProfile
 	}
-	if c.Profile.Signer.Key == "" {
-		return nil, fmt.Errorf("profile %q has no signer.key — run `cometcli keys add` and set it", c.Profile.Name)
+	if c.Profile.Signer.Key == "" && (c.signerContainer() == "" || c.containerKey() == "") {
+		return nil, fmt.Errorf("profile %q has no signer.key — run `cometcli keys add` and set it, or configure signer.container_key", c.Profile.Name)
 	}
 	// GRPC() manages its own locking — call it before taking c.mu or we
 	// self-deadlock on the non-reentrant mutex.
@@ -154,6 +158,13 @@ func (c *Context) Tx() (*tx.Builder, error) {
 	defer c.mu.Unlock()
 	if c.txb == nil && c.txErr == nil {
 		c.txb, c.txErr = tx.NewBuilder(c.Context, g, c.Profile, c.Audit)
+		if c.txErr != nil && c.signerContainer() != "" && c.containerKey() != "" {
+			// no local key: the node container's key answers for the address
+			c.mu.Unlock()
+			b, err := c.containerBuilder()
+			c.mu.Lock()
+			c.txb, c.txErr = b, err
+		}
 	}
 	return c.txb, c.txErr
 }
@@ -170,6 +181,7 @@ func WithDeadline(c *Context, timeout time.Duration) (*Context, context.CancelFu
 		Audit: c.Audit, Approver: c.Approver, AutoApproveBelow: c.AutoApproveBelow,
 		Session: c.Session, Rules: c.Rules, ReadOnly: c.ReadOnly,
 		AcceptEdits: c.AcceptEdits, WorkRoot: c.WorkRoot, HookDecision: c.HookDecision, ToolName: c.ToolName,
+		Chooser: c.Chooser, Secret: c.Secret,
 	}, cancel
 }
 
@@ -182,6 +194,7 @@ func WithCancel(c *Context) (*Context, context.CancelFunc) {
 		Audit: c.Audit, Approver: c.Approver, AutoApproveBelow: c.AutoApproveBelow,
 		Session: c.Session, Rules: c.Rules, ReadOnly: c.ReadOnly,
 		AcceptEdits: c.AcceptEdits, WorkRoot: c.WorkRoot, HookDecision: c.HookDecision, ToolName: c.ToolName,
+		Chooser: c.Chooser, Secret: c.Secret,
 	}, cancel
 }
 

@@ -28,6 +28,20 @@ type Execer interface {
 	Exec(ctx context.Context, script string, maxOut int) (ExecResult, error)
 }
 
+// StdinExecer runs a script with input on stdin (secrets, documents).
+type StdinExecer interface {
+	ExecIn(ctx context.Context, script string, stdin []byte, maxOut int) (ExecResult, error)
+}
+
+// ExecIn runs script on h with stdin. Hosts without stdin support error.
+func ExecIn(ctx context.Context, h Host, script string, stdin []byte, maxOut int) (ExecResult, error) {
+	e, ok := h.(StdinExecer)
+	if !ok {
+		return ExecResult{}, fmt.Errorf("host %s can't pass stdin to commands", h)
+	}
+	return e.ExecIn(ctx, script, stdin, maxOut)
+}
+
 // Exec runs script on h via Execer when available.
 func Exec(ctx context.Context, h Host, script string, maxOut int) (ExecResult, error) {
 	if e, ok := h.(Execer); ok {
@@ -95,8 +109,16 @@ func shellBin() string {
 // Exec runs script under bash (or sh) with stdin from /dev/null. On
 // cancel or timeout the whole process group gets SIGTERM, then SIGKILL.
 func (l *Local) Exec(ctx context.Context, script string, maxOut int) (ExecResult, error) {
+	return l.ExecIn(ctx, script, nil, maxOut)
+}
+
+// ExecIn is Exec with stdin (nil = /dev/null).
+func (l *Local) ExecIn(ctx context.Context, script string, stdin []byte, maxOut int) (ExecResult, error) {
 	c := exec.Command(shellBin(), "-c", script)
 	c.Env = append(os.Environ(), nonInteractiveEnv...)
+	if stdin != nil {
+		c.Stdin = bytes.NewReader(stdin)
+	}
 	w := &capWriter{max: maxOut}
 	c.Stdout, c.Stderr = w, w
 	setProcessGroup(c)
@@ -136,6 +158,11 @@ func (l *Local) Exec(ctx context.Context, script string, maxOut int) (ExecResult
 
 // Exec runs script on the remote host. Cancel kills the session.
 func (s *SSH) Exec(ctx context.Context, script string, maxOut int) (ExecResult, error) {
+	return s.ExecIn(ctx, script, nil, maxOut)
+}
+
+// ExecIn is Exec with stdin.
+func (s *SSH) ExecIn(ctx context.Context, script string, stdin []byte, maxOut int) (ExecResult, error) {
 	sess, err := s.client.NewSession()
 	if err != nil {
 		return ExecResult{}, err
@@ -143,6 +170,9 @@ func (s *SSH) Exec(ctx context.Context, script string, maxOut int) (ExecResult, 
 	defer sess.Close()
 	w := &capWriter{max: maxOut}
 	sess.Stdout, sess.Stderr = w, w
+	if stdin != nil {
+		sess.Stdin = bytes.NewReader(stdin)
+	}
 	env := ""
 	for _, e := range nonInteractiveEnv {
 		env += e + " "

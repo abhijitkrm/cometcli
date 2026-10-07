@@ -12,13 +12,11 @@ import (
 	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
 	abciv1beta1 "cosmossdk.io/api/cosmos/base/abci/v1beta1"
 	basev1beta1 "cosmossdk.io/api/cosmos/base/v1beta1"
-	secp256k1api "cosmossdk.io/api/cosmos/crypto/secp256k1"
 	signingv1beta1 "cosmossdk.io/api/cosmos/tx/signing/v1beta1"
 	txv1beta1 "cosmossdk.io/api/cosmos/tx/v1beta1"
 
@@ -33,9 +31,16 @@ type Builder struct {
 	conn    *grpc.Conn
 	profile *config.Profile
 	audit   *audit.Logger
-	key     *keys.Key
-	address string // bech32 account address of the signer
+	signer  Signer
 }
+
+// NewBuilderWith builds transactions signed by s.
+func NewBuilderWith(conn *grpc.Conn, p *config.Profile, lg *audit.Logger, s Signer) *Builder {
+	return &Builder{conn: conn, profile: p, audit: lg, signer: s}
+}
+
+// Signer returns the builder's signer.
+func (b *Builder) Signer() Signer { return b.signer }
 
 // NewBuilder opens the ops keyring and resolves the signer key.
 func NewBuilder(ctx context.Context, conn *grpc.Conn, p *config.Profile, lg *audit.Logger) (*Builder, error) {
@@ -58,14 +63,14 @@ func NewBuilder(ctx context.Context, conn *grpc.Conn, p *config.Profile, lg *aud
 	if err != nil {
 		return nil, err
 	}
-	return &Builder{conn: conn, profile: p, audit: lg, key: k, address: addr}, nil
+	return &Builder{conn: conn, profile: p, audit: lg, signer: &LocalSigner{Key: k, Addr: addr}}, nil
 }
 
 // Address returns the signer's bech32 account address.
-func (b *Builder) Address() string { return b.address }
+func (b *Builder) Address() string { return b.signer.Address() }
 
 // ValAddress returns the signer's valoper address.
-func (b *Builder) ValAddress() (string, error) { return keys.ValAddress(b.address) }
+func (b *Builder) ValAddress() (string, error) { return keys.ValAddress(b.signer.Address()) }
 
 // Msgs is one message to include.
 type Msgs []proto.Message
@@ -111,6 +116,7 @@ type Built struct {
 
 // Doc is the decoded transaction for display.
 type Doc struct {
+	Signer   string   `json:"signer"`
 	ChainID  string   `json:"chain_id"`
 	Account  string   `json:"account"`
 	AccNum   uint64   `json:"account_number"`
@@ -118,23 +124,52 @@ type Doc struct {
 	Msgs     []string `json:"messages"`
 	Fee      string   `json:"fee"`
 	GasLimit uint64   `json:"gas_limit"`
+	GasNote  string   `json:"gas_note,omitempty"`
 	Memo     string   `json:"memo,omitempty"`
 }
+
+// Prepared is a transaction ready to approve and sign: gas settled, the
+// document rendered, nothing signed yet (for the container signer).
+type Prepared struct {
+	Msgs   Msgs
+	Body   []byte
+	AccNum uint64
+	Seq    uint64
+	Opt    Options
+	Doc    Doc
+}
+
+// DefaultGas is used when gas can't be simulated.
+const DefaultGas = 300_000
 
 func (d Doc) String() string {
 	b, _ := json.MarshalIndent(d, "", "  ")
 	return string(b)
 }
 
-// Build produces a signed tx. If GasLimit==0 it first simulates to estimate
-// gas (x1.4 adjust) — the signature is real either way.
+// Build prepares and signs in one step (no approval in between).
 func (b *Builder) Build(ctx context.Context, msgs Msgs, opt Options) (*Built, error) {
+	p, err := b.Prepare(ctx, msgs, opt)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := b.Sign(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	return &Built{TxBytes: raw, Doc: p.Doc}, nil
+}
+
+// Prepare resolves the account, builds the body and settles gas — by
+// simulation (x GasAdjust) unless GasLimit is set, or DefaultGas when the
+// signer can't produce a simulation tx.
+func (b *Builder) Prepare(ctx context.Context, msgs Msgs, opt Options) (*Prepared, error) {
 	var num, seq uint64
 	if opt.haveAccount {
 		num, seq = opt.AccountNum, opt.Sequence
 	} else {
 		var err error
-		num, seq, err = b.conn.Account(ctx, b.address)
+		num, seq, err = b.conn.Account(ctx, b.signer.Address())
 		if err != nil {
 			return nil, err
 		}
@@ -145,36 +180,48 @@ func (b *Builder) Build(ctx context.Context, msgs Msgs, opt Options) (*Built, er
 	if opt.GasAdjust == 0 {
 		opt.GasAdjust = 1.4
 	}
-
 	body, err := b.body(msgs, opt.Memo)
 	if err != nil {
 		return nil, err
 	}
-	authInfo, err := b.authInfo(opt, seq)
-	if err != nil {
-		return nil, err
-	}
-	raw, doc, err := b.sign(msgs, body, authInfo, num, seq, opt)
-	if err != nil {
-		return nil, err
-	}
-
+	p := &Prepared{Msgs: msgs, Body: body, AccNum: num, Seq: seq, Opt: opt}
+	gasNote := ""
 	if opt.GasLimit == 0 {
-		sim, err := b.Simulate(ctx, raw)
-		if err != nil {
-			return nil, fmt.Errorf("gas simulation: %w", err)
-		}
-		opt.GasLimit = uint64(float64(sim) * opt.GasAdjust)
-		authInfo, err = b.authInfo(opt, seq)
+		sim, err := b.signer.SimBytes(ctx, b, p)
 		if err != nil {
 			return nil, err
 		}
-		raw, doc, err = b.sign(msgs, body, authInfo, num, seq, opt)
-		if err != nil {
-			return nil, err
+		if sim == nil {
+			p.Opt.GasLimit = DefaultGas
+			gasNote = fmt.Sprintf("not simulated (the signer's public key isn't on chain yet) — using %d; pass gas-limit to override", DefaultGas)
+		} else {
+			used, err := b.Simulate(ctx, sim)
+			if err != nil {
+				return nil, fmt.Errorf("gas simulation: %w", err)
+			}
+			p.Opt.GasLimit = uint64(float64(used) * opt.GasAdjust)
 		}
 	}
-	return &Built{TxBytes: raw, Doc: doc}, nil
+	p.Doc = b.doc(p)
+	p.Doc.GasNote = gasNote
+	return p, nil
+}
+
+// Sign produces the final tx bytes.
+func (b *Builder) Sign(ctx context.Context, p *Prepared) ([]byte, error) {
+	return b.signer.Sign(ctx, b, p)
+}
+
+func (b *Builder) doc(p *Prepared) Doc {
+	d := Doc{Signer: b.signer.Describe(), ChainID: b.profile.ChainID, Account: b.signer.Address(),
+		AccNum: p.AccNum, Seq: p.Seq, Memo: p.Opt.Memo, GasLimit: p.Opt.GasLimit}
+	for _, m := range p.Msgs {
+		d.Msgs = append(d.Msgs, describeMsg(m))
+	}
+	if fee, err := b.fee(p.Opt); err == nil && len(fee.Amount) > 0 {
+		d.Fee = fee.Amount[0].Amount + fee.Amount[0].Denom
+	}
+	return d
 }
 
 func (b *Builder) body(msgs Msgs, memo string) ([]byte, error) {
@@ -224,12 +271,8 @@ func (b *Builder) fee(opt Options) (*txv1beta1.Fee, error) {
 	}, nil
 }
 
-func (b *Builder) authInfo(opt Options, seq uint64) ([]byte, error) {
+func (b *Builder) authInfo(pkAny *anypb.Any, opt Options, seq uint64) ([]byte, error) {
 	fee, err := b.fee(opt)
-	if err != nil {
-		return nil, err
-	}
-	pkAny, err := b.pubKeyAny()
 	if err != nil {
 		return nil, err
 	}
@@ -246,51 +289,6 @@ func (b *Builder) authInfo(opt Options, seq uint64) ([]byte, error) {
 		Fee: fee,
 	}
 	return proto.Marshal(ai)
-}
-
-// pubKeyAny emits the pubkey Any matching the key algorithm. eth_secp256k1
-// uses the ethermint type URL kept by cosmos-evm for compatibility.
-func (b *Builder) pubKeyAny() (*anypb.Any, error) {
-	switch b.key.Algo {
-	case keys.AlgoEthSecp256k1:
-		var v []byte
-		v = protowire.AppendTag(v, 1, protowire.BytesType)
-		v = protowire.AppendBytes(v, b.key.PubKey)
-		return &anypb.Any{TypeUrl: "/cosmos.evm.crypto.v1.ethsecp256k1.PubKey", Value: v}, nil
-	default:
-		v, err := proto.Marshal(&secp256k1api.PubKey{Key: b.key.PubKey})
-		if err != nil {
-			return nil, err
-		}
-		return &anypb.Any{TypeUrl: "/cosmos.crypto.secp256k1.PubKey", Value: v}, nil
-	}
-}
-
-func (b *Builder) sign(msgs Msgs, body, authInfo []byte, num, seq uint64, opt Options) ([]byte, Doc, error) {
-	sd := &txv1beta1.SignDoc{
-		BodyBytes:     body,
-		AuthInfoBytes: authInfo,
-		ChainId:       b.profile.ChainID,
-		AccountNumber: num,
-	}
-	sdBytes, err := proto.Marshal(sd)
-	if err != nil {
-		return nil, Doc{}, err
-	}
-	sig := b.key.Sign(sdBytes)
-	raw := &txv1beta1.TxRaw{BodyBytes: body, AuthInfoBytes: authInfo, Signatures: [][]byte{sig}}
-	rawBytes, err := proto.Marshal(raw)
-	if err != nil {
-		return nil, Doc{}, err
-	}
-	doc := Doc{ChainID: b.profile.ChainID, Account: b.address, AccNum: num, Seq: seq, Memo: opt.Memo, GasLimit: opt.GasLimit}
-	for _, m := range msgs {
-		doc.Msgs = append(doc.Msgs, describeMsg(m))
-	}
-	if fee, err := b.fee(opt); err == nil && len(fee.Amount) > 0 {
-		doc.Fee = fee.Amount[0].Amount + fee.Amount[0].Denom
-	}
-	return rawBytes, doc, nil
 }
 
 // Simulate runs the tx against the node's simulation endpoint, returning gas used.

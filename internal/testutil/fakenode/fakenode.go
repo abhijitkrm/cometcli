@@ -58,6 +58,8 @@ type Node struct {
 	// account state
 	AccNum uint64
 	Seq    uint64 // the chain's next expected sequence
+	// PubKey, when set, is returned as the account's on-chain public key.
+	PubKey *anypb.Any
 	// StaleSeq, when set, is what account queries report (a tx pending in
 	// the mempool makes the query lag the CheckTx state).
 	StaleSeq *uint64
@@ -134,7 +136,11 @@ func (s *authSrv) Account(_ context.Context, r *authv1beta1.QueryAccountRequest)
 	if s.n.StaleSeq != nil {
 		seq = *s.n.StaleSeq
 	}
-	b, _ := proto.Marshal(&authv1beta1.BaseAccount{Address: r.Address, AccountNumber: s.n.AccNum, Sequence: seq})
+	acc := &authv1beta1.BaseAccount{Address: r.Address, AccountNumber: s.n.AccNum, Sequence: seq}
+	if s.n.PubKey != nil {
+		acc.PubKey = &anypb.Any{TypeUrl: s.n.PubKey.TypeUrl, Value: s.n.PubKey.Value}
+	}
+	b, _ := proto.Marshal(acc)
 	return &authv1beta1.QueryAccountResponse{Account: &anypb.Any{TypeUrl: "/cosmos.auth.v1beta1.BaseAccount", Value: b}}, nil
 }
 
@@ -155,6 +161,12 @@ type decoded struct {
 // verify decodes raw tx bytes and checks the signature against the sign
 // doc the chain would build. It does not check the sequence.
 func (n *Node) verify(raw []byte, accNum uint64) (*decoded, error) {
+	return n.verifyTx(raw, accNum, false)
+}
+
+// verifyTx checks a tx; when simulating, an empty signature is accepted
+// (the SDK skips signature checks in simulation).
+func (n *Node) verifyTx(raw []byte, accNum uint64, simulate bool) (*decoded, error) {
 	var tr txv1beta1.TxRaw
 	if err := proto.Unmarshal(raw, &tr); err != nil {
 		return nil, fmt.Errorf("tx parse error: %w", err)
@@ -172,8 +184,14 @@ func (n *Node) verify(raw []byte, accNum uint64) (*decoded, error) {
 			return nil, fmt.Errorf("unable to resolve type URL %s", m.TypeUrl)
 		}
 	}
-	if len(ai.SignerInfos) != 1 || len(tr.Signatures) != 1 || len(tr.Signatures[0]) != 64 {
-		return nil, fmt.Errorf("expected one signer with a 64-byte signature")
+	if len(ai.SignerInfos) != 1 || len(tr.Signatures) != 1 {
+		return nil, fmt.Errorf("expected one signer and one signature")
+	}
+	if simulate && len(tr.Signatures[0]) == 0 {
+		return &decoded{body: &body, auth: &ai, seq: ai.SignerInfos[0].Sequence}, nil
+	}
+	if len(tr.Signatures[0]) != 64 {
+		return nil, fmt.Errorf("expected a 64-byte signature")
 	}
 	si := ai.SignerInfos[0]
 	if si.ModeInfo.GetSingle().GetMode().String() != "SIGN_MODE_DIRECT" {
@@ -222,7 +240,7 @@ func (s *txSrv) Simulate(_ context.Context, r *txv1beta1.SimulateRequest) (*txv1
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.Simulations++
-	d, err := n.verify(r.TxBytes, n.AccNum)
+	d, err := n.verifyTx(r.TxBytes, n.AccNum, true)
 	if err != nil {
 		return nil, status.Error(codes.Unknown, err.Error())
 	}
@@ -371,7 +389,7 @@ func (n *Node) Profile(t testing.TB, algo string) *config.Profile {
 		t.Fatal(err)
 	}
 	// a fixed test key — never use outside tests
-	if _, err := ring.ImportHex("ops", "4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318", keys.Algo(algo)); err != nil {
+	if _, err := ring.ImportHex("ops", TestKeyHex, keys.Algo(algo)); err != nil {
 		t.Fatal(err)
 	}
 	return p
