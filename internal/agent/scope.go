@@ -43,7 +43,11 @@ ENVIRONMENT: %s/%s, host %s, working directory %s, date %s
 			names = append(names, fmt.Sprintf("%s (%s, %s)", n, orNone(p.Role), orNone(p.ChainID)))
 		}
 		sort.Strings(names)
-		fmt.Fprintf(&b, "NODE PROFILES: %s — for validator/node work (signing, jailing, upgrades, txs), the operator switches with /one <profile>, which adds the node tools and safety rules; suggest it when relevant.\n", strings.Join(names, "; "))
+		active := ""
+		if ap, err := c.Cfg.ActiveProfile(""); err == nil && ap != nil {
+			active = " Active profile: " + ap.Name + "."
+		}
+		fmt.Fprintf(&b, "NODE PROFILES: %s.%s For any question about a node, validator or chain (jailing, sync, peers, upgrades, governance, txs), call use_node with the right profile yourself and continue — never ask the operator to switch. Any profile on a chain answers chain-wide questions; pick the active one when nothing points elsewhere.\n", strings.Join(names, "; "), active)
 	}
 	return b.String()
 }
@@ -71,6 +75,17 @@ const generalToolsText = `General tools:
 // so provider-bound replay state is dropped and the cache restarts; the
 // model is told about the switch on the next turn.
 func (a *Agent) SwitchScope(p *config.Profile) {
+	note := "[The operator switched this session to general mode: node tools are gone; the shell runs on their machine.]"
+	if p != nil {
+		note = fmt.Sprintf("[The operator switched this session to node mode for profile %s (role %s, chain %s, transport %s); node tools, rules and a live snapshot are now in your instructions.]",
+			p.Name, orNone(p.Role), orNone(p.ChainID), orNone(p.Transport.Type))
+	}
+	a.switchScope(p, note)
+}
+
+// switchScope moves the session to p (nil = general); note, if any, is
+// carried into the next user turn (the model's own use_node needs none).
+func (a *Agent) switchScope(p *config.Profile, note string) {
 	old := a.Ctx
 	c := &toolkit.Context{
 		Context: old.Context, Profile: p, Cfg: old.Cfg, Out: old.Out,
@@ -86,10 +101,8 @@ func (a *Agent) SwitchScope(p *config.Profile) {
 	a.loaded = nil
 	a.Tools = toolkit.NewSession("")
 	a.dropBoundRaw()
-	note := "[The operator switched this session to general mode: node tools are gone; the shell runs on their machine.]"
-	if p != nil {
-		note = fmt.Sprintf("[The operator switched this session to node mode for profile %s (role %s, chain %s, transport %s); node tools, rules and a live snapshot are now in your instructions.]",
-			p.Name, orNone(p.Role), orNone(p.ChainID), orNone(p.Transport.Type))
+	if note == "" {
+		return
 	}
 	if a.carry != "" {
 		a.carry += "\n\n"

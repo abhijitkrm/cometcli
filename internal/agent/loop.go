@@ -275,6 +275,9 @@ func (a *Agent) toolDefs() []ToolDef {
 	if a.parent == nil {
 		out = append(out, a.taskToolDef())
 	}
+	if d, ok := a.useNodeDef(); ok {
+		out = append(out, d)
+	}
 	return out
 }
 
@@ -520,6 +523,10 @@ func (a *Agent) execCall(ctx context.Context, call Call) Msg {
 		return a.todoWrite(call, args)
 	case toolSearchName:
 		return a.toolSearch(call, args)
+	case useNodeName:
+		if a.parent == nil {
+			return a.useNode(call, args)
+		}
 	case taskToolName:
 		if a.parent == nil {
 			return a.runTask(ctx, call, args)

@@ -77,11 +77,11 @@ type validatorsTool struct{}
 
 func (validatorsTool) Name() string { return "chain.validators" }
 func (validatorsTool) Desc() string {
-	return "List validators with status, tokens, and commission"
+	return "List the chain's validators with status, tokens, commission and jailed flag (status=jailed: only jailed ones; default bonded)"
 }
 func (validatorsTool) Schema() map[string]any {
 	return toolkit.ObjSchema(map[string]any{
-		"status": toolkit.Enum("filter by bond status", "all", "bonded", "unbonding", "unbonded"),
+		"status": toolkit.Enum("filter: bonded (default), jailed, unbonding, unbonded or all", "all", "bonded", "jailed", "unbonding", "unbonded"),
 	})
 }
 func (validatorsTool) Tier() toolkit.Tier { return toolkit.TierObserve }
@@ -91,10 +91,12 @@ func (validatorsTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, 
 	if err != nil {
 		return nil, err
 	}
+	filter := a.String("status", "bonded")
 	status := map[string]string{
 		"bonded": "BOND_STATUS_BONDED", "unbonding": "BOND_STATUS_UNBONDING",
-		"unbonded": "BOND_STATUS_UNBONDED", "all": "",
-	}[a.String("status", "bonded")]
+		"unbonded": "BOND_STATUS_UNBONDED", "all": "", "jailed": "",
+	}[filter]
+	onlyJailed := filter == "jailed"
 	var b strings.Builder
 	var all []map[string]any
 	key := []byte{}
@@ -107,9 +109,16 @@ func (validatorsTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, 
 			return nil, err
 		}
 		for _, v := range res.Validators {
-			fmt.Fprintf(&b, "%-24s %-10s %s  comm=%s\n",
+			if onlyJailed && !v.Jailed {
+				continue
+			}
+			flag := ""
+			if v.Jailed {
+				flag = "  JAILED"
+			}
+			fmt.Fprintf(&b, "%-24s %-10s %s  comm=%s  %s%s\n",
 				trunc(v.Description.Moniker, 24), strings.TrimPrefix(v.Status.String(), "BOND_STATUS_"),
-				v.Tokens, v.Commission.CommissionRates.Rate)
+				v.Tokens, v.Commission.CommissionRates.Rate, v.OperatorAddress, flag)
 			all = append(all, map[string]any{
 				"moniker": v.Description.Moniker, "status": v.Status.String(),
 				"tokens": v.Tokens, "valoper": v.OperatorAddress, "jailed": v.Jailed,
@@ -119,6 +128,9 @@ func (validatorsTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, 
 			break
 		}
 		key = res.Pagination.NextKey
+	}
+	if onlyJailed && len(all) == 0 {
+		b.WriteString("no validator is jailed\n")
 	}
 	fmt.Fprintf(&b, "total: %d\n", len(all))
 	return &toolkit.Result{Text: b.String(), Data: map[string]any{"validators": all, "count": len(all)}}, nil

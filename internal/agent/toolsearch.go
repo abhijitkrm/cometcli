@@ -20,7 +20,7 @@ const toolSearchName = "tool_search"
 var coreTools = map[string]bool{
 	"node.status": true, "node.health": true, "node.logs": true,
 	"val.status": true, "val.signing": true,
-	"val.jail-check": true, "val.consensus": true, "wait.until": true,
+	"val.jail-check": true, "val.consensus": true, "wait.until": true, "chain.validators": true,
 	"node.triage": true, "kb.show": true, "kb.search": true,
 }
 
@@ -140,7 +140,7 @@ func (a *Agent) toolSearch(call Call, args map[string]any) Msg {
 			continue
 		}
 		if !a.deferrable(t) && !coreTools[t.Name()] {
-			missing = append(missing, t.Name()+" (node tool: needs node mode — /one <profile>)")
+			missing = append(missing, t.Name()+" (node tool: call use_node with a profile first)")
 			continue
 		}
 		a.loaded[t.Name()] = true

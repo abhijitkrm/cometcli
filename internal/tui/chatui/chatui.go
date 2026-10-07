@@ -1342,6 +1342,8 @@ func toolHeader(e agent.Event) string {
 		s = arg("url")
 	case "task":
 		s = arg("description")
+	case "use_node":
+		s = arg("profile")
 	default:
 		s = agent.CompactArgs(a)
 	}
@@ -1376,6 +1378,8 @@ func toolLabel(name string) string {
 		name = "Task"
 	case "tool_search":
 		name = "Load tools"
+	case "use_node":
+		name = "Use node"
 	default:
 		if strings.HasPrefix(name, "mcp__") {
 			srv, tool, _ := strings.Cut(strings.TrimPrefix(name, "mcp__"), "__")
