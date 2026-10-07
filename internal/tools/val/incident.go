@@ -42,6 +42,8 @@ type Facts struct {
 
 	Height      int64
 	BlockTime   time.Time
+	// NodeConsHex is the consensus address the node itself signs with.
+	NodeConsHex []byte
 	CatchingUp  bool
 	CometErr    string
 	MaxBlockLag time.Duration
@@ -124,6 +126,7 @@ func Gather(c *toolkit.Context, a toolkit.Args) (*Facts, error) {
 		f.CometErr = err.Error()
 	} else {
 		f.Height, f.BlockTime, f.CatchingUp = st.SyncInfo.LatestBlockHeight, st.SyncInfo.LatestBlockTime, st.SyncInfo.CatchingUp
+		f.NodeConsHex = st.ValidatorInfo.Address
 	}
 	return f, nil
 }
@@ -162,6 +165,10 @@ func (f *Facts) UnjailBlockers(c *toolkit.Context) []Blocker {
 	if !f.Synced() {
 		out = append(out, Blocker{Hard: true, Issue: "node not synced: " + f.SyncState(),
 			Fix: "wait.until condition=synced (and fix why it fell behind) — an unjailed validator that can't sign gets jailed again"})
+	}
+	if len(f.NodeConsHex) > 0 && len(f.ConsHex) > 0 && !bytes.Equal(f.NodeConsHex, f.ConsHex) {
+		out = append(out, Blocker{Hard: true, Issue: fmt.Sprintf("the node signs with consensus key %X, but the validator is registered with %X — it would be jailed again", []byte(f.NodeConsHex), f.ConsHex),
+			Fix: "the operator restores the registered priv_validator_key.json (check no other machine runs it) and restarts — kb.show val-key-mismatch"})
 	}
 	if ahead := f.SignerAhead(c); ahead > 0 {
 		out = append(out, Blocker{Hard: true, Issue: fmt.Sprintf("the signer's priv_validator_state is %d blocks ahead of the chain (height %d) — it refuses to sign until the chain passes it", ahead, f.Height+ahead),

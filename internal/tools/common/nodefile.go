@@ -33,4 +33,3 @@ func ReadNodeFile(c *toolkit.Context, h host.Host, rel string) ([]byte, string, 
 	}
 	return nil, "", fmt.Errorf("cannot read %s", rel)
 }
-

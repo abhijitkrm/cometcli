@@ -124,3 +124,16 @@ func TestUnjailBlockedWhileSignerAhead(t *testing.T) {
 		t.Fatalf("unjail not refused: %v", err)
 	}
 }
+
+func TestUnjailBlockedOnWrongConsensusKey(t *testing.T) {
+	n, c, valoper, chain := setupChain(t)
+	jail(n, time.Now().Add(-time.Minute))
+	chain.Set(func(c *fakenode.Comet) { c.NodeKeyAddr = make([]byte, 20) })
+	res, err := (jailCheckTool{}).Run(c, toolkit.Args{"validator": valoper})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Text, "but the validator is registered with") || res.Data["can_unjail_now"] != false {
+		t.Fatalf("wrong key not a blocker:\n%s", res.Text)
+	}
+}

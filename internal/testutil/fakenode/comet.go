@@ -42,6 +42,9 @@ type Comet struct {
 	InSet bool
 	Power int64
 	Peers int
+	// NodeKeyAddr, when set, is the consensus address the node reports
+	// signing with (a node running the wrong priv_validator_key).
+	NodeKeyAddr []byte
 }
 
 // ConsPub is the test validator's consensus key (ed25519, fixed seed).
@@ -128,6 +131,9 @@ func (c *Comet) result(method string, p map[string]any) (any, error) {
 	case "health":
 		return &coretypes.ResultHealth{}, nil
 	case "status":
+		if c.NodeKeyAddr != nil {
+			addr = c.NodeKeyAddr
+		}
 		power := int64(0)
 		if c.InSet {
 			power = c.Power
