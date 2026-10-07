@@ -15,6 +15,7 @@ import (
 type anthropic struct {
 	key, model, base string
 	hc               *http.Client
+	noEffort         bool // the model rejected output_config.effort
 }
 
 func (a *anthropic) Name() string { return "anthropic" }
@@ -31,6 +32,10 @@ type anthBlock map[string]any
 // Models that take adaptive thinking (4.6+ Opus/Sonnet, the 5 family,
 // Fable/Mythos). Older ones (Haiku 4.5, Sonnet 4.5, …) reject it.
 var anthAdaptiveRe = regexp.MustCompile(`^claude-(fable|mythos)-|^claude-(opus|sonnet)-(4-[6-9]|5)`)
+
+// Models that take output_config.effort (Opus 4.5+, Sonnet 4.6+, the 5
+// family, Fable/Mythos). Haiku 4.5 and Sonnet 4.5 reject it with a 400.
+var anthEffortRe = regexp.MustCompile(`^claude-(fable|mythos)-|^claude-opus-(4-[5-9]|5)|^claude-sonnet-(4-[6-9]|5)|^claude-haiku-[5-9]`)
 
 // Models that accept the server-side refusal fallback ("default" routing).
 var anthFallbackRe = regexp.MustCompile(`^claude-(fable-5-1|opus-5|sonnet-5-5)`)
@@ -79,7 +84,7 @@ func (a *anthropic) body(r *Request, stream bool) map[string]any {
 	if anthAdaptiveRe.MatchString(r.Model) {
 		body["thinking"] = map[string]any{"type": "adaptive", "display": "summarized"}
 	}
-	if r.Effort != "" {
+	if r.Effort != "" && anthEffortRe.MatchString(r.Model) && !a.noEffort {
 		body["output_config"] = map[string]any{"effort": r.Effort}
 	}
 	if a.firstParty() && anthFallbackRe.MatchString(r.Model) {
@@ -106,7 +111,14 @@ func (a *anthropic) post(ctx context.Context, body map[string]any) (*http.Respon
 	}
 	if resp.StatusCode/100 != 2 {
 		defer resp.Body.Close()
-		return nil, apiError("anthropic", resp)
+		err := apiError("anthropic", resp)
+		// a model we didn't know lacks effort: drop it for the session
+		if _, has := body["output_config"]; has && resp.StatusCode == 400 && strings.Contains(err.Error(), "effort") {
+			a.noEffort = true
+			delete(body, "output_config")
+			return a.post(ctx, body)
+		}
+		return nil, err
 	}
 	return resp, nil
 }
