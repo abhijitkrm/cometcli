@@ -3,6 +3,7 @@ package val
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"regexp"
@@ -162,6 +163,10 @@ func (f *Facts) UnjailBlockers(c *toolkit.Context) []Blocker {
 		out = append(out, Blocker{Hard: true, Issue: "node not synced: " + f.SyncState(),
 			Fix: "wait.until condition=synced (and fix why it fell behind) — an unjailed validator that can't sign gets jailed again"})
 	}
+	if ahead := f.SignerAhead(c); ahead > 0 {
+		out = append(out, Blocker{Hard: true, Issue: fmt.Sprintf("the signer's priv_validator_state is %d blocks ahead of the chain (height %d) — it refuses to sign until the chain passes it", ahead, f.Height+ahead),
+			Fix: fmt.Sprintf("wait.until condition=height value=%d — never reset priv_validator_state.json", f.Height+ahead+1)})
+	}
 	if lessThan(f.SelfDelegation, f.MinSelfDelegation) {
 		out = append(out, Blocker{Hard: true, Issue: fmt.Sprintf("self-delegation %s is below min_self_delegation %s", f.SelfDelegation, f.MinSelfDelegation),
 			Fix: "self-delegate the difference with tx.delegate before unjailing"})
@@ -178,6 +183,35 @@ func (f *Facts) UnjailBlockers(c *toolkit.Context) []Blocker {
 
 // feeEstimate is a conservative fee for one simple tx at the profile's
 // gas price (300k gas).
+// SignerAhead returns how many blocks the node's priv_validator_state is
+// ahead of the chain (0 when it isn't, or it can't be read — a remote
+// signer keeps its own state).
+func (f *Facts) SignerAhead(c *toolkit.Context) int64 {
+	if f.Height == 0 || c.Profile == nil || c.Profile.Home == "" && c.Profile.Service.Type != "docker" {
+		return 0
+	}
+	h, err := c.Host()
+	if err != nil {
+		return 0
+	}
+	raw, _, err := common.ReadNodeFile(c, h, "data/priv_validator_state.json")
+	if err != nil {
+		return 0
+	}
+	var pvs struct {
+		Height string `json:"height"`
+	}
+	if json.Unmarshal(raw, &pvs) != nil {
+		return 0
+	}
+	var ph int64
+	fmt.Sscan(pvs.Height, &ph)
+	if ph > f.Height+1 { // the next height is normal
+		return ph - f.Height - 1
+	}
+	return 0
+}
+
 func feeEstimate(c *toolkit.Context) *big.Int {
 	price, ok := new(big.Rat).SetString(c.Profile.Metadata["gas_price"])
 	if !ok {

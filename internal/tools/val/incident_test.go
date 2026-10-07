@@ -1,6 +1,8 @@
 package val
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -95,5 +97,30 @@ func TestConsensusVerdict(t *testing.T) {
 	res, _ = (consensusTool{}).Run(c, toolkit.Args{"validator": valoper})
 	if res.Data["in_consensus"] != false || res.Data["voting_power"] != int64(0) {
 		t.Fatalf("jailed:\n%s", res.Text)
+	}
+}
+
+func TestUnjailBlockedWhileSignerAhead(t *testing.T) {
+	n, c, valoper, _ := setupChain(t)
+	jail(n, time.Now().Add(-time.Minute))
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, "data"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// restored from an older snapshot: the signer last signed 200 blocks ahead
+	if err := os.WriteFile(filepath.Join(home, "data", "priv_validator_state.json"), []byte(`{"height":"1200","round":0,"step":3}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c.Profile.Home = home
+	c.SetHost(&host.Local{})
+	res, err := (jailCheckTool{}).Run(c, toolkit.Args{"validator": valoper})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Text, "199 blocks ahead") || !strings.Contains(res.Text, "never reset priv_validator_state.json") || res.Data["can_unjail_now"] != false {
+		t.Fatalf("signer-ahead not a blocker:\n%s", res.Text)
+	}
+	if _, err := (unjailTool{}).Run(c, toolkit.Args{"validator": valoper}); err == nil || !strings.Contains(err.Error(), "ahead") {
+		t.Fatalf("unjail not refused: %v", err)
 	}
 }

@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
-	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -588,35 +587,13 @@ func processStart(c *toolkit.Context, h host.Host, svc config.Service, binary st
 	return time.Time{}
 }
 
-// readNodeFile reads <home>/<rel> from the host, falling back to the
-// container when the node runs in docker and the home isn't on the host.
 func readNodeFile(c *toolkit.Context, h host.Host, rel string) ([]byte, error) {
-	b, _, err := readNodeFileAt(c, h, rel)
+	b, _, err := common.ReadNodeFile(c, h, rel)
 	return b, err
 }
 
-// readNodeFileAt is readNodeFile that also says where the file was read
-// ("/home/x/.evmd/config/app.toml" or "container:/data/…").
 func readNodeFileAt(c *toolkit.Context, h host.Host, rel string) ([]byte, string, error) {
-	p := c.Profile
-	if p.Home != "" {
-		if b, err := h.ReadFile(c, path.Join(p.Home, rel)); err == nil {
-			return b, path.Join(p.Home, rel), nil
-		}
-	}
-	if p.Service.Type == "docker" && p.Service.Unit != "" {
-		home := p.Signer.ContainerHome
-		if home == "" {
-			home = p.Home
-		}
-		if home != "" {
-			out, code, err := h.Run(c, "docker exec "+common.ShellQ(p.Service.Unit)+" cat "+common.ShellQ(path.Join(home, rel)))
-			if err == nil && code == 0 {
-				return []byte(out), p.Service.Unit + ":" + path.Join(home, rel), nil
-			}
-		}
-	}
-	return nil, "", fmt.Errorf("cannot read %s", rel)
+	return common.ReadNodeFile(c, h, rel)
 }
 
 func collectConfig(c *toolkit.Context, r *Report, set func(string, any)) error {

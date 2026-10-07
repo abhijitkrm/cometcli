@@ -110,6 +110,9 @@
     all: ["config.remote_signer == false", "logs.privval > 0"]
   confirm:
     - "sec.perms on config/priv_validator_key.json and data/priv_validator_state.json (owner, mode, read-only fs?)"
+  causes:
+    - key or state file unreadable / not writable by the node user (ownership, mode, read-only filesystem)
+    - "'no SignBytes found': priv_validator_state.json was hand-edited (or restored) to a height/round/step without its sign bytes — the signer refuses that exact HRS and recovers on the next height"
   fix:
     - "[change] fix ownership/permissions so the node user can read the key and write the state file; restart"
   warnings:

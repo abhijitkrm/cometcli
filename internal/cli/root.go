@@ -183,7 +183,11 @@ func RunTool(cmd *cobra.Command, t toolkit.Tool, args toolkit.Args) error {
 	}
 	defer c.Close()
 	if !toolkit.IsLongRunning(t) {
-		sub, cancel := toolkit.WithDeadline(c, 90*time.Second)
+		d := 90 * time.Second
+		if to, ok := t.(toolkit.Timeouter); ok { // wait.until, triage… set their own
+			d = to.Timeout(args)
+		}
+		sub, cancel := toolkit.WithDeadline(c, d)
 		defer cancel()
 		defer sub.Close()
 		c = sub
