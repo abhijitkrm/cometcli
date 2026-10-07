@@ -1460,10 +1460,3 @@ func humanTok(n int) string {
 	}
 	return strconv.Itoa(n)
 }
-
-func orDefault(s, d string) string {
-	if s == "" {
-		return d
-	}
-	return s
-}

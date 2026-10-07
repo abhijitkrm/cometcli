@@ -279,7 +279,9 @@ func (depositTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, err
 			return nil, fmt.Errorf("gov params: %v", err)
 		}
 		min := params.Params.MinDeposit
-		if pr.Proposal.Expedited && len(params.Params.ExpeditedMinDeposit) > 0 {
+		expedited := pr.Proposal.ProposalType == govv1.ProposalType_PROPOSAL_TYPE_EXPEDITED ||
+			pr.Proposal.Expedited //nolint:staticcheck // chains before SDK v0.53 only set the deprecated flag
+		if expedited && len(params.Params.ExpeditedMinDeposit) > 0 {
 			min = params.Params.ExpeditedMinDeposit
 		}
 		amount = missing(min, pr.Proposal.TotalDeposit)
