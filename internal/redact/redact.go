@@ -34,7 +34,7 @@ var (
 // Text scrubs sensitive material from s.
 func Text(s string) string {
 	s = mnemonicRe.ReplaceAllStringFunc(s, scrubMnemonic)
-	s = hex64Re.ReplaceAllString(s, "[REDACTED_HEX]")
+	s = scrubHex64(s)
 	s = privValRe.ReplaceAllString(s, `"$1": "[REDACTED]"`)
 	s = keyValueRe.ReplaceAllString(s, `"value": "[REDACTED]"`)
 	s = kvSecretRe.ReplaceAllString(s, "[REDACTED_SECRET]")
@@ -42,6 +42,33 @@ func Text(s string) string {
 	s = jwtRe.ReplaceAllString(s, "[REDACTED_JWT]")
 	s = urlCredRe.ReplaceAllString(s, "$1://[REDACTED_CRED]@")
 	return s
+}
+
+// hashLabelRe ends with a label that marks the following hex as a hash
+// (tx, block, app hash): public data the operator needs, not a key.
+var hashLabelRe = regexp.MustCompile(`(?i)hash["']?\s*(:|=)?\s*["']?$`)
+
+// scrubHex64 redacts 64-char hex (a private key's shape) unless it is
+// labelled as a hash: "tx hash: AB…", "txhash=…", "\"hash\": \"0x…\"".
+func scrubHex64(s string) string {
+	locs := hex64Re.FindAllStringIndex(s, -1)
+	if locs == nil {
+		return s
+	}
+	var b strings.Builder
+	last := 0
+	for _, l := range locs {
+		start := max(0, l[0]-24)
+		b.WriteString(s[last:l[0]])
+		if hashLabelRe.MatchString(s[start:l[0]]) {
+			b.WriteString(s[l[0]:l[1]])
+		} else {
+			b.WriteString("[REDACTED_HEX]")
+		}
+		last = l[1]
+	}
+	b.WriteString(s[last:])
+	return b.String()
 }
 
 // mnemonicLen is the shortest BIP-39 mnemonic (128-bit entropy).

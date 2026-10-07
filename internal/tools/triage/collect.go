@@ -468,10 +468,17 @@ func collectLogs(c *toolkit.Context, r *Report, set func(string, any)) error {
 // readNodeFile reads <home>/<rel> from the host, falling back to the
 // container when the node runs in docker and the home isn't on the host.
 func readNodeFile(c *toolkit.Context, h host.Host, rel string) ([]byte, error) {
+	b, _, err := readNodeFileAt(c, h, rel)
+	return b, err
+}
+
+// readNodeFileAt is readNodeFile that also says where the file was read
+// ("/home/x/.evmd/config/app.toml" or "container:/data/…").
+func readNodeFileAt(c *toolkit.Context, h host.Host, rel string) ([]byte, string, error) {
 	p := c.Profile
 	if p.Home != "" {
 		if b, err := h.ReadFile(c, path.Join(p.Home, rel)); err == nil {
-			return b, nil
+			return b, path.Join(p.Home, rel), nil
 		}
 	}
 	if p.Service.Type == "docker" && p.Service.Unit != "" {
@@ -482,11 +489,11 @@ func readNodeFile(c *toolkit.Context, h host.Host, rel string) ([]byte, error) {
 		if home != "" {
 			out, code, err := h.Run(c, "docker exec "+common.ShellQ(p.Service.Unit)+" cat "+common.ShellQ(path.Join(home, rel)))
 			if err == nil && code == 0 {
-				return []byte(out), nil
+				return []byte(out), p.Service.Unit + ":" + path.Join(home, rel), nil
 			}
 		}
 	}
-	return nil, fmt.Errorf("cannot read %s", rel)
+	return nil, "", fmt.Errorf("cannot read %s", rel)
 }
 
 func collectConfig(c *toolkit.Context, r *Report, set func(string, any)) error {
@@ -498,9 +505,10 @@ func collectConfig(c *toolkit.Context, r *Report, set func(string, any)) error {
 		return err
 	}
 	var errs []string
-	if raw, err := readNodeFile(c, h, "config/config.toml"); err != nil {
+	if raw, at, err := readNodeFileAt(c, h, "config/config.toml"); err != nil {
 		errs = append(errs, err.Error())
 	} else {
+		set("config.file", at)
 		var m map[string]any
 		if err := toml.Unmarshal(raw, &m); err != nil {
 			set("config.parse_error", true)
@@ -525,9 +533,10 @@ func collectConfig(c *toolkit.Context, r *Report, set func(string, any)) error {
 			set("config.prometheus", get("instrumentation", "prometheus") == true)
 		}
 	}
-	if raw, err := readNodeFile(c, h, "config/app.toml"); err != nil {
+	if raw, at, err := readNodeFileAt(c, h, "config/app.toml"); err != nil {
 		errs = append(errs, err.Error())
 	} else {
+		set("app.file", at)
 		var m map[string]any
 		if err := toml.Unmarshal(raw, &m); err != nil {
 			set("app.parse_error", true)

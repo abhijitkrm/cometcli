@@ -188,3 +188,18 @@ func TestHostOf(t *testing.T) {
 		}
 	}
 }
+
+func TestHashesAreNotKeys(t *testing.T) {
+	h := "B240273F16D1F385FB9C4FC5CEB0820ECE4CC7C2C03B159FD22359CA7DAA014C"
+	for _, in := range []string{"tx hash: " + h, "txhash=" + h, `{"hash": "0x` + strings.ToLower(h) + `"}`, "app_hash=" + h, "TxHash " + h} {
+		if got := Text(in); !strings.Contains(strings.ToUpper(got), h) {
+			t.Errorf("hash redacted: %q → %q", in, got)
+		}
+	}
+	key := strings.ToLower(h)
+	for _, in := range []string{"key " + key, "priv=" + key, key, "export: 0x" + key} {
+		if got := Text(in); strings.Contains(got, key) {
+			t.Errorf("key not redacted: %q", got)
+		}
+	}
+}
