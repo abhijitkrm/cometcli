@@ -390,6 +390,24 @@ func (voteTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error)
 	if a.Int("proposal", 0) <= 0 {
 		return nil, fmt.Errorf("proposal id is required")
 	}
+	// a vote outside the voting period only fails at simulation with
+	// "inactive proposal": say what actually happened
+	if g, err := c.GRPC(); err == nil {
+		if pr, err := g.GovV1.Proposal(c, &govv1.QueryProposalRequest{ProposalId: uint64(a.Int("proposal", 0))}); err == nil && pr.Proposal != nil {
+			p := pr.Proposal
+			switch p.Status {
+			case govv1.ProposalStatus_PROPOSAL_STATUS_VOTING_PERIOD:
+			case govv1.ProposalStatus_PROPOSAL_STATUS_DEPOSIT_PERIOD:
+				return nil, fmt.Errorf("proposal %d is still in its deposit period — voting opens once it reaches the minimum deposit (gov.deposit)", p.Id)
+			default:
+				ended := ""
+				if p.VotingEndTime != nil && p.VotingEndTime.AsTime().Year() > 2000 {
+					ended = " at " + p.VotingEndTime.AsTime().UTC().Format("2006-01-02 15:04 UTC")
+				}
+				return nil, fmt.Errorf("proposal %d is closed: voting ended%s, %s", p.Id, ended, strings.TrimPrefix(p.Status.String(), "PROPOSAL_STATUS_"))
+			}
+		}
+	}
 	msg := &govv1.MsgVote{
 		ProposalId: uint64(a.Int("proposal", 0)),
 		Voter:      acct,

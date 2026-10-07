@@ -158,7 +158,7 @@ func (govTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) 
 	for _, p := range res.Proposals {
 		fmt.Fprintf(&b, "#%-4d %-26s %-56s ends %s\n",
 			p.Id, strings.TrimPrefix(p.Status.String(), "PROPOSAL_STATUS_"),
-			trunc(p.Title, 56), p.VotingEndTime.AsTime().Format("2006-01-02 15:04"))
+			trunc(p.Title, 56), proposalEnd(p))
 		props = append(props, map[string]any{"id": p.Id, "title": p.Title, "status": p.Status.String()})
 	}
 	if len(props) == 0 {
@@ -260,4 +260,17 @@ func trunc(s string, n int) string {
 		return s[:n-1] + "…"
 	}
 	return s
+}
+
+// proposalEnd is when the proposal's current period ends: voting, or the
+// deposit period while it still waits for its minimum deposit.
+func proposalEnd(p *govv1.Proposal) string {
+	t := p.VotingEndTime
+	if p.Status == govv1.ProposalStatus_PROPOSAL_STATUS_DEPOSIT_PERIOD || t == nil || t.AsTime().Year() < 2000 {
+		if p.DepositEndTime != nil {
+			return p.DepositEndTime.AsTime().Format("2006-01-02 15:04") + " (deposit)"
+		}
+		return "-"
+	}
+	return t.AsTime().Format("2006-01-02 15:04")
 }

@@ -96,7 +96,7 @@ func toolGroupCommands(reg *toolkit.Registry) []*cobra.Command {
 		}
 		parent.AddCommand(toolCmd(t))
 	}
-	preferred := []string{"node", "val", "chain", "evm", "keys", "tx", "upgrade", "snap", "mon", "sec", "net", "runbook", "fleet"}
+	preferred := []string{"node", "val", "chain", "gov", "evm", "keys", "tx", "upgrade", "snap", "mon", "sec", "net", "runbook", "fleet"}
 	var out []*cobra.Command
 	for _, d := range preferred {
 		if p, ok := groups[d]; ok {

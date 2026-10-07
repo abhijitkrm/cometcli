@@ -6,6 +6,7 @@ import (
 	"github.com/abhijitkrm/cometcli/internal/tools/evmtool"
 	"github.com/abhijitkrm/cometcli/internal/tools/fleet"
 	"github.com/abhijitkrm/cometcli/internal/tools/fs"
+	"github.com/abhijitkrm/cometcli/internal/tools/govtool"
 	"github.com/abhijitkrm/cometcli/internal/tools/keystool"
 	"github.com/abhijitkrm/cometcli/internal/tools/montool"
 	"github.com/abhijitkrm/cometcli/internal/tools/nettool"
@@ -27,6 +28,7 @@ func RegisterAll(r *toolkit.Registry) {
 	node.Register(r)
 	val.Register(r)
 	chain.Register(r)
+	govtool.Register(r)
 	evmtool.Register(r)
 	keystool.Register(r)
 	sectool.Register(r)
