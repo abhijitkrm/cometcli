@@ -1207,6 +1207,9 @@ func (m *model) banner() string {
 		dim.Render(fitEnd("  "+scope+" · "+m.a.Provider.Name()+"/"+m.a.Model))
 	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(accent).Padding(0, 1).Width(inner).Render(body)
 	out := []string{box}
+	if art := cometArt(m.width); art != "" && len(m.a.History()) == 0 {
+		out = []string{art, "", box}
+	}
 	for _, n := range m.notes {
 		out = append(out, result(dim.Render(n)))
 	}
