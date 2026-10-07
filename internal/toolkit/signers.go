@@ -66,6 +66,14 @@ func (c *Context) TxSigner() (*tx.Builder, error) {
 	} else {
 		localErr = fmt.Errorf("no signer.key")
 	}
+	// a key that isn't this validator's operator account would sign a
+	// valid tx as someone else (a shared keyring, a copied profile)
+	if localErr == nil && c.Profile.Metadata["valoper"] != "" {
+		if want, err := keys.AccFromValoper(c.Profile.Metadata["valoper"]); err == nil && want != localB.Address() {
+			localErr = fmt.Errorf("cometcli keyring key %q is %s, not this validator's operator account %s", c.Profile.Signer.Key, localB.Address(), want)
+			localB = nil
+		}
+	}
 	container, ckey := c.signerContainer(), c.containerKey()
 	containerOK := container != "" && ckey != ""
 	switch c.Profile.Signer.Mode {

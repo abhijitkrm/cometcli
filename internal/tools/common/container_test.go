@@ -2,6 +2,7 @@ package common
 
 import (
 	"context"
+	"github.com/cosmos/btcutil/bech32"
 	"os"
 	"strings"
 	"testing"
@@ -138,4 +139,30 @@ func TestSignerChoiceWhenBothAvailable(t *testing.T) {
 func mustPub(t *testing.T) []byte {
 	t.Helper()
 	return fakenode.TestPubKey()
+}
+
+func TestLocalKeyOfAnotherAccountIsNeverOffered(t *testing.T) {
+	n, c, _ := containerSetup(t, "test")
+	c.Profile.Signer.Key = "ops"
+	conv, _ := bech32.ConvertBits(make([]byte, 20), 8, 5, true)
+	other, err := bech32.Encode("cosmosvaloper", conv) // someone else's validator
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Profile.Metadata["valoper"] = other
+	c.Chooser = func(*toolkit.Context, string, []string) (int, error) {
+		t.Fatal("offered a key that isn't this validator's operator account")
+		return 0, nil
+	}
+	// only the container can sign (its key is the right account in the
+	// fake); the broadcast itself may fail on the fake chain — what matters
+	// is that the wrong local key was never offered or used
+	_, _ = BroadcastMsgs(c, send("cosmos1dest"), "", nil, tx.Options{})
+	if _, _, sims := n.Snapshot(); sims != 0 {
+		t.Fatal("the other account's local key signed")
+	}
+	c.Profile.Signer.Mode = "local"
+	if _, err := BroadcastMsgs(c, send("cosmos1dest"), "", nil, tx.Options{}); err == nil || !strings.Contains(err.Error(), "not this validator's operator account") {
+		t.Fatalf("signer.mode local with the wrong key: %v", err)
+	}
 }
