@@ -74,3 +74,24 @@
     - "[change] upgrade.prepare the current release; restart"
   test:
     signals: {upgrade.pending: false, logs.apphash: 2, node.catching_up: false}
+
+- id: upgrade-replay-past-upgrade
+  title: Node syncing from an old height halts at an upgrade the chain already passed
+  explains: [upgrade-halt-binary-missing, node-crash-loop, node-process-down, node-rpc-down, node-restarted-recently, node-catching-up, node-stalled, evm-rpc-down, val-jailed-downtime, val-jailed-waiting-period, val-not-signing]
+  severity: critical
+  symptoms: a catching-up node logs UPGRADE "x" NEEDED, but the chain has no pending plan — it is replaying history
+  match:
+    all: ["logs.upgrade_needed > 0", "upgrade.pending == false"]
+  confirm:
+    - "logs.upgrade_name and the halt height vs the chain's current height (far above it)"
+    - "how did the network pass that height: an upgrade binary, or a coordinated --unsafe-skip-upgrades?"
+  causes:
+    - block-syncing from genesis or an old snapshot with only the latest binary
+  fix:
+    - "[change] the network applied the upgrade: run each historical binary up to its upgrade height (cosmovisor with every upgrades/<name>/bin staged), or"
+    - "[change] the network skipped it: start with --unsafe-skip-upgrades <height> like the validators did"
+    - "[change] or avoid replay entirely: snap.statesync / a recent trusted snapshot"
+  verify:
+    - "node.height passes the upgrade height; wait.until synced"
+  test:
+    signals: {logs.upgrade_needed: 2, upgrade.pending: false, node.catching_up: true}

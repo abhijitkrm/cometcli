@@ -205,6 +205,9 @@ func collectChain(c *toolkit.Context, r *Report, set func(string, any)) error {
 	if c.Profile == nil || c.Profile.Endpoints.GRPC == "" {
 		return fmt.Errorf("no grpc endpoint in profile")
 	}
+	if !c.Profile.IsValidator() && c.Profile.Metadata["valoper"] == "" {
+		return chainPlanOnly(c, set) // rpc/sentry nodes: no validator to inspect
+	}
 	f, err := val.Gather(c, nil)
 	if err != nil {
 		return err
@@ -267,6 +270,27 @@ func collectChain(c *toolkit.Context, r *Report, set func(string, any)) error {
 				set("upgrade.pending", false)
 			}
 		}
+	}
+	return nil
+}
+
+// chainPlanOnly collects the chain-wide signals a non-validator needs.
+func chainPlanOnly(c *toolkit.Context, set func(string, any)) error {
+	g, err := c.GRPC()
+	if err != nil {
+		return err
+	}
+	set("chain.via_fallback", c.GRPCFallback)
+	plan, err := g.Upgrade.CurrentPlan(c, &upgradev1beta1.QueryCurrentPlanRequest{})
+	if err != nil {
+		return err
+	}
+	if plan.Plan != nil && plan.Plan.Name != "" {
+		set("upgrade.pending", true)
+		set("upgrade.name", plan.Plan.Name)
+		set("upgrade.height", float64(plan.Plan.Height))
+	} else {
+		set("upgrade.pending", false)
 	}
 	return nil
 }
