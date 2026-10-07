@@ -393,6 +393,7 @@ func collectProcess(c *toolkit.Context, r *Report, set func(string, any)) error 
 		if t, err := time.Parse(time.RFC3339Nano, kv["started"]); err == nil && t.Year() > 1 {
 			set("proc.uptime_s", float64(int64(time.Since(t).Seconds())))
 		}
+		dockerMemory(c, h, svc.Unit, set)
 	case "systemd", "":
 		unit := svc.Unit
 		if unit == "" {
@@ -420,6 +421,43 @@ func collectProcess(c *toolkit.Context, r *Report, set func(string, any)) error 
 		return fmt.Errorf("service type %q not inspected", svc.Type)
 	}
 	return nil
+}
+
+// dockerMemory reports the container's memory limit, usage against it,
+// and cgroup OOM kills. Docker's OOMKilled flag only covers PID 1, but a
+// node usually runs under a wrapper shell, so the kernel kills the child
+// and the flag stays false — the cgroup's oom_kill counter does not.
+func dockerMemory(c *toolkit.Context, h host.Host, unit string, set func(string, any)) {
+	run := func(cmd string) (string, bool) {
+		out, code, err := h.Run(c, cmd)
+		return strings.TrimSpace(out), err == nil && code == 0
+	}
+	if out, ok := run("docker inspect -f '{{.HostConfig.Memory}} {{.Id}}' " + common.ShellQ(unit)); ok {
+		f := strings.Fields(out)
+		if len(f) == 2 {
+			if lim := num(f[0]); lim > 0 {
+				set("proc.mem_limit_mb", round1(lim/1024/1024))
+				if pc, ok := run("docker stats --no-stream --format '{{.MemPerc}}' " + common.ShellQ(unit)); ok {
+					set("proc.mem_used_pct_of_limit", pct(pc))
+				}
+			}
+			ev, code, err := h.Run(c, "docker exec "+common.ShellQ(unit)+" cat /sys/fs/cgroup/memory.events")
+			ok := err == nil && code == 0
+			execOOM := err != nil && strings.Contains(err.Error(), "OOM")
+			if !ok { // Linux host: read the cgroup directly (exec itself may be OOM-killed)
+				ev, ok = run("cat /sys/fs/cgroup/system.slice/docker-" + f[1] + ".scope/memory.events 2>/dev/null")
+			}
+			if ok {
+				for _, l := range strings.Split(ev, "\n") {
+					if k, v, _ := strings.Cut(l, " "); k == "oom_kill" {
+						set("proc.oom_kills", num(v))
+					}
+				}
+			} else if execOOM {
+				set("proc.oom_kills", 1.0) // "possibly OOM-killed" from the runtime
+			}
+		}
+	}
 }
 
 func collectLogs(c *toolkit.Context, r *Report, set func(string, any)) error {

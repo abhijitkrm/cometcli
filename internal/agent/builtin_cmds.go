@@ -13,7 +13,7 @@ var builtinCommands = map[string]*settings.Command{
 1. node.triage (since=2h if the problem started earlier). Note which sources were unavailable.
 2. Take the top matched case: kb.show it, run its confirm steps. If confirmation fails, move to the next case or kb.search the symptoms/log lines. No case at all → investigate from the signals and logs (node.logs, bash read-only).
 3. If several cases match, fix the one that CAUSES the others first (disk full → crash → behind → jailed: disk first).
-4. Apply the fix steps. [change] and [tx] steps need the operator's approval — say what and why first. Never do anything a case lists under NEVER.
+4. Apply the fix steps by CALLING the tools. [change] and [tx] steps are approved at the tool's own prompt: state in one line what you're doing and why, then make the call in the same step — never stop to ask for approval in text. Never do anything a case lists under NEVER.
 5. Wait for the effect with wait.until (synced, signing, in-consensus, or condition=signal value="<expr>"). If progress stalls, re-triage instead of waiting longer.
 6. Verify with the case's verify steps, then node.triage again: the case must no longer match.
 7. Report: root cause with evidence, actions taken (tx hashes), final state. If you found a cause no case described, propose a kb.add case (with a test fixture) for the operator to approve.

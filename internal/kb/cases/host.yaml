@@ -50,7 +50,7 @@
   explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, host-memory-pressure]
   severity: critical
   match:
-    any: ["proc.oom_killed == true", "logs.oom > 0"]
+    any: ["proc.oom_killed == true", "logs.oom > 0", "proc.oom_kills > 0"]
   confirm:
     - "bash: dmesg -T | grep -i oom (or journalctl -k); host.mem_used_pct"
   causes:
@@ -130,3 +130,24 @@
     - two instances of a validator = double-sign risk; stop one immediately
   test:
     signals: {logs.port_in_use: 2}
+
+- id: container-memory-limit
+  title: Container memory limit too low for the node (OOM kills inside the container)
+  explains: [node-crash-loop, node-process-down, node-rpc-down, node-restarted-recently, node-killed-sigkill, host-oom-killed, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, node-catching-up, evm-rpc-down]
+  severity: critical
+  symptoms: restarts with no error in the logs; docker OOMKilled may be false because the node runs under a wrapper shell
+  match:
+    all: ["proc.mem_limit_mb < 4096"]
+    any: ["proc.oom_kills > 0", "proc.mem_used_pct_of_limit >= 90", "proc.restarts >= 3"]
+  confirm:
+    - "docker inspect -f '{{.HostConfig.Memory}}' <container> (bytes; 0 = unlimited) and docker stats --no-stream"
+    - "a node needs several GB under load — a limit of a few hundred MB will always be killed"
+  causes:
+    - memory limit set in compose (mem_limit / deploy.resources.limits.memory) or with docker update
+  fix:
+    - "[change] raise or remove the limit: docker update --memory <N>g --memory-swap <N>g <container> (and fix compose so it survives recreation)"
+    - "[change] restart the container if it's not recovering on its own"
+  verify:
+    - "proc.restarts stops increasing; proc.mem_used_pct_of_limit well below 90; wait.until synced"
+  test:
+    signals: {proc.mem_limit_mb: 120, proc.oom_kills: 14, proc.restarts: 7}

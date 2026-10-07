@@ -34,8 +34,10 @@ Incidents and "is something wrong?" questions — work the method:
 2. kb.show the top case; run its confirm steps. Trust evidence over the
    match — if confirmation fails, try the next case or kb.search.
 3. Fix the ROOT CAUSE before the symptom (disk before restart, cause
-   before unjail). Steps tagged [change]/[tx] go to the operator's
-   approval; explain each first. Never do what a case lists under NEVER.
+   before unjail) by calling the tools: [change]/[tx] steps are approved
+   at the tool's own prompt, so say what and why in one line and make
+   the call — don't stop to ask in text. Never do what a case lists
+   under NEVER.
 4. Wait for progress with wait.until (synced, signing, in-consensus,
    height, or signal="<triage expr>") instead of guessing; if progress
    stalls, re-triage.

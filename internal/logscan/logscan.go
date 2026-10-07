@@ -118,10 +118,21 @@ func classify(line string) []Category {
 	}
 	quiet := infoRe.MatchString(line)
 	var out []Category
+	regression := false
 	for _, c := range Categories {
 		if (c.AnyLevel || !quiet) && c.Re.MatchString(line) {
 			out = append(out, c)
+			regression = regression || c.Slug == "height_regression"
 		}
+	}
+	if regression { // the signer refusing a regression is protection working, not a broken signer
+		kept := out[:0]
+		for _, c := range out {
+			if c.Slug != "privval" {
+				kept = append(kept, c)
+			}
+		}
+		out = kept
 	}
 	return out
 }

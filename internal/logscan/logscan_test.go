@@ -48,3 +48,10 @@ func TestOwnJailLine(t *testing.T) {
 		t.Fatal("line without an address dropped")
 	}
 }
+
+func TestRegressionIsNotAPrivvalFault(t *testing.T) {
+	r := Scan(`5:58AM ERR failed signing vote err="error signing vote: step regression at height 1317 round 0. Got 2, last step 3" module=consensus`)
+	if r.Counts["privval"] != 0 || r.Counts["height_regression"] != 1 {
+		t.Fatalf("%v", r.Counts)
+	}
+}
