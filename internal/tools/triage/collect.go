@@ -396,7 +396,9 @@ func collectProcess(c *toolkit.Context, r *Report, set func(string, any)) error 
 		}
 		dockerMemory(c, h, svc.Unit, set)
 		if n, ok := runOK(c, h, "docker inspect -f '{{len .NetworkSettings.Networks}}' "+common.ShellQ(svc.Unit)); ok {
-			set("proc.networks", num(n))
+			if v, err := strconv.Atoi(n); err == nil { // never turn unparsable output into 0
+				set("proc.networks", float64(v))
+			}
 		}
 		if kv["status"] == "running" {
 			insideRPC(c, h, svc.Unit, set)
@@ -442,7 +444,7 @@ func dockerMemory(c *toolkit.Context, h host.Host, unit string, set func(string,
 	if out, ok := run("docker inspect -f '{{.HostConfig.Memory}} {{.Id}}' " + common.ShellQ(unit)); ok {
 		f := strings.Fields(out)
 		if len(f) == 2 {
-			if lim := num(f[0]); lim > 0 {
+			if lim, err := strconv.ParseFloat(f[0], 64); err == nil && lim > 0 {
 				set("proc.mem_limit_mb", round1(lim/1024/1024))
 				if pc, ok := run("docker stats --no-stream --format '{{.MemPerc}}' " + common.ShellQ(unit)); ok {
 					set("proc.mem_used_pct_of_limit", pct(pc))
