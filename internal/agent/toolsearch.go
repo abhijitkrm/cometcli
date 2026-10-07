@@ -21,6 +21,7 @@ var coreTools = map[string]bool{
 	"node.status": true, "node.health": true, "node.logs": true,
 	"val.status": true, "val.signing": true,
 	"val.jail-check": true, "val.consensus": true, "wait.until": true,
+	"node.triage": true, "kb.show": true, "kb.search": true,
 }
 
 var toolSearchDef = ToolDef{

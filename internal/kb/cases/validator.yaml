@@ -1,0 +1,275 @@
+- id: val-jailed-downtime
+  title: Validator jailed for downtime (missed too many blocks)
+  severity: critical
+  symptoms: validator jailed, not tombstoned; zero voting power; signing stopped earlier
+  match:
+    all: ["val.jailed == true", "val.tombstoned == false"]
+  confirm:
+    - "val.jail-check — jailed_until, unjail blockers, and log forensics around the jailing time"
+    - "the cause must be found and fixed before unjailing, or it will be jailed again"
+  causes:
+    - node was down, crashed, or OOM-killed (check proc.restarts, proc.oom_killed, logs.panic, logs.oom)
+    - node fell behind / stalled (peers lost, disk full, slow IO)
+    - signer broken (remote signer down, wrong priv_validator_key after migration)
+    - halted at an upgrade height without the new binary
+  fix:
+    - "[read] val.jail-check to get the jail cause from logs and the remaining jail time"
+    - "[change] fix the root cause found (restart the service, free disk, fix peers, install upgrade binary)"
+    - "[read] wait.until synced — never unjail a node that is not caught up"
+    - "[read] wait.until unjailable (jailed_until passed)"
+    - "[tx] val.unjail (asks which signer: cometcli keyring or the container keyring)"
+    - "[read] if the tx fails, read the error (TxHint explains known codes), fix, retry"
+  verify:
+    - "wait.until in-consensus (bonded, in the validator set, signing recent blocks)"
+    - "val.consensus shows signed ≥90% of the last 20 blocks"
+  warnings:
+    - never unjail while catching up — it misses blocks again immediately
+    - never copy priv_validator_key to a second running node to "get back fast" (double sign → tombstone)
+  test:
+    signals: {val.jailed: true, val.tombstoned: false}
+
+- id: val-tombstoned
+  title: Validator tombstoned (double sign) — permanent
+  severity: critical
+  symptoms: validator jailed and tombstoned; cannot be unjailed ever
+  match:
+    all: ["val.tombstoned == true"]
+  confirm:
+    - "val.status / val.jail-check shows tombstoned=true"
+    - "sec.doublesign and logs for duplicate vote evidence around the slash height"
+  causes:
+    - the same consensus key signed on two nodes (failover without stopping the old node, copied key, restored backup while live)
+    - priv_validator_state.json reset or restored to an older height while the key was active elsewhere
+  fix:
+    - "[read] identify every machine holding this priv_validator_key and stop all but none — the key is burned"
+    - "[change] stop the node signing with the tombstoned key to avoid confusion"
+    - "[tx] a NEW validator is required: new consensus key (operator generates it, never the agent), val.create, ask delegators to redelegate"
+  verify:
+    - new validator bonded and signing (val.consensus with the new operator)
+  warnings:
+    - unjail is impossible for a tombstoned validator — do not attempt val.unjail
+    - never reuse the tombstoned consensus key
+  test:
+    signals: {val.tombstoned: true, val.jailed: true}
+
+- id: val-jail-imminent
+  title: Downtime budget nearly exhausted — jail imminent
+  severity: critical
+  symptoms: missed blocks counter close to the slashing window limit
+  match:
+    all: ["val.jailed == false", "val.downtime_budget_used_pct >= 70"]
+  confirm:
+    - "val.signing — missed counter vs window and min_signed_per_window"
+    - "val.consensus — is it signing NOW? if yes, the counter drains as the window slides"
+  causes:
+    - recent outage; node may still be unhealthy
+  fix:
+    - "[read] node.triage signals for the reason it is missing blocks (sync, peers, signer, process)"
+    - "[change] fix that cause immediately — every missed block counts"
+  verify:
+    - "val.signed_recent_pct back to ~100 and val.missed stops increasing"
+  warnings:
+    - do not restart repeatedly — each restart costs blocks while it replays and reconnects
+  test:
+    signals: {val.jailed: false, val.downtime_budget_used_pct: 85}
+
+- id: val-not-signing
+  title: Validator in the active set but not signing blocks
+  severity: critical
+  symptoms: bonded, not jailed, voting power > 0, but absent from recent commits
+  match:
+    all: ["val.jailed == false", "val.in_set == true", "val.signed_recent_pct < 50"]
+  confirm:
+    - "val.consensus window=50"
+    - "node.status — is the node synced? node.key_mismatch? logs.privval / logs.height_regression?"
+  causes:
+    - node not synced or stalled
+    - node runs a different consensus key than the chain has registered (node.key_mismatch)
+    - remote signer / KMS disconnected
+    - priv_validator_state height ahead of the chain (signing refused)
+    - clock skew causing late votes
+  fix:
+    - "[read] node.triage → follow the more specific case it matches"
+    - "[change] restore signing: fix signer connection / key / sync as found"
+  verify:
+    - "wait.until signing"
+  warnings:
+    - never start a second node with the same key to "fix" signing
+  test:
+    signals: {val.jailed: false, val.in_set: true, val.signed_recent_pct: 0}
+
+- id: val-key-mismatch
+  title: Node runs a different consensus key than the validator registered on chain
+  severity: critical
+  symptoms: node status shows a consensus address different from the validator's; node is not signing
+  match:
+    all: ["node.key_mismatch == true", "profile.role == validator"]
+  confirm:
+    - "node.status validator address vs val.status consensus address"
+    - "sec.perms on config/priv_validator_key.json (file replaced? new init?)"
+  causes:
+    - node re-initialized (init generated a fresh priv_validator_key)
+    - migrated to a new machine without moving the key
+    - the real key is on ANOTHER machine that may still be running
+  fix:
+    - "[read] find where the registered key lives; confirm the old machine is stopped (double-sign risk)"
+    - "[change] the operator places the correct priv_validator_key.json (agent never handles key material) and restarts the node"
+  verify:
+    - "node.key_mismatch == false after restart; wait.until signing"
+  warnings:
+    - make sure only ONE machine ever runs the registered key
+    - cometcli never reads or copies consensus keys
+  test:
+    signals: {node.key_mismatch: true, profile.role: validator}
+
+- id: val-not-in-active-set
+  title: Validator bonded status lost — unbonding/unbonded, not jailed
+  severity: high
+  symptoms: validator not jailed but not in the active set
+  match:
+    all: ["val.jailed == false", "val.bonded == false"]
+  confirm:
+    - "chain.validators — compare our tokens with the last active validator (max_validators cutoff)"
+    - "val.status — tokens and status"
+  causes:
+    - stake fell below the active-set cutoff (delegators left, others gained)
+    - self-delegation below min_self_delegation (validator auto-unbonds)
+  fix:
+    - "[read] chain.params staking max_validators, chain.validators"
+    - "[tx] tx.delegate more stake (operator decision)"
+  verify:
+    - "val.status BONDED; val.in_set true on the next epoch/block"
+  test:
+    signals: {val.jailed: false, val.bonded: false, val.status: UNBONDING}
+
+- id: val-self-delegation-below-min
+  title: Self-delegation below min_self_delegation
+  severity: high
+  match:
+    all: ["val.self_below_min == true"]
+  confirm:
+    - "val.status self_delegation vs min_self_delegation"
+  causes:
+    - operator undelegated or was slashed below the minimum
+  fix:
+    - "[tx] tx.delegate from the operator account to bring self-delegation above the minimum"
+    - "[tx] then val.unjail if jailed"
+  verify:
+    - "val.self_below_min == false"
+  test:
+    signals: {val.self_below_min: true}
+
+- id: val-no-fee-balance
+  title: Operator account has no balance for fees (unjail/vote will fail)
+  severity: medium
+  match:
+    all: ["val.fee_balance_zero == true"]
+  confirm:
+    - "chain.balance of the operator account in the fee denom"
+  fix:
+    - "[tx] fund the operator account (tx.send from another account the operator controls) or val.withdraw rewards first"
+  verify:
+    - "chain.balance > estimated fee"
+  test:
+    signals: {val.fee_balance_zero: true}
+
+- id: val-jailed-waiting-period
+  title: Jailed and still inside the downtime jail period
+  severity: high
+  match:
+    all: ["val.jailed == true", "val.jail_remaining_s > 0", "val.tombstoned == false"]
+  confirm:
+    - "val.jail-check — jailed_until"
+  fix:
+    - "[read] kb.show val-jailed-downtime — the full recovery procedure; this case only adds the wait"
+    - "[change] use the wait to fix the cause and get the node synced"
+    - "[read] wait.until unjailable"
+    - "[tx] val.unjail"
+  verify:
+    - "wait.until in-consensus"
+  warnings:
+    - an unjail tx before jailed_until fails with 'validator still jailed' and costs fees
+  test:
+    signals: {val.jailed: true, val.jail_remaining_s: 300, val.tombstoned: false}
+
+- id: val-gov-vote-due
+  title: Open governance proposals not voted on
+  severity: medium
+  match:
+    all: ["gov.unvoted > 0"]
+  confirm:
+    - "val.votes — proposals in voting period and our vote status"
+  fix:
+    - "[read] chain.gov show each proposal; summarize for the operator"
+    - "[tx] val.vote with the operator's choice (never choose for them)"
+  verify:
+    - "val.votes shows our vote"
+  test:
+    signals: {gov.unvoted: 2, gov.unvoted_ends_in_h: 30}
+
+- id: val-gov-vote-urgent
+  title: Governance vote ending within 24h without our vote
+  severity: high
+  match:
+    all: ["gov.unvoted > 0", "gov.unvoted_ends_in_h < 24"]
+  fix:
+    - "[read] chain.gov the proposal; upgrade proposals also need a binary ready"
+    - "[tx] val.vote with the operator's decision"
+  test:
+    signals: {gov.unvoted: 1, gov.unvoted_ends_in_h: 5}
+
+- id: val-remote-signer-down
+  title: Remote signer (tmkms/horcrux) connection failing
+  severity: critical
+  match:
+    all: ["config.remote_signer == true"]
+    any: ["logs.privval > 0", "val.signed_recent_pct < 50"]
+  confirm:
+    - "node.logs grep=privval|signer"
+    - "check the signer host/process and the priv_validator_laddr port"
+  causes:
+    - signer process down, network/firewall between node and signer, signer state height mismatch
+  fix:
+    - "[read] inspect the signer service on its host (bash, read-only first)"
+    - "[change] restart the signer, then the node if it does not reconnect"
+  verify:
+    - "wait.until signing"
+  warnings:
+    - never point two nodes at the same signer as an active-active setup without a threshold signer (horcrux)
+  test:
+    signals: {config.remote_signer: true, logs.privval: 40}
+
+- id: val-pvs-ahead
+  title: priv_validator_state height ahead of the chain — signing refused
+  severity: high
+  symptoms: node synced but won't sign; logs show height regression / conflicting data
+  match:
+    all: ["pvs.ahead_by > 1"]
+    any: ["node.catching_up == false", "logs.height_regression > 0"]
+  confirm:
+    - "sec.doublesign shows priv_validator_state height vs node height"
+  causes:
+    - node data restored from an older snapshot while priv_validator_state kept the newer height (this is the protection working)
+  fix:
+    - "[read] wait — the node will sign again once the chain passes pvs.height; wait.until height <pvs.height+1>"
+    - "[change] only if the chain was rolled back/forked by coordinated governance, the operator may adjust state per the chain's instructions"
+  warnings:
+    - never reset priv_validator_state.json to 0 on a live validator — that is how double signs happen
+  test:
+    signals: {pvs.ahead_by: 5000, node.catching_up: false, logs.height_regression: 12}
+
+- id: val-double-sign-evidence
+  title: Double-sign evidence in logs
+  severity: critical
+  match:
+    any: ["logs.double_sign > 0"]
+  confirm:
+    - "sec.doublesign; val.status tombstoned?"
+    - "find every machine running this consensus key"
+  fix:
+    - "[change] STOP the duplicate signer immediately (operator confirms which machine)"
+    - "[read] then follow val-tombstoned if tombstoned"
+  warnings:
+    - every additional block signed on two machines can produce more evidence
+  test:
+    signals: {logs.double_sign: 3}

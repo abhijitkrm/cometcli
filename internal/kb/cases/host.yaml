@@ -1,0 +1,125 @@
+- id: host-disk-full
+  title: Disk full or nearly full on the node data volume
+  severity: critical
+  match:
+    any: ["host.disk_used_pct >= 95", "logs.disk_io > 0"]
+  confirm:
+    - "bash: df -h <home>; du -sh <home>/data/* (largest dirs)"
+  causes:
+    - unpruned state (app.pruning=nothing/default on a validator), old snapshots, huge logs, cosmovisor backups
+  fix:
+    - "[read] snap.prune advice; snap.list"
+    - "[change] remove old snapshots / rotated logs / cosmovisor backup dirs (operator confirms each delete)"
+    - "[change] set app.toml pruning=custom (keep-recent 100, interval 10) for validators; restart"
+    - "[change] longer-term: grow the volume"
+  verify:
+    - "host.disk_used_pct < 85"
+  warnings:
+    - never delete data/priv_validator_state.json or anything under config/
+    - never delete application.db/blockstore.db on a validator to free space
+  test:
+    signals: {host.disk_used_pct: 98}
+
+- id: host-disk-high
+  title: Disk usage high (80-95%)
+  severity: medium
+  match:
+    all: ["host.disk_used_pct >= 80", "host.disk_used_pct < 95"]
+  fix:
+    - "[read] snap.prune; du of data dirs"
+    - "[change] plan pruning / cleanup / resize before it fills"
+  test:
+    signals: {host.disk_used_pct: 88}
+
+- id: host-inodes-exhausted
+  title: Inodes exhausted
+  severity: critical
+  match:
+    all: ["host.inode_used_pct >= 95"]
+  confirm:
+    - "bash: df -i; find <home> -xdev -type f | cut -d/ -f1-5 | sort | uniq -c | sort -n | tail"
+  fix:
+    - "[change] remove the directory with millions of small files (often old snapshot chunks or wasm cache)"
+  test:
+    signals: {host.inode_used_pct: 100}
+
+- id: host-oom-killed
+  title: Node killed for out-of-memory
+  severity: critical
+  match:
+    any: ["proc.oom_killed == true", "logs.oom > 0"]
+  confirm:
+    - "bash: dmesg -T | grep -i oom (or journalctl -k); host.mem_used_pct"
+  causes:
+    - too little RAM, iavl cache too large, large query load on a validator (API/gRPC open), memory leak in a version
+  fix:
+    - "[change] lower app.toml iavl-cache-size, disable public API/gRPC on validators, add swap as a stopgap, add RAM"
+    - "[change] node.service restart"
+  verify:
+    - "proc.running and memory stable for an hour"
+  test:
+    signals: {proc.oom_killed: true}
+
+- id: host-memory-pressure
+  title: Memory pressure (>90% used)
+  severity: medium
+  match:
+    all: ["host.mem_used_pct >= 90"]
+  fix:
+    - "[read] bash: ps aux --sort=-rss | head"
+    - "[change] reduce caches / other processes; add RAM"
+  test:
+    signals: {host.mem_used_pct: 94}
+
+- id: host-overloaded
+  title: Host CPU overloaded
+  severity: medium
+  match:
+    all: ["host.load_per_cpu >= 2"]
+  fix:
+    - "[read] bash: top -bn1 | head -20"
+    - "[change] move other workloads off the validator host"
+  test:
+    signals: {host.load_per_cpu: 3.5}
+
+- id: host-clock-unsynced
+  title: System clock not NTP-synchronized
+  severity: high
+  match:
+    all: ["clock.ntp_synced == false"]
+  confirm:
+    - "bash: timedatectl; chronyc tracking"
+  fix:
+    - "[change] enable chrony/systemd-timesyncd: timedatectl set-ntp true"
+  verify:
+    - "clock.ntp_synced true"
+  test:
+    signals: {clock.ntp_synced: false}
+
+- id: host-too-many-files
+  title: Too many open files
+  severity: high
+  match:
+    all: ["logs.too_many_files > 0"]
+  confirm:
+    - "bash: cat /proc/$(pgrep -f <binary>)/limits | grep 'open files'"
+  fix:
+    - "[change] systemd: LimitNOFILE=65535 in the unit; docker: --ulimit nofile=65535:65535; restart"
+  test:
+    signals: {logs.too_many_files: 10}
+
+- id: host-port-in-use
+  title: Node can't bind a port (address already in use)
+  severity: high
+  match:
+    all: ["logs.port_in_use > 0"]
+  confirm:
+    - "bash: ss -ltnp | grep -E '26656|26657|9090|1317|8545'"
+  causes:
+    - a second instance of the node running, another service on the port
+  fix:
+    - "[change] stop the duplicate (CHECK it is not a second validator instance with the same key) or change the port"
+  warnings:
+    - two instances of a validator = double-sign risk; stop one immediately
+  test:
+    signals: {logs.port_in_use: 2}

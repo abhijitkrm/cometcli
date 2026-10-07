@@ -1,0 +1,71 @@
+- id: upgrade-halt-binary-missing
+  title: Chain halted at an upgrade height — new binary not running
+  severity: critical
+  symptoms: logs show UPGRADE "<name>" NEEDED at height; node stopped or crash-looping
+  match:
+    any: ["logs.upgrade_needed > 0"]
+  confirm:
+    - "logs.upgrade_name; chain.upgrade-plan; upgrade.check (local version vs required)"
+  fix:
+    - "[read] upgrade.check — find the release for the plan name"
+    - "[change] upgrade.prepare (download + checksum verify + stage for cosmovisor, or swap the binary/image)"
+    - "[change] node.service restart with the new binary"
+  verify:
+    - "node.block_age_s < 30 after the network reaches 2/3; val.consensus"
+  warnings:
+    - never skip the upgrade by restarting the old binary with --unsafe-skip-upgrades unless the chain coordinators say so
+  test:
+    signals: {logs.upgrade_needed: 3, logs.upgrade_name: v2.0.0, proc.restarts: 4}
+
+- id: upgrade-imminent
+  title: Scheduled upgrade soon — binary must be staged
+  severity: high
+  match:
+    all: ["upgrade.pending == true", "upgrade.blocks_to_halt > 0", "upgrade.blocks_to_halt < 20000"]
+  confirm:
+    - "upgrade.check — is the new binary staged (cosmovisor upgrades/<name>/bin)?"
+  fix:
+    - "[change] upgrade.prepare now"
+    - "[read] upgrade.watch near the height"
+  verify:
+    - "upgrade.check shows staged and checksum-verified"
+  test:
+    signals: {upgrade.pending: true, upgrade.blocks_to_halt: 5000, upgrade.name: v2.0.0}
+
+- id: upgrade-binary-too-early
+  title: New binary started before the upgrade height
+  severity: critical
+  match:
+    any: ["logs.binary_early > 0"]
+  confirm:
+    - "node.logs grep 'BINARY UPDATED BEFORE TRIGGER'; upgrade.check"
+  fix:
+    - "[change] switch back to the previous binary until the upgrade height, then switch"
+  test:
+    signals: {logs.binary_early: 1}
+
+- id: upgrade-halt-height-set
+  title: halt-height configured in app.toml
+  severity: high
+  match:
+    all: ["app.halt_height > 0"]
+  confirm:
+    - "node.config app.toml halt-height"
+  causes:
+    - left over from a manual coordinated upgrade
+  fix:
+    - "[change] set halt-height = 0 after the coordinated halt is done; restart"
+  test:
+    signals: {app.blocks_to_halt_height: 200, app.halt_height: 1200}
+
+- id: upgrade-version-behind
+  title: Upgrade passed but node still on an older version
+  severity: high
+  match:
+    all: ["upgrade.pending == false", "logs.apphash > 0", "node.catching_up == false"]
+  confirm:
+    - "node.version-check; compare with the version other validators run"
+  fix:
+    - "[change] upgrade.prepare the current release; restart"
+  test:
+    signals: {upgrade.pending: false, logs.apphash: 2, node.catching_up: false}

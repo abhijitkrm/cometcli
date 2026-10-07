@@ -4,6 +4,9 @@
 package waittool
 
 import (
+	"github.com/abhijitkrm/cometcli/internal/kb"
+	"github.com/abhijitkrm/cometcli/internal/tools/triage"
+
 	"fmt"
 	"strconv"
 	"strings"
@@ -31,12 +34,12 @@ type Until struct{}
 
 func (Until) Name() string { return "wait.until" }
 func (Until) Desc() string {
-	return "Wait until a condition holds, checking every interval without spending model tokens, with progress: synced (caught up, recent blocks) | height (value=N) | unjailable (jail period over) | bonded | signing (signed ≥ min_signed_pct of the last window blocks) | in-consensus (bonded + in the set + signing) | tx-committed (value=hash) | proposal-status (value=id:STATUS, e.g. 12:PASSED). Returns done=false with the last state on timeout."
+	return "Wait until a condition holds, checking every interval without spending model tokens, with progress: synced (caught up, recent blocks) | height (value=N) | unjailable (jail period over) | bonded | signing (signed ≥ min_signed_pct of the last window blocks) | in-consensus (bonded + in the set + signing) | tx-committed (value=hash) | proposal-status (value=id:STATUS, e.g. 12:PASSED) | signal (value=node.triage expressions joined by &&, e.g. \"host.disk_used_pct < 85 && proc.running == true\"). Returns done=false with the last state on timeout."
 }
 func (Until) Schema() map[string]any {
 	return toolkit.ObjSchema(map[string]any{
-		"condition":      toolkit.Enum("what to wait for", "synced", "height", "unjailable", "bonded", "signing", "in-consensus", "tx-committed", "proposal-status"),
-		"value":          toolkit.Str("height, tx hash, or proposal id:STATUS — for the conditions that take one"),
+		"condition":      toolkit.Enum("what to wait for", "synced", "height", "unjailable", "bonded", "signing", "in-consensus", "tx-committed", "proposal-status", "signal"),
+		"value":          toolkit.Str("height, tx hash, proposal id:STATUS, or signal expressions — for the conditions that take one"),
 		"validator":      toolkit.Str("valoper address (default: profile)"),
 		"window":         toolkit.Int("blocks to check for signing / in-consensus (default 20)"),
 		"min_signed_pct": toolkit.Int("percent of window that must be signed (default 90)"),
@@ -273,5 +276,50 @@ func checker(cond string, a toolkit.Args) (checkFn, error) {
 			return st, nil
 		}, nil
 	}
+	if cond == "signal" {
+		return signalChecker(a.String("value", ""))
+	}
 	return nil, fmt.Errorf("unknown condition %q", cond)
+}
+
+// signalChecker waits for node.triage signal expressions to all hold,
+// collecting only the sources they need.
+func signalChecker(expr string) (func(*toolkit.Context, *syncProgress) (state, error), error) {
+	var conds []kb.Cond
+	var names []string
+	for _, part := range strings.Split(expr, "&&") {
+		if strings.TrimSpace(part) == "" {
+			continue
+		}
+		cd, err := kb.ParseCond(part)
+		if err != nil {
+			return nil, err
+		}
+		conds = append(conds, cd)
+		names = append(names, cd.Signal)
+	}
+	if len(conds) == 0 {
+		return nil, fmt.Errorf("signal needs value=<expr>[ && <expr>…], e.g. \"node.peers >= 3\"")
+	}
+	return func(c *toolkit.Context, _ *syncProgress) (state, error) {
+		r := triage.CollectFor(c, 10*time.Minute, names)
+		done := true
+		var parts []string
+		data := map[string]any{}
+		for _, cd := range conds {
+			ok := cd.Eval(r.Signals)
+			done = done && ok
+			v, has := r.Signals[cd.Signal]
+			if !has {
+				v = "unavailable"
+			}
+			data[cd.Signal] = v
+			mark := "✗"
+			if ok {
+				mark = "✓"
+			}
+			parts = append(parts, fmt.Sprintf("%s %s=%v", mark, cd.Signal, v))
+		}
+		return state{done: done, status: strings.Join(parts, ", "), data: data}, nil
+	}, nil
 }

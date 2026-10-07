@@ -17,6 +17,7 @@ import (
 
 	"github.com/abhijitkrm/cometcli/internal/client/host"
 	"github.com/abhijitkrm/cometcli/internal/keys"
+	"github.com/abhijitkrm/cometcli/internal/logscan"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
 	"github.com/abhijitkrm/cometcli/internal/tools/common"
 )
@@ -242,19 +243,6 @@ func InValidatorSet(c *toolkit.Context, consHex []byte) (int64, error) {
 
 var (
 	jailLineRe = regexp.MustCompile(`(?i)jail|liveness fault|double.?sign|tombston|slashing`)
-	causes     = []struct {
-		name string
-		re   *regexp.Regexp
-	}{
-		{"crash/panic", regexp.MustCompile(`(?i)\bpanic\b|fatal error|CONSENSUS FAILURE|segmentation`)},
-		{"out of memory", regexp.MustCompile(`(?i)out of memory|oom.?kill|cannot allocate`)},
-		{"disk full / IO", regexp.MustCompile(`(?i)no space left|disk quota|input/output error|read-only file system`)},
-		{"peer loss / network", regexp.MustCompile(`(?i)connection refused|i/o timeout|dial tcp|stopping peer|no peers|failed to (dial|connect)|network is unreachable`)},
-		{"signer / privval", regexp.MustCompile(`(?i)privval|remote signer|failed to sign|error signing|sign (vote|proposal)`)},
-		{"app hash / state", regexp.MustCompile(`(?i)wrong app ?hash|apphash|wrong block\.header|state mismatch`)},
-		{"clock / timing", regexp.MustCompile(`(?i)clock|time.*(skew|drift)|timed out waiting`)},
-		{"too many files", regexp.MustCompile(`(?i)too many open files`)},
-	}
 )
 
 // Forensics is what the node's own logs and process state show around
@@ -315,11 +303,11 @@ func Investigate(c *toolkit.Context, f *Facts) *Forensics {
 			if jailLineRe.MatchString(line) && len(fo.JailLines) < 6 {
 				fo.JailLines = append(fo.JailLines, clipLine(line))
 			}
-			for _, cs := range causes {
-				if cs.re.MatchString(line) {
-					fo.Counts[cs.name]++
-					if len(fo.Causes[cs.name]) < 3 {
-						fo.Causes[cs.name] = append(fo.Causes[cs.name], clipLine(line))
+			for _, cs := range logscan.Categories {
+				if cs.Slug != "jail" && cs.Re.MatchString(line) {
+					fo.Counts[cs.Name]++
+					if len(fo.Causes[cs.Name]) < 3 {
+						fo.Causes[cs.Name] = append(fo.Causes[cs.Name], clipLine(line))
 					}
 				}
 			}

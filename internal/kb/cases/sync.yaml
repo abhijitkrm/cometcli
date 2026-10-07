@@ -1,0 +1,186 @@
+- id: node-rpc-down
+  title: Node RPC unreachable (process down or RPC disabled)
+  severity: critical
+  match:
+    all: ["node.reachable == false"]
+  confirm:
+    - "node.health; node.service status"
+    - "proc.running and proc.exit_code; node.logs tail"
+  causes:
+    - process crashed/exited (see logs.panic, logs.config_parse, logs.port_in_use)
+    - RPC laddr changed or bound to another interface
+    - host unreachable
+  fix:
+    - "[read] node.logs last 200 lines for the exit reason"
+    - "[change] fix the reason, then node.service restart"
+  verify:
+    - "node.health ok; wait.until synced"
+  test:
+    signals: {node.reachable: false}
+
+- id: node-process-down
+  title: Node process/container not running
+  severity: critical
+  match:
+    all: ["proc.running == false"]
+  confirm:
+    - "node.service status; node.logs (last lines before exit); proc.exit_code"
+  causes:
+    - crash (panic), OOM kill, bad config/flag, port in use, disk full, upgrade halt (exits by design)
+  fix:
+    - "[read] node.logs to find why it exited — do not restart blindly"
+    - "[change] fix the reason; node.service start"
+  verify:
+    - "proc.running true and stays up >5 min; wait.until synced"
+  warnings:
+    - an upgrade halt exits on purpose — restarting the old binary re-halts; follow upgrade-halt-binary-missing
+  test:
+    signals: {proc.running: false, proc.state: exited}
+
+- id: node-crash-loop
+  title: Node crash-looping (restarting repeatedly)
+  severity: critical
+  match:
+    all: ["proc.restarts >= 3"]
+    any: ["proc.uptime_s < 600", "logs.panic > 0"]
+  confirm:
+    - "node.logs for the panic/exit message repeated each start"
+  causes:
+    - panic on a block (app hash / bug → needs a fixed binary), bad config, corrupt DB, upgrade halt with old binary
+  fix:
+    - "[read] node.logs; kb.search the panic message"
+    - "[change] apply the matching fix; stop the restart loop if it makes things worse (node.service stop)"
+  test:
+    signals: {proc.restarts: 12, proc.uptime_s: 40, logs.panic: 5}
+
+- id: node-catching-up
+  title: Node catching up (block sync in progress)
+  severity: medium
+  match:
+    all: ["node.catching_up == true"]
+  confirm:
+    - "node.status twice ~30s apart: is the height increasing? how fast?"
+  causes:
+    - restarted after downtime, restored from snapshot, slow disk/peers
+  fix:
+    - "[read] wait.until synced (progress shows blocks/s and ETA)"
+    - "[change] if far behind (days), consider snap.statesync instead of replaying"
+  verify:
+    - "node.catching_up false, node.block_age_s < 30"
+  test:
+    signals: {node.catching_up: true, node.block_age_s: 7200}
+
+- id: node-stalled
+  title: Node stalled — not catching up but no new blocks
+  severity: critical
+  symptoms: catching_up=false but latest block is minutes old
+  match:
+    all: ["node.stalled == true"]
+  confirm:
+    - "node.status twice; node.peers; is the whole chain halted? compare a public RPC (web_fetch <rpc>/status)"
+  causes:
+    - whole chain halted (upgrade height, consensus failure) — check upgrade.blocks_to_halt, logs.upgrade_needed
+    - this node lost peers or is stuck on a bad block / app hash
+  fix:
+    - "[read] decide: chain-wide halt vs local stall (public RPC height)"
+    - "[change] local: fix peers (net.add-peer), restart; chain-wide: follow the chain's coordination channel"
+  verify:
+    - "node.block_age_s < 30"
+  test:
+    signals: {node.stalled: true, node.block_age_s: 900, node.catching_up: false}
+
+- id: node-no-peers
+  title: Node has no peers
+  severity: critical
+  match:
+    all: ["node.peers == 0"]
+  confirm:
+    - "node.peers; logs.peer_net / logs.p2p_auth samples; sec.exposure (26656 reachable?)"
+  causes:
+    - persistent_peers/seeds empty or stale, firewall blocks 26656, wrong chain-id/genesis (peers reject), external_address wrong
+  fix:
+    - "[read] get current peers from the chain's registry or a public RPC /net_info"
+    - "[change] net.add-peer (2-5 healthy peers); node.service restart"
+  verify:
+    - "node.peers >= 3 and node.block_age_s < 30"
+  test:
+    signals: {node.peers: 0}
+
+- id: node-low-peers
+  title: Node has very few peers
+  severity: medium
+  match:
+    all: ["node.peers > 0", "node.peers < 3"]
+  fix:
+    - "[change] net.add-peer more persistent peers; check config.pex and max_inbound_peers"
+  test:
+    signals: {node.peers: 1}
+
+- id: node-peer-churn
+  title: Heavy peer connection errors
+  severity: low
+  match:
+    all: ["logs.peer_net > 200"]
+  confirm:
+    - "node.peers count stable? if peers OK this is usually harmless noise"
+  fix:
+    - "[change] remove dead persistent peers (net.rm-peer) and add healthy ones"
+  test:
+    signals: {logs.peer_net: 900, node.peers: 8}
+
+- id: node-wrong-network
+  title: Peers reject us — different network / genesis
+  severity: critical
+  match:
+    any: ["logs.chain_mismatch > 0"]
+  confirm:
+    - "node.status network vs profile chain_id; sha256 of config/genesis.json vs the official one"
+  causes:
+    - wrong genesis.json, wrong chain-id in config/client, joined testnet peers on mainnet
+  fix:
+    - "[read] compare genesis checksum with the chain's official genesis (web_fetch)"
+    - "[change] replace genesis with the official one (operator confirms), reset is NOT done by the agent"
+  warnings:
+    - never run unsafe-reset-all on a validator without the operator — it is refused by cometcli
+  test:
+    signals: {logs.chain_mismatch: 30, node.peers: 0}
+
+- id: node-p2p-port-exposure
+  title: Peers cannot dial us (p2p port not reachable)
+  severity: medium
+  match:
+    all: ["node.peers < 3", "config.pex == true"]
+    any: ["logs.p2p_auth > 0", "logs.peer_net > 0"]
+  confirm:
+    - "sec.exposure — is 26656 listening on a public interface? check external_address in config.toml"
+  fix:
+    - "[change] set p2p.external_address, open firewall for 26656, restart"
+  test:
+    signals: {node.peers: 1, config.pex: true, logs.p2p_auth: 20}
+
+- id: node-consensus-timeouts
+  title: Consensus round timeouts / slow votes
+  severity: medium
+  match:
+    all: ["logs.clock > 20", "node.catching_up == false"]
+  confirm:
+    - "node.consensus — round > 0 often? clock.ntp_synced? host.load_per_cpu?"
+  causes:
+    - clock skew, overloaded host, slow disk, poor connectivity to other validators
+  fix:
+    - "[change] fix NTP / load / peers; consider a sentry topology"
+  test:
+    signals: {logs.clock: 50, node.catching_up: false}
+
+- id: node-blocksync-slow
+  title: Catching up too slowly to ever reach the tip
+  severity: high
+  match:
+    all: ["node.catching_up == true", "node.block_age_s > 86400"]
+  confirm:
+    - "two node.status calls 60s apart: blocks/s vs chain block rate"
+  fix:
+    - "[change] snap.statesync (or restore a trusted snapshot) instead of replaying"
+    - "[change] faster disk (NVMe), more peers"
+  test:
+    signals: {node.catching_up: true, node.block_age_s: 400000}

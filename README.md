@@ -181,7 +181,11 @@ ask, transactions always ask, and key material or state resets are refused. See
 Settings files, `COMET.md` memory, custom slash commands, hooks, MCP servers and
 subagents work like Claude Code's — see [docs/EXTENDING.md](docs/EXTENDING.md).
 
-Incidents run to resolution: `/recover-jail` diagnoses (with root-cause evidence from the
+Incidents start from evidence, not guesses: `node.triage` sweeps ~50 signals (sync,
+signing, keys, upgrade plan, host, process, log error categories, config invariants, EVM)
+and matches them against a knowledge base of known Cosmos SDK / Cosmos-EVM failure cases,
+each with confirm, fix, verify and never-do steps; `/incident` works the top case to
+resolution and can record new cases with `kb.add`. `/recover-jail` diagnoses (with root-cause evidence from the
 node's logs), waits for sync and the jail period without burning tokens, unjails — signed
 with cometcli's keyring or inside the node's own container — fixes and retries on failure,
 and verifies the validator is signing again. See [docs/COMMANDS.md](docs/COMMANDS.md#incidents).

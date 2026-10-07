@@ -5,6 +5,21 @@ import "github.com/abhijitkrm/cometcli/internal/settings"
 // builtinCommands ship with cometcli. A user or project command with the
 // same name overrides one.
 var builtinCommands = map[string]*settings.Command{
+	"incident": {
+		Name: "incident", Scope: "builtin", ArgHint: "[what you see]",
+		Description: "Work an incident to resolution: triage, match a known case, fix the root cause, wait, verify, report",
+		Body: `Work this incident on the node to resolution. Keep the operator's checklist current with todo_write; don't stop between steps unless something needs their decision.
+
+1. node.triage (since=2h if the problem started earlier). Note which sources were unavailable.
+2. Take the top matched case: kb.show it, run its confirm steps. If confirmation fails, move to the next case or kb.search the symptoms/log lines. No case at all → investigate from the signals and logs (node.logs, bash read-only).
+3. If several cases match, fix the one that CAUSES the others first (disk full → crash → behind → jailed: disk first).
+4. Apply the fix steps. [change] and [tx] steps need the operator's approval — say what and why first. Never do anything a case lists under NEVER.
+5. Wait for the effect with wait.until (synced, signing, in-consensus, or condition=signal value="<expr>"). If progress stalls, re-triage instead of waiting longer.
+6. Verify with the case's verify steps, then node.triage again: the case must no longer match.
+7. Report: root cause with evidence, actions taken (tx hashes), final state. If you found a cause no case described, propose a kb.add case (with a test fixture) for the operator to approve.
+
+What the operator sees: $ARGUMENTS`,
+	},
 	"recover-jail": {
 		Name: "recover-jail", Scope: "builtin", ArgHint: "[notes]",
 		Description: "Recover a jailed validator end to end: diagnose, fix the cause, sync, unjail, verify it signs",
@@ -18,9 +33,11 @@ var builtinCommands = map[string]*settings.Command{
 6. Confirm: wait.until condition=in-consensus window=50 min_signed_pct=95 timeout=1800, then val.consensus.
 7. Report: why it was jailed and the root cause (with the evidence), what you did (tx hashes), and the final consensus numbers.
 
+(This is the knowledge-base case val-jailed-downtime as a ready procedure; for anything else use /incident.)
+
 Operator notes: $ARGUMENTS`,
 	},
 }
 
 // builtinNeedsNode lists built-ins that only make sense in node mode.
-var builtinNeedsNode = map[string]bool{"recover-jail": true}
+var builtinNeedsNode = map[string]bool{"recover-jail": true, "incident": true}

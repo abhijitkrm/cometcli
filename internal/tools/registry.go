@@ -14,6 +14,7 @@ import (
 	"github.com/abhijitkrm/cometcli/internal/tools/sectool"
 	"github.com/abhijitkrm/cometcli/internal/tools/shell"
 	"github.com/abhijitkrm/cometcli/internal/tools/snaptool"
+	"github.com/abhijitkrm/cometcli/internal/tools/triage"
 	"github.com/abhijitkrm/cometcli/internal/tools/txtool"
 	"github.com/abhijitkrm/cometcli/internal/tools/upgradetool"
 	"github.com/abhijitkrm/cometcli/internal/tools/val"
@@ -37,6 +38,7 @@ func RegisterAll(r *toolkit.Registry) {
 	nettool.Register(r)
 	txtool.Register(r)
 	waittool.Register(r)
+	triage.Register(r)
 	// general-purpose agent tools
 	shell.Register(r)
 	fs.Register(r)

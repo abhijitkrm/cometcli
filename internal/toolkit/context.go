@@ -287,3 +287,20 @@ func (c *Context) Close() {
 		h.Close()
 	}
 }
+
+// Derive returns a Context bound to ctx that shares c's already-dialed
+// clients (comet, grpc, evm, host) — for fanning out concurrent calls with
+// their own deadlines. Never Close a derived Context: c owns the clients.
+func (c *Context) Derive(ctx context.Context) *Context {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return &Context{
+		Context: ctx, Profile: c.Profile, Cfg: c.Cfg, Out: c.Out,
+		Audit: c.Audit, Approver: c.Approver, AutoApproveBelow: c.AutoApproveBelow,
+		Session: c.Session, Rules: c.Rules, ReadOnly: c.ReadOnly,
+		AcceptEdits: c.AcceptEdits, WorkRoot: c.WorkRoot, HookDecision: c.HookDecision, ToolName: c.ToolName,
+		Chooser: c.Chooser, Secret: c.Secret, Progress: c.Progress,
+		comet: c.comet, cometEr: c.cometEr, grpc: c.grpc, grpcErr: c.grpcErr,
+		evm: c.evm, evmErr: c.evmErr, host: c.host, hostErr: c.hostErr,
+	}
+}

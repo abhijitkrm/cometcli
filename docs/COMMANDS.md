@@ -65,6 +65,49 @@ Messages typed while a turn runs are queued and sent when it ends. Approvals off
 
 ## Incidents
 
+### Triage and the knowledge base
+
+Validators fail in a few hundred known ways. cometcli carries them as a **knowledge base
+of cases** (Cosmos SDK, CometBFT and Cosmos-EVM), and starts every incident with one
+deterministic sweep instead of the model guessing which tool to call:
+
+```bash
+cometcli node triage                 # ~50 signals in parallel + the known cases they match
+cometcli node triage --since 2h      # wider log window
+cometcli node triage --signals val.  # just one family
+cometcli kb search --query "app hash mismatch"
+cometcli kb show --id val-jailed-downtime
+```
+
+`node.triage` collects from every source at once — CometBFT RPC, chain gRPC (staking,
+slashing, upgrade plan, gov), host (disk, inodes, memory, load, NTP), the process (state,
+restarts, OOM kill, exit code), logs (counted by category: panic, OOM, disk, app hash, DB
+lock/corruption, privval, height regression, double sign, upgrade halt, state sync, port
+in use, config error, chain mismatch, EVM JSON-RPC…), config.toml/app.toml invariants,
+priv_validator_state, and on Cosmos-EVM chains the JSON-RPC endpoint. A source that's
+down is reported, never fatal. Signals are flat names (`val.jailed`,
+`host.disk_used_pct`, `logs.apphash`, `node.key_mismatch`…).
+
+Each **case** says which signals point to it, how to confirm it, causes, fix steps tagged
+`[read]` / `[change]` / `[tx]`, how to verify, and what never to do. In node mode,
+**`/incident [what you see]`** runs the method: triage → confirm the top case → fix the
+root cause first (approvals as usual) → wait with `wait.until` → verify → re-triage →
+report. When the agent finds a cause no case covered, it offers to record one with
+`kb.add` (you approve the write), so the next triage recognizes it.
+
+Chain family comes from the profile (`metadata.chain_type: cosmos-sdk|cosmos-evm`, else any
+EVM endpoint/chain id/`*evm*` binary means cosmos-evm); EVM-only cases are skipped on plain
+SDK chains. Add or override cases in `~/.cometcli/kb/*.yaml` or `.cometcli/kb/*.yaml` —
+format in [EXTENDING.md](EXTENDING.md#knowledge-base-cases).
+
+`wait.until --condition signal` waits on any triage expression:
+
+```bash
+cometcli wait until --condition signal --value "host.disk_used_pct < 85 && proc.running == true"
+```
+
+### Incident tools
+
 Tools built for running an incident to resolution — usable directly or by the agent:
 
 ```bash
@@ -333,6 +376,7 @@ saved after each turn to `~/.cometcli/sessions/` (0600, already redacted).
 | `/memory`, `/remember [--user\|--node] <text>` | memory files loaded; add a line to COMET.md |
 | `/mcp`, `/agents` | connected MCP servers; subagents for the task tool |
 | `/<custom>` | commands from `.cometcli/commands/*.md` — see [EXTENDING.md](EXTENDING.md) |
+| `/incident [what you see]` | node mode: triage → known case → fix root cause → wait → verify → report |
 | `/recover-jail [notes]` | node mode: run the full jail-recovery procedure |
 | `/one [profile\|off]` | switch the session to node mode for a profile, or back to general (conversation kept) |
 

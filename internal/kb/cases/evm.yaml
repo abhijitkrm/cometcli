@@ -1,0 +1,78 @@
+- id: evm-rpc-down
+  title: EVM JSON-RPC not responding
+  severity: high
+  chains: [cosmos-evm]
+  match:
+    all: ["evm.reachable == false", "node.reachable == true"]
+  confirm:
+    - "node.config app.toml [json-rpc] enable/address; sec.exposure for 8545; logs.evm_rpc samples"
+  causes:
+    - json-rpc disabled or bound to 127.0.0.1 while queried remotely; port conflict; indexer error
+  fix:
+    - "[change] enable [json-rpc] and set address (0.0.0.0:8545 only behind a proxy/firewall); restart"
+  verify:
+    - "evm.syncing / evm.chainid respond"
+  test:
+    signals: {evm.reachable: false, node.reachable: true}
+
+- id: evm-json-rpc-disabled
+  title: JSON-RPC disabled in app.toml on an RPC node
+  severity: medium
+  chains: [cosmos-evm]
+  match:
+    all: ["app.json_rpc_enable == false", "profile.role != validator"]
+  fix:
+    - "[change] set [json-rpc] enable = true; restart"
+  test:
+    signals: {app.json_rpc_enable: false, profile.role: rpc}
+
+- id: evm-height-drift
+  title: EVM RPC height lags the CometBFT height
+  severity: medium
+  chains: [cosmos-evm]
+  match:
+    any: ["evm.drift > 5", "evm.drift < -5"]
+  confirm:
+    - "evm.parity — compare eth_blockNumber with comet height twice"
+  causes:
+    - EVM indexer behind or stuck, JSON-RPC served from another node behind a load balancer
+  fix:
+    - "[change] restart the node; if persistent, check [json-rpc] enable-indexer and indexer logs"
+  test:
+    signals: {evm.drift: 120}
+
+- id: evm-chain-id-mismatch
+  title: EVM chain id differs from app.toml evm-chain-id
+  severity: high
+  chains: [cosmos-evm]
+  match:
+    all: ["evm.chain_id_mismatch == true"]
+  confirm:
+    - "evm.chainid vs app.toml [evm] evm-chain-id vs the chain's documented EVM chain id"
+  fix:
+    - "[change] set the documented evm-chain-id in app.toml; restart (wallets sign with the chain id — a mismatch breaks txs)"
+  test:
+    signals: {evm.chain_id_mismatch: true}
+
+- id: evm-rpc-errors
+  title: EVM JSON-RPC / indexer errors in logs
+  severity: medium
+  chains: [cosmos-evm]
+  match:
+    all: ["logs.evm_rpc > 10"]
+  fix:
+    - "[read] node.logs grep=json-rpc; kb.search the error text"
+  test:
+    signals: {logs.evm_rpc: 40}
+
+- id: evm-validator-json-rpc-public
+  title: Validator serves EVM JSON-RPC
+  severity: medium
+  chains: [cosmos-evm]
+  match:
+    all: ["profile.role == validator", "app.json_rpc_enable == true"]
+    any: ["app.json_rpc_address contains 0.0.0.0"]
+  fix:
+    - "[change] disable JSON-RPC on validators or bind it to 127.0.0.1; serve RPC from dedicated nodes"
+  test:
+    signals: {profile.role: validator, app.json_rpc_enable: true, app.json_rpc_address: "0.0.0.0:8545"}

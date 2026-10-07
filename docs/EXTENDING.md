@@ -190,3 +190,38 @@ then journalctl. Report each distinct error with first/last timestamp and count.
 ```
 
 `tools` restricts what it can use. `/agents` lists them.
+
+## Knowledge-base cases
+
+`node.triage` matches its signals against cases. Built-in cases ship in the binary
+(`internal/kb/cases/`); yours go in `~/.cometcli/kb/*.yaml` (all nodes) or
+`<project>/.cometcli/kb/*.yaml`. Same `id` overrides a built-in. A file holds one case or a
+list of them:
+
+```yaml
+- id: sentry-lost                 # lowercase, digits, dashes
+  title: Validator lost both sentries
+  chains: [cosmos-sdk]            # or cosmos-evm; omit for all (cosmos-sdk includes evm chains)
+  severity: high                  # critical | high | medium | low
+  symptoms: peers drop to 0 after sentry maintenance
+  match:
+    all: ["node.peers == 0", "config.pex == false"]   # every one must hold
+    any: ["logs.peer_net > 0"]                         # at least one, when given
+  confirm: ["node.peers; can the validator reach sentry-1:26656?"]
+  causes: ["sentries restarted with new node ids"]
+  fix:
+    - "[read] get the sentries' node ids"
+    - "[change] net.add-peer the new ids; restart"
+  verify: ["node.peers >= 2"]
+  warnings: ["never open the validator's p2p port publicly as a shortcut"]
+  test:
+    signals: {node.peers: 0, config.pex: false, logs.peer_net: 3}   # must match
+```
+
+Conditions are `<signal> <op> <value>` with `== != > >= < <= contains exists missing`;
+values are numbers, `true`/`false`, or strings. A signal triage couldn't collect never
+satisfies a condition (except `missing`). `cometcli node triage` prints every signal name
+and value — write conditions against those. Fix steps must start with `[read]`, `[change]`
+or `[tx]`; the agent still goes through the normal approvals for each. Ranking: more matched
+conditions first, then severity. The built-in suite checks every case's `test` fixture
+ranks it in the top 3 and that a healthy node matches nothing.

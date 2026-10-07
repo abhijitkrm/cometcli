@@ -142,3 +142,24 @@ func TestWaitHeightAndBadArgs(t *testing.T) {
 		t.Fatal("cancel didn't stop the wait")
 	}
 }
+
+func TestWaitSignalExpressions(t *testing.T) {
+	_, chain, c, _ := setup(t)
+	chain.Set(func(c *fakenode.Comet) { c.Peers = 1 })
+	after(150*time.Millisecond, func() { chain.Set(func(c *fakenode.Comet) { c.Peers = 5 }) })
+	res, err := Until{}.Run(c, toolkit.Args{"condition": "signal", "value": "node.peers >= 3 && val.jailed == false", "interval": 0.02, "timeout": 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Data["done"] != true || res.Data["node.peers"] != 5.0 {
+		t.Fatalf("%s %v", res.Text, res.Data)
+	}
+	if _, err := (Until{}).Run(c, toolkit.Args{"condition": "signal", "value": "node.peers"}); err == nil {
+		t.Fatal("bad expression accepted")
+	}
+	// an uncollectable signal never holds and says so
+	res, err = Until{}.Run(c, toolkit.Args{"condition": "signal", "value": "evm.height > 0", "interval": 0.02, "timeout": 1})
+	if err != nil || res.Data["done"] != false || !strings.Contains(res.Text, "unavailable") {
+		t.Fatalf("%v %v", res, err)
+	}
+}

@@ -1,0 +1,80 @@
+- id: state-apphash-mismatch
+  title: App hash mismatch (state diverged from the network)
+  severity: critical
+  symptoms: wrong Block.Header.AppHash / CONSENSUS FAILURE; node halts on a block
+  match:
+    any: ["logs.apphash > 0"]
+  confirm:
+    - "node.logs grep -i apphash: at which height? node.version-check — same version as the network?"
+  causes:
+    - wrong binary version (missed or early upgrade, non-deterministic build), different config affecting state (e.g. iavl/fastnode), corrupt state
+  fix:
+    - "[read] verify the exact binary version the network runs at that height"
+    - "[change] install the correct binary; if state is corrupt, restore from a trusted snapshot or snap.statesync"
+  warnings:
+    - rollback commands change state — operator only; keep priv_validator_state.json
+  test:
+    signals: {logs.apphash: 5, logs.panic: 1}
+
+- id: state-db-locked
+  title: Database locked by another process
+  severity: high
+  match:
+    all: ["logs.db_lock > 0"]
+  confirm:
+    - "bash: ps aux | grep <binary> — two instances? lsof <home>/data/*/LOCK"
+  fix:
+    - "[change] stop the duplicate process (verify it is not a second validator instance first)"
+  test:
+    signals: {logs.db_lock: 3}
+
+- id: state-db-corrupt
+  title: Database corruption
+  severity: critical
+  match:
+    all: ["logs.db_corrupt > 0"]
+    any: ["logs.panic > 0", "proc.running == false", "proc.restarts > 0"]
+  confirm:
+    - "node.logs — which db (application, blockstore, state)?"
+  causes:
+    - unclean shutdown, disk errors (logs.disk_io), full disk
+  fix:
+    - "[change] restore data from a trusted snapshot or snap.statesync (operator confirms)"
+  warnings:
+    - preserve data/priv_validator_state.json across any restore
+  test:
+    signals: {logs.db_corrupt: 4, logs.panic: 1}
+
+- id: state-statesync-failing
+  title: State sync failing
+  severity: high
+  match:
+    all: ["logs.statesync_fail > 0"]
+  confirm:
+    - "node.config statesync section; are rpc_servers reachable and serving snapshots? trust height recent?"
+  causes:
+    - trust height/hash stale or wrong, rpc servers without snapshots, snapshot format mismatch, too few peers with snapshots
+  fix:
+    - "[change] snap.statesync to refresh trust height/hash from a trusted RPC; add peers that serve snapshots; restart"
+  test:
+    signals: {logs.statesync_fail: 8, config.statesync_enable: true}
+
+- id: state-statesync-left-enabled
+  title: statesync.enable left on after the node synced
+  severity: low
+  match:
+    all: ["config.statesync_enable == true", "node.catching_up == false"]
+  fix:
+    - "[change] set [statesync] enable=false so a future restart with empty data doesn't surprise you"
+  test:
+    signals: {config.statesync_enable: true, node.catching_up: false}
+
+- id: state-no-snapshots-served
+  title: Node does not produce state-sync snapshots
+  severity: low
+  match:
+    all: ["app.snapshot_interval == 0", "profile.role != validator"]
+  fix:
+    - "[change] RPC/sentry nodes: set state-sync snapshot-interval (e.g. 1000) and keep-recent to help peers"
+  test:
+    signals: {app.snapshot_interval: 0, profile.role: rpc}

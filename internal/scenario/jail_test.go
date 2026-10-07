@@ -46,9 +46,9 @@ INF slashing and jailing validator due to liveness fault height=162050 jailed_un
 type scripted struct {
 	t         *testing.T
 	syncStart chan struct{} // closed when the model starts waiting for sync
-	mu    sync.Mutex
-	calls []string
-	seen  map[string]string // tool → last result text
+	mu        sync.Mutex
+	calls     []string
+	seen      map[string]string // tool → last result text
 }
 
 func call(name string, args map[string]any) *agent.Response {
@@ -244,7 +244,7 @@ func TestJailRecoveryEndToEnd(t *testing.T) {
 	if signerChoices != 2 {
 		t.Fatalf("signer asked %d times, want once per unjail attempt", signerChoices)
 	}
-		if !strings.Contains(out, "participating in consensus") || strings.Contains(out, "NOT participating") {
+	if !strings.Contains(out, "participating in consensus") || strings.Contains(out, "NOT participating") {
 		t.Fatalf("final: %s", out)
 	}
 	t.Logf("final answer: %s", out)
