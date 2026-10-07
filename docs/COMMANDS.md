@@ -19,7 +19,10 @@ cometcli -p "prompt"                   # headless: print the answer and exit
 cmd | cometcli -p "prompt"             # piped input is attached as <stdin> context
 cometcli -c / -r <id>                  # continue the latest session here / resume one
 cometcli config show                   # global agent settings (general mode; profiles override)
-cometcli config set agent.provider groq
+cometcli config set agent.provider anthropic   # or openrouter, openai, groq, gemini, openai-compat
+cometcli config set agent.model claude-haiku-4-5-20251001
+cometcli config set-key ANTHROPIC_API_KEY      # saves a key (read hidden from stdin) to ~/.cometcli/credentials, 0600
+cometcli config set agent.max_turns 300        # model steps per request before it pauses (default 200)
 cometcli trust                         # let this project's hooks and MCP servers run
 cometcli mcp add|list|remove …         # MCP servers the agent connects to
 ```
@@ -51,12 +54,19 @@ input, approval dialog, status line — redraws.
 | `!cmd` | run `cmd` **in your terminal** — the UI steps aside, so prompts and passwords work (e.g. `!./upgrade/vote-upgrade.sh`). Output is never sent to the model; it's told the command and exit code. In node mode over SSH it runs on the node (`ssh -t`) |
 | `#text` | add a line to memory (`/remember`) |
 | `shift+tab` | cycle mode: ops → accept-edits → read-only (→ bypass, if started with it) |
-| `esc` | interrupt the running turn (or close a menu) |
+| `esc` | interrupt the running turn (or close a menu); a message you typed meanwhile is sent right away |
+| `ctrl+r` | expand the last collapsed tool output |
+| `ctrl+o` | show the model's last thinking |
 | `ctrl+c` | interrupt · clear input · twice to exit |
 | `ctrl+d` | exit (empty input) |
 | `?` | shortcut help |
 
-Messages typed while a turn runs are queued and sent when it ends. Approvals offer
+A message typed while a turn runs reaches the model at its next step (after the current
+tool call), so you can redirect or stop it mid-task; `esc` interrupts and sends it at
+once. Tool output is collapsed to a few lines (`ctrl+r` expands it) and thinking to a
+"Thought for Ns" line (`ctrl+o` shows it). If a request runs out of steps it pauses —
+say "continue". In general mode the agent moves onto a node profile by itself when a
+question needs one; `/one <profile>` pins one. Approvals offer
 **Yes**, **Yes, and don't ask again for `<rule>`** (saved to the project's
 `.cometcli/settings.local.json`, or your user settings outside a project), and **No**
 (declines and interrupts so you can redirect). Transactions offer only Yes/No.
@@ -207,7 +217,10 @@ cometcli val signing                   # missed-block counter + uptime %
 cometcli val rewards                   # outstanding rewards + commission
 cometcli val votes                     # active proposals vs recorded votes
 
-cometcli val unjail                    # MsgUnjail (fails at simulation if still jailed)
+cometcli val jail-check                # why jailed, evidence from the logs, every unjail blocker
+cometcli val unjail                    # MsgUnjail — refused while the jail period runs, the node isn't
+                                       # synced, the signer's state is ahead, the node runs another
+                                       # consensus key, self-delegation is short or fees are missing
 cometcli val vote --proposal 7 --option yes
 cometcli val edit --commission-rate 0.05 --moniker new-name
 cometcli val withdraw                  # rewards + commission to signer
@@ -215,6 +228,26 @@ cometcli val create --amount 1000000uatom \
     --pubkey '{"@type":"/cosmos.crypto.ed25519.PubKey","key":"…"}' \
     --moniker myval --commission-rate 0.05
 ```
+
+## Governance
+
+```bash
+cometcli chain gov                     # proposals in voting (--status deposit|passed|rejected|all)
+cometcli val votes                     # open proposals and how this validator voted
+cometcli gov propose --kind text --title "…" --summary "…"
+cometcli gov propose --kind upgrade --title "v2" --summary "…" --name v2 --in_blocks 20000
+cometcli gov propose --kind messages --title "…" --summary "…" \
+    --messages '[{"@type":"/cosmos.distribution.v1beta1.MsgCommunityPoolSpend", …}]'
+cometcli gov deposit --proposal 7      # tops up exactly what's missing to the minimum
+cometcli val vote --proposal 7 --option yes
+cometcli wait until --condition proposal-status --value 7:PASSED
+```
+
+The deposit defaults to the chain's minimum and is checked against its
+`min_deposit_ratio` before you approve. An upgrade height the vote can't reach in time
+(voting period at the measured block time) is refused, with the earliest height that
+works. Messages are signed with whichever signer you pick (see
+[Signing transactions](#signing-transactions)).
 
 ## Transactions
 
@@ -232,7 +265,7 @@ All tx commands accept: `--gas-price` · `--fee-denom` · `--gas-limit` ·
 ## Chain (gRPC queries)
 
 ```bash
-cometcli chain validators              # bonded set
+cometcli chain validators              # bonded set (--status jailed|all|unbonding|unbonded)
 cometcli chain params                  # slashing window, unbonding, inflation
 cometcli chain pool                    # bonded vs unbonded stake
 cometcli chain gov                     # proposals in voting period

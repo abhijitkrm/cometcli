@@ -1,7 +1,7 @@
 <div align="center">
   <img src="cometcli.jpg" alt="cometcli" width="1200" />
   <h1>cometcli</h1>
-  <p><b>An agentic SRE terminal for Cosmos-EVM validators</b></p>
+  <p><b>An agentic SRE terminal for Cosmos validators — Claude Code for your nodes</b></p>
 </div>
 
 <div align="center">
@@ -24,30 +24,31 @@
 
 <br/>
 
-cometcli is a local-first operations terminal for validators running
-[Cosmos-EVM](https://github.com/cosmos/evm) chains. It answers
-*"is my node healthy?"* — and lets you act on the answer — from one place.
+cometcli is a terminal you talk to, the way you use Claude Code, built for running
+[Cosmos SDK](https://github.com/cosmos/cosmos-sdk) and
+[Cosmos-EVM](https://github.com/cosmos/evm) validators. Ask *"is anyone jailed?"* or
+*"why is my validator missing blocks?"*. It inspects the node, chain and host, works
+out the cause, proposes the fix, and carries it out once you approve.
 
-- **Observe** — CometBFT RPC, Cosmos gRPC, and EVM JSON-RPC in one view:
-  signing health, peers, drift, gov, upgrade plans
-- **Operate** — transactions (simulate → decode → approve → broadcast),
-  service control, upgrades, state-sync, security audits
-- **Watch** — live TUI dashboard and an alert engine that pages you on
-  Slack, Discord, or Telegram
-- **Automate** — runbooks for jail recovery, halts, migrations; the same
-  tools drive an optional AI agent
-
-No dashboards to wire up. No context-switching between `evmd`, `systemctl`,
-`curl`, and explorer tabs.
+- **Ask** — plain-language questions about your machine, nodes and chain; it checks
+  instead of guessing
+- **Diagnose** — one sweep of ~50 signals, matched against a knowledge base of 77
+  known failure cases, root cause first
+- **Fix** — incidents worked end to end: fix the cause, wait for sync, unjail, check
+  it signs again; every change and transaction waits for your approval
+- **Operate** — transactions, governance proposals and votes, upgrades, state sync,
+  service control, security audits
+- **Watch** — live dashboard and alerts to Slack, Discord or Telegram
+- **Extend** — settings, memory, custom commands, hooks, MCP servers and subagents,
+  as in Claude Code
 
 <p align="center">
   <img src="docs/images/cometcli-startup.png" alt="cometcli starting in the terminal: a comet streaking over the COMETCLI wordmark, the welcome box and the prompt" width="820" />
 </p>
 
-Every capability is a deterministic subcommand **and** a tool the optional AI
-agent can call — one registry, two front-ends. The deterministic layer is
-boring and correct; the agent composes it. See [PLAN.md](PLAN.md) for the
-architecture and design rationale.
+Every capability is a deterministic subcommand **and** a tool the agent can call —
+one registry, two front-ends. The deterministic layer is boring and correct; the
+agent composes it. See [PLAN.md](PLAN.md) for the architecture.
 
 ## Install
 
@@ -64,42 +65,156 @@ Details — custom install dirs, checksum/cosign verification, SBOMs — in
 
 ## Quick start
 
-```bash
-# 1. Guided setup — probes your node and fills in chain-id, bech32 prefix,
-#    bond denom, and evm-chain-id automatically
-cometcli init
+**1. Pick a model** (once). Keys are read hidden and saved to
+`~/.cometcli/credentials` (mode 0600); an environment variable of the same name
+always wins.
 
-# (or declaratively — `profile add` merges, re-run to update one field)
+```bash
+# low-cost Claude
+cometcli config set agent.provider anthropic
+cometcli config set agent.model claude-haiku-4-5-20251001
+cometcli config set-key ANTHROPIC_API_KEY
+
+# or free models via OpenRouter
+cometcli config set agent.provider openrouter     # model defaults to openrouter/free
+cometcli config set-key OPENROUTER_API_KEY
+```
+
+**2. Talk to it.**
+
+```bash
+cometcli                                  # chat on this machine
+cometcli "why is the disk filling up?"    # start with a question
+```
+
+**3. Add your node** and ask about it — the agent moves onto the node by itself when
+a question needs it.
+
+```bash
+cometcli init                             # guided: probes the node, fills chain-id, prefix, denoms
+cometcli one myval                        # or pin a session to the node
+cometcli one myval "is my validator healthy?"
+cometcli doctor                           # one-shot health check, no model needed
+```
+
+Or add the profile declaratively (`profile add` merges — re-run to change a field):
+
+```bash
 cometcli profile add myval \
-  --chain-id mychain-1 --evm-chain-id 9000 --bech32-prefix cosmos \
+  --chain-id mychain-1 --bech32-prefix cosmos \
   --role validator --home /var/lib/evmd --binary evmd \
   --comet tcp://127.0.0.1:26657 --grpc 127.0.0.1:9090 \
   --evm http://127.0.0.1:8545 \
   --service systemd --unit evmd.service \
   --signer ops --signer-backend file --fee-denom uatom
-
-# 2. Add an ops key (transaction signing only — consensus keys are never touched)
-cometcli keys add --name ops                       # generate
-cometcli keys add --name ops --recover             # import BIP-39 mnemonic
-cometcli keys add --name ops --privkey-hex <hex>   # import raw secp256k1 hex
-
-# 3. Check everything
-cometcli doctor
 ```
 
+`--evm` is optional: leave it out for a plain Cosmos SDK chain.
+
+## The terminal
+
+An inline chat like Claude Code's: answers land in your normal scrollback, and only
+the bottom of the screen redraws.
+
 ```
-✓  rpc reachable      height 4464
-✓  not catching up    catching_up=false
-✓  has peers          3 peers
-✓  port exposure      clean
-✗  key file perms     1 problems          ← config dir is 0755, want 0700
-✓  signing health     missed 5/10000
-✓  jail status        not jailed
-✓  upgrade pending    none
-✓  host disk
-✓  ntp/clock
-✓  evm parity         drift 0
+> is anyone jailed?
+
+⏺ Use node(val01)
+  ⎿  node mode: val01
+
+⏺ chain.validators(status=jailed)
+  ⎿  no validator is jailed
+
+⏺ No — none of primium-1's validators is jailed.
 ```
+
+| Key / prefix | Does |
+|---|---|
+| `/` | command menu — `/incident`, `/status`, `/one`, `/model`, `/cost`, `/compact`, … |
+| `@path` · `!cmd` · `#text` | attach a file · run a command in your own terminal · save to memory |
+| `esc` | interrupt; anything you typed meanwhile is sent at once |
+| `ctrl+r` · `ctrl+o` | expand the last tool output · show the model's thinking |
+| `shift+tab` | cycle permission mode: ops → accept-edits → read-only |
+
+Type while it works and your message reaches the model at its next step, so you can
+redirect or stop it mid-task. Approvals offer **Yes**, **Yes, and don't ask again**
+for that kind of command, and **No**. Full list in
+[docs/COMMANDS.md](docs/COMMANDS.md#the-interactive-terminal).
+
+**General mode** (`cometcli`) gives the agent `bash`, file read/write/edit,
+`glob`/`grep` and `web_fetch` on your machine. **Node mode** (`cometcli one
+<profile>`, `/one <profile>`, or the agent's own `use_node`) adds the node, chain,
+validator and incident tools, runs the shell on the node's host (local or SSH), applies
+the validator safety rules and keeps a live snapshot of the node in context.
+
+Headless, for scripts and CI:
+
+```bash
+cometcli -p "summarize docker container health"
+journalctl -u evmd -n 300 | cometcli one myval -p "why did it halt?"
+cometcli -p --output-format json "…"            # result + usage as JSON
+cometcli -p --output-format stream-json "…"     # one JSON event per line
+cometcli -c                                     # continue the last session here
+cometcli -r <id>                                # resume one (cometcli sessions)
+```
+
+## Incidents
+
+Validators fail in a few hundred known ways. cometcli starts every incident from
+evidence: `node.triage` collects ~50 signals at once — sync, peers, signing, jail,
+consensus key, upgrade plan, governance, disk, memory, clock, process restarts and
+OOM kills, log error categories, config invariants, EVM — and matches them against a
+knowledge base of known cases for CometBFT, the Cosmos SDK and Cosmos-EVM.
+
+```
+$ cometcli node triage
+matched cases (root causes, most severe first):
+  1. cfg-parse-error [critical] Config file fails to parse — config.parse_error == true
+symptoms of the above (clear once the root is fixed): node-crash-loop, node-rpc-down,
+  val-jailed-downtime
+→ kb.show <id> for confirm steps, fix and verify; confirm before acting.
+```
+
+Each case lists how to confirm it, its causes, fix steps tagged `[read]` /
+`[change]` / `[tx]`, how to verify, and what never to do. In a session,
+**`/incident [what you see]`** works the top case to resolution: confirm → fix the
+root cause → wait (`wait.until`, without spending model calls) → verify → report.
+When the agent finds a cause no case covered, it offers to record it with `kb.add`.
+Add your own cases in `~/.cometcli/kb/` — format in
+[docs/EXTENDING.md](docs/EXTENDING.md#knowledge-base-cases).
+
+Jail recovery is careful about fees: `val.unjail` refuses while the jail period runs,
+the node isn't synced, the signer's saved state is ahead of the chain, the node signs
+with a different consensus key than the one registered, self-delegation is below the
+minimum, or the account can't pay the fee. `/recover-jail` runs the whole procedure.
+
+## Transactions and governance
+
+Every on-chain op goes through **build → simulate → decode → approve → broadcast →
+confirm**, and always waits for you:
+
+```
+⚠  [on-chain] broadcast transaction
+{
+  "signer": "container val-node (key validator, test keyring)",
+  "chain_id": "mychain-1",
+  "messages": ["/cosmos.slashing.v1beta1.MsgUnjail {…}"],
+  "fee": "130408000000000uatom",
+  "gas_limit": 130408
+}
+Proceed? [y/N]
+```
+
+Two signers: cometcli's own keyring, or **the node container's keyring** — the key
+never leaves the node; cometcli has `evmd tx sign` run inside the container. When both
+can sign, you pick one first. A local key is only offered if it is the validator's
+operator account. Sync-acceptance is not success — cometcli polls for the committed
+result and reports the real code, height and gas.
+
+Governance: `gov propose` (text, software upgrade, any messages), `gov deposit`,
+`val vote`, and `wait until --condition proposal-status`. Upgrade heights the vote
+can't reach in time are refused before you sign. See
+[docs/COMMANDS.md](docs/COMMANDS.md#governance).
 
 ## Command surface
 
@@ -108,169 +223,115 @@ Tools are grouped by domain. Required args also bind positionally —
 
 | Domain | Highlights |
 |---|---|
-| `node` | `status`, `peers`, `health`, `consensus`, `logs`, `config --action lint`, `service status\|restart`, `version-check` |
-| `val` | `status`, `signing`, `rewards`, `votes` · on-chain: `unjail`, `withdraw`, `vote`, `edit`, `create` |
-| `chain` | `validators`, `params`, `gov`, `upgrade-plan`, `pool`, `balance` |
-| `evm` | `chainid` (profile-vs-RPC sanity), `parity` (comet↔JSON-RPC drift), `gasprice`, `txpool` |
+| `node` | `triage`, `status`, `peers`, `health`, `consensus`, `logs`, `config --action lint`, `service status\|restart`, `version-check` |
+| `val` | `status`, `signing`, `jail-check`, `consensus`, `rewards`, `votes` · on-chain: `unjail`, `withdraw`, `vote`, `edit`, `create` |
+| `chain` | `validators` (`--status jailed`), `params`, `gov`, `upgrade-plan`, `pool`, `balance` |
+| `gov` | `propose` (text / upgrade / messages), `deposit` |
+| `kb` | `search`, `show`, `add` — the knowledge base of failure cases |
+| `wait` | `until` — synced, height, unjailable, signing, in-consensus, tx-committed, proposal-status, or any triage signal |
+| `evm` | `chainid`, `parity` (comet↔JSON-RPC drift), `gasprice`, `txpool` |
 | `tx` | `send`, `delegate`, `undelegate`, `redelegate`, `get` — every tx tool takes `--gas-price`, `--gas-limit`, `--fee-denom`, `--seq` |
-| `keys` | `add` (`--recover`/`--privkey-hex`), `list`, `show`, `rm`, `convert` (bech32↔0x) — `eth_secp256k1` by default |
-| `sec` | `exposure` (listening-port audit), `perms` (key-file permissions), `doublesign` (priv_validator_state HRS check) |
-| `mon` | `snapshot`, `watch` (live TUI), `alerts` (rules → stdout/Slack/Discord/Telegram; `--once`, `--mute`, `--repeat-minutes`) |
-| `ui` | chat-first TUI: talk to the agent, `/run` tools, approvals in-app; overview/fleet/logs/send panes behind it |
-| `upgrade` | `check` (plan + binary + upstream release), `prepare` (cosmovisor staging), `watch` |
-| `snap` | `list`, `prune`, `statesync` (fetch trust height, write `[statesync]`) |
-| `runbook` | `list`, `show`, `run` — builtins + your own YAML in `~/.cometcli/runbooks/` |
-| `net` | `add-peer`, `rm-peer` (persistent peers in config.toml) |
-| `fleet` | `status` (health matrix), `exec` (fan out a read-only tool), `shell` (command on every host, one approval) |
-| `agent`/`ask` | interactive AI SRE over the same registry |
+| `keys` | `add` (`--recover`/`--privkey-hex`), `list`, `show`, `rm`, `convert` (bech32↔0x) |
+| `sec` | `exposure` (listening ports), `perms` (key-file permissions), `doublesign` (priv_validator_state check) |
+| `mon` | `snapshot`, `watch` (live TUI), `alerts` (rules → stdout/Slack/Discord/Telegram) |
+| `upgrade` | `check`, `prepare` (download, verify, stage for cosmovisor), `watch` |
+| `snap` | `list`, `prune`, `statesync` |
+| `runbook` | `list`, `show`, `run` — builtins + your own YAML |
+| `net` | `add-peer`, `rm-peer` |
+| `fleet` | `status`, `exec` (a read-only tool on every profile), `shell` (one command on every host, one approval) |
 
-Global flags: `--profile` (override active), `--json` (structured output),
-`-y/--yes` (auto-approve observe/diagnose prompts — never on-chain).
+Global flags: `--profile`, `--json`, `-y/--yes` (auto-approve observe/diagnose
+prompts — never on-chain).
 
-## Transactions
+## Models
 
-Every on-chain op goes through **build → simulate → decode → approve →
-broadcast → confirm**:
+| Provider | Key | Default model |
+|---|---|---|
+| `anthropic` | `ANTHROPIC_API_KEY` | `claude-opus-5-5` (`claude-haiku-4-5-20251001` for low cost) |
+| `openrouter` | `OPENROUTER_API_KEY` | `openrouter/free` — a free model that supports tools |
+| `openai` | `OPENAI_API_KEY` | `gpt-4.1` |
+| `groq` | `GROQ_API_KEY` | `llama-3.3-70b-versatile` |
+| `gemini` | `GEMINI_API_KEY` | `gemini-3.8-flash` (`store=false`: nothing kept server-side) |
+| `openai-compat` | `--agent-base-url` | Ollama, vLLM, LM Studio — any OpenAI-shaped endpoint |
 
-```
-⚠  [on-chain] broadcast transaction
-{
-  "chain_id": "mychain-1",
-  "account": "cosmos10pmprk9…",
-  "sequence": 1,
-  "messages": ["/cosmos.bank.v1beta1.MsgSend {…}"],
-  "fee": "155401875000000uatom",
-  "gas_limit": 138135
-}
-Proceed? [y/N]
-```
+Set per machine (`cometcli config set agent.provider …`) or per profile; switch for
+one session with `--model` or `/model`. `/cost` shows token use; prompt caching is on
+for Anthropic. Thinking streams live where the model offers it, and effort
+(`--effort` or `/effort`) is sent only to models that accept it.
 
-Nothing hits the wire without an explicit `y`. Sync-acceptance is not
-success — cometcli polls for the committed result and reports the real
-`code`, height, and gas. Sequence drift auto-heals once.
-
-## The agent
-
-```bash
-cometcli config set agent.provider groq      # once; or per profile: profile add … --agent-provider
-export GROQ_API_KEY=…                        # or ANTHROPIC_/OPENAI_/GEMINI_API_KEY;
-                                             # COMETCLI_LLM_API_KEY is a universal fallback
-
-cometcli                                     # chat on this machine: shell, files, web
-cometcli "why is disk filling up on /var?"   # start with a prompt
-cometcli one myval                           # node mode: validator tools, rules, live snapshot
-cometcli one myval "why am I missing blocks?"
-
-cometcli -p "summarize docker container health"            # answer once, exit
-journalctl -u evmd -n 300 | cometcli one myval -p "why did it halt?"
-cometcli -p --output-format json "…"                       # result + usage as JSON
-cometcli -p --output-format stream-json "…"                # one JSON event per line
-cometcli -c                                                # continue the last session here
-cometcli -r <id>                                           # resume one (cometcli sessions)
-```
-
-The terminal is an inline chat like Claude Code's — scrollback-friendly, `/` command
-menu, `@file` mentions, `!cmd` to run something interactive in your own terminal,
-`shift+tab` to change permission mode, approvals with "don't ask again".
-[Keys and prefixes](docs/COMMANDS.md#the-interactive-terminal).
-
-**General mode** is an SRE agent on your machine: `bash`, `read`/`write`/`edit`,
-`glob`/`grep`, `web_fetch`. **Node mode** (`cometcli one <profile>`, or `/one
-<profile>` mid-conversation) adds the node tools, runs the shell on the node's host
-(local or SSH), applies the validator safety rules, and keeps a live snapshot of the
-node in context. Every shell command is classified before it runs: reads run, changes
-ask, transactions always ask, and key material or state resets are refused. See
-[docs/COMMANDS.md](docs/COMMANDS.md#general-tools-and-permissions).
-
-Settings files, `COMET.md` memory, custom slash commands, hooks, MCP servers and
-subagents work like Claude Code's — see [docs/EXTENDING.md](docs/EXTENDING.md).
-
-Incidents start from evidence, not guesses: `node.triage` sweeps ~50 signals (sync,
-signing, keys, upgrade plan, host, process, log error categories, config invariants, EVM)
-and matches them against a knowledge base of known Cosmos SDK / Cosmos-EVM failure cases,
-each with confirm, fix, verify and never-do steps; `/incident` works the top case to
-resolution and can record new cases with `kb.add`. `/recover-jail` diagnoses (with root-cause evidence from the
-node's logs), waits for sync and the jail period without burning tokens, unjails — signed
-with cometcli's keyring or inside the node's own container — fixes and retries on failure,
-and verifies the validator is signing again. See [docs/COMMANDS.md](docs/COMMANDS.md#incidents).
-
-`cometcli ask "…"`, `cometcli agent` and `cometcli ui` still work as before (node mode
-on the active profile).
-
-Providers: `anthropic`, `openai`, `groq` (`GROQ_API_KEY`, default model
-`llama-3.3-70b-versatile`), `gemini` (`GEMINI_API_KEY`, default model
-`gemini-3.8-flash` — Interactions API, `store=false` so nothing is kept
-server-side), `openai-compat` (Ollama, vLLM, LM Studio — any OpenAI-shaped
-endpoint via `--agent-base-url`), or `off`.
-
-The model sees tool calls as function calls; every on-chain or local-change
-call still goes through the same approval gate — **the model can propose,
-only you approve.**
+The model proposes; **only you approve.** Every change and every transaction goes
+through the same approval gate whichever model you use.
 
 Bounded runs for automation:
 
 ```bash
-cometcli agent --task "check fleet, report anomalies" --budget 8 --max-iter 6
 cometcli ask "is anything wrong?" --safe   # read-only: mutating tools refused
 cometcli mon alerts --triage               # every alert ships with an AI diagnosis
 ```
 
-`--triage` runs a bounded, safe-mode agent per firing alert and appends the
-diagnosis to whatever the webhook delivers — you get *"missed 9931/10000 —
-likely jailed; run `cometcli val unjail` after jailed_until"* instead of a
-bare alarm.
-
 ### MCP server
 
-`cometcli mcp` exposes the whole registry as a Model Context Protocol
-server on stdio — point any MCP client (Claude Desktop, Cursor, a custom
-orchestrator) at it:
+`cometcli mcp` exposes the whole registry as a Model Context Protocol server on
+stdio — point Claude Desktop, Cursor or your own orchestrator at it:
 
 ```json
 { "mcpServers": { "cometcli": { "command": "cometcli", "args": ["mcp"] } } }
 ```
 
-Observe/diagnose tools run freely and carry `readOnlyHint`; mutating tiers
-are marked `destructiveHint` and refused — stdio has no human to approve,
-run those via the CLI.
+Observe/diagnose tools run freely and carry `readOnlyHint`; mutating tiers are
+marked `destructiveHint` and refused — stdio has no human to approve, run those via
+the CLI. cometcli is also an MCP *client*: `cometcli mcp add` connects servers to the
+agent.
 
 ## Safety model
 
-- **Tiers** — `observe → diagnose → local-change → on-chain`. Read-only by
-  default; every mutation prompts.
-- **Consensus keys are radioactive** — `priv_validator_key.json` is never
-  read into memory or sent to a model. Only `priv_validator_state.json`
-  HRS is inspected for double-sign guards.
-- **Redaction** — keys, mnemonics, JWTs, bearer tokens, and URL credentials
-  are scrubbed from all text entering and leaving the agent.
-- **Audit** — every tool call, shell command, prompt, and transaction lands
-  in `~/.cometcli/audit/YYYY-MM-DD.jsonl` (`cometcli audit` to tail it).
-- **Bounded execution** — every tool runs under a deadline; a dead endpoint
-  fails fast instead of hanging.
+- **Tiers** — `observe → diagnose → local-change → on-chain`. Reads run; changes ask;
+  transactions always ask.
+- **Permission rules** — allow / ask / deny in Claude Code syntax
+  (`bash(docker logs:*)`, `read(./config/**)`, `node.*`); deny beats ask beats allow.
+  Every shell command is classified first, scripts and `docker exec` included.
+- **Consensus keys are radioactive** — `priv_validator_key.json` is never read into
+  memory or sent to a model; state resets are refused outright. Key management is
+  operator-only.
+- **Redaction** — keys, mnemonics, JWTs, bearer tokens and URL credentials are
+  scrubbed from everything entering and leaving the agent (tx hashes stay visible).
+- **Audit** — every tool call, shell command, prompt and transaction lands in
+  `~/.cometcli/audit/YYYY-MM-DD.jsonl` (`cometcli audit` to tail it).
+- **Bounded execution** — every tool runs under a deadline; long requests pause
+  after 200 model steps (`agent.max_turns`) and continue on "continue".
 
 ## Profiles & config
 
 State lives in `~/.cometcli/` (`COMETCLI_HOME` to override):
 
 ```
-config.yaml     # profiles + active pointer
-keys/           # ops keyring (file backend)
-runbooks/       # your custom YAML playbooks
-audit/          # JSONL audit trail
+config.yaml       # profiles, active pointer, agent settings
+credentials       # API keys saved by `config set-key` (0600)
+settings.json     # permission rules, hooks, MCP servers (also per project: .cometcli/)
+COMET.md          # memory the agent always reads (also per project)
+kb/               # your own knowledge-base cases
+keys/             # ops keyring (file backend)
+sessions/         # saved conversations (cometcli -c / -r)
+runbooks/         # your custom YAML playbooks
+audit/            # JSONL audit trail
 ```
 
 Key env vars: `COMETCLI_PROFILE`, `COMETCLI_KEYRING_PASSWORD`,
-`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `COMETCLI_LLM_API_KEY`.
+`COMETCLI_CONTAINER_KEYRING_PASSWORD`, the provider keys above, and
+`COMETCLI_LLM_API_KEY` as a universal fallback.
 
 ## Documentation
 
+- [docs/COMMANDS.md](docs/COMMANDS.md) — full command reference: chat, incidents,
+  signing, governance, every tool
+- [docs/EXTENDING.md](docs/EXTENDING.md) — settings, memory, custom commands, hooks,
+  MCP, subagents, knowledge-base cases
 - [docs/INSTALL.md](docs/INSTALL.md) — install options, checksum & cosign verification
-- [docs/COMMANDS.md](docs/COMMANDS.md) — full command reference with examples
-- [TESTING.md](TESTING.md) — test locally against docker validators, with a free LLM key (Groq/Ollama)
+- [TESTING.md](TESTING.md) — test locally against docker validators
 - [PLAN.md](PLAN.md) — architecture and design rationale
 - [docs/RUNBOOKS.md](docs/RUNBOOKS.md) — builtin playbooks + authoring your own
-- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — endpoints, keyrings,
-  tx errors, SSH, state sync, agent config
+- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — endpoints, keyrings, tx errors,
+  SSH, state sync, agent config
 - [docs/RELEASE.md](docs/RELEASE.md) — release checklist and verification
 - [CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md)
 
@@ -280,11 +341,15 @@ Key env vars: `COMETCLI_PROFILE`, `COMETCLI_KEYRING_PASSWORD`,
 go build ./...          # build all packages
 go vet ./...            # vet
 golangci-lint run       # lint (config: .golangci.yml)
-go test ./...           # unit tests (keys KAT, redaction, lint, agent loop…)
+go test -race ./...     # unit + scenario tests, incl. a full jail recovery on a
+                        # simulated chain (fake gRPC node, CometBFT RPC and docker)
 
 # e2e (needs a live node):
 COMETCLI_E2E=1 COMETCLI_E2E_GRPC=127.0.0.1:9090 \
 COMETCLI_E2E_COMET=tcp://127.0.0.1:26657 go test ./test/e2e/...
+
+# container signing against a real evmd image:
+go test -tags realdocker ./internal/tools/common/
 
 # SSH transport e2e (needs a reachable sshd):
 COMETCLI_SSH_TEST_HOST=127.0.0.1 COMETCLI_SSH_TEST_PORT=2222 \
@@ -294,16 +359,14 @@ go test ./internal/client/host -run SSHLive -v
 
 ## Ecosystem
 
-Built for the Cosmos stack — chains running
-[CometBFT](https://github.com/cometbft/cometbft) consensus with the
-[Cosmos EVM](https://github.com/cosmos/evm) module (`evmd` and derivatives).
-If your chain exposes a CometBFT RPC, Cosmos gRPC, and Ethereum JSON-RPC,
-cometcli speaks to all three.
+Built for chains running [CometBFT](https://github.com/cometbft/cometbft) consensus
+with the [Cosmos SDK](https://github.com/cosmos/cosmos-sdk) — plain SDK chains and
+[Cosmos-EVM](https://github.com/cosmos/evm) chains (`evmd` and derivatives) alike. It
+speaks CometBFT RPC, Cosmos gRPC and, where present, Ethereum JSON-RPC.
 
-**Nothing is chain-specific.** Chain-id, bech32 prefix, fee denom, EVM
-chain-id, ports, binary name — all live in the profile, and `cometcli init`
-auto-detects most of them by probing the node. Point it at any evmd-based
-chain and it just works.
+**Nothing is chain-specific.** Chain-id, bech32 prefix, fee denom, EVM chain-id, ports
+and binary name live in the profile, and `cometcli init` detects most of them by
+probing the node. Nodes can run under systemd or docker, locally or over SSH.
 
 ## Contributing
 
