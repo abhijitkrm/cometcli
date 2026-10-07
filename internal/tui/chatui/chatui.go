@@ -165,9 +165,10 @@ type model struct {
 	mdWidth int
 	mdStyle string
 
-	initial string
-	notes   []string
-	printed []string // everything printed, for tests
+	initial  string
+	notes    []string
+	progress string   // latest live status from a long-running tool
+	printed  []string // everything printed, for tests
 }
 
 func newModel(o Options) *model {
@@ -570,6 +571,7 @@ func (m *model) onEvent(e agent.Event) tea.Cmd {
 		m.think = ""
 		return m.print("", accentSt.Render("● ")+toolHeader(e))
 	case agent.EvToolResult:
+		m.progress = ""
 		if e.Err != "" {
 			return m.print(result(errSt.Render(e.Err)))
 		}
@@ -580,6 +582,9 @@ func (m *model) onEvent(e agent.Event) tea.Cmd {
 		return m.print(result(colorDiff(out)))
 	case agent.EvNotice:
 		return m.print(result(dim.Render(e.Text)))
+	case agent.EvProgress:
+		m.progress = e.Text
+		return nil
 	case agent.EvTodos:
 		return m.print("", accentSt.Render("● ")+bold.Render("Update todos"), result(todoLines(e.Todos)))
 	}
@@ -587,7 +592,7 @@ func (m *model) onEvent(e agent.Event) tea.Cmd {
 }
 
 func (m *model) onDone(v doneMsg) tea.Cmd {
-	m.running, m.cancel = false, nil
+	m.running, m.cancel, m.progress = false, nil, ""
 	var cmds []tea.Cmd
 	if s := strings.TrimSpace(m.live.String()); s != "" && v.err != nil {
 		cmds = append(cmds, m.print("", accentSt.Render("● ")+s)) // partial text before an error
@@ -819,6 +824,9 @@ func (m *model) View() string {
 			b.WriteString(lastLines(lipgloss.NewStyle().Width(w-2).Render(accentSt.Render("● ")+s), 14) + "\n")
 		} else if t := strings.TrimSpace(m.think); t != "" {
 			b.WriteString(faint.Render(lastLines(lipgloss.NewStyle().Width(w-4).Render("∴ "+oneLine(t, 400)), 3)) + "\n")
+		}
+		if m.progress != "" {
+			b.WriteString(accentSt.Render("  ⎿  ") + dim.Render(oneLine(m.progress, w-8)) + "\n")
 		}
 		u, _ := m.a.Usage()
 		fmt.Fprintf(&b, "\n%s %s %s\n", m.sp.View(), accentSt.Render(working(m.started)),

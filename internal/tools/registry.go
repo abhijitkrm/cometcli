@@ -17,6 +17,7 @@ import (
 	"github.com/abhijitkrm/cometcli/internal/tools/txtool"
 	"github.com/abhijitkrm/cometcli/internal/tools/upgradetool"
 	"github.com/abhijitkrm/cometcli/internal/tools/val"
+	"github.com/abhijitkrm/cometcli/internal/tools/waittool"
 	"github.com/abhijitkrm/cometcli/internal/tools/web"
 )
 
@@ -35,6 +36,7 @@ func RegisterAll(r *toolkit.Registry) {
 	fleet.Register(r)
 	nettool.Register(r)
 	txtool.Register(r)
+	waittool.Register(r)
 	// general-purpose agent tools
 	shell.Register(r)
 	fs.Register(r)

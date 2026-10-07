@@ -2,6 +2,7 @@ package val
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -11,17 +12,30 @@ import (
 	slashingv1beta1 "cosmossdk.io/api/cosmos/slashing/v1beta1"
 	stakingv1beta1 "cosmossdk.io/api/cosmos/staking/v1beta1"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/abhijitkrm/cometcli/internal/testutil/fakenode"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
 	"github.com/abhijitkrm/cometcli/internal/tx"
 )
 
+func TestMain(m *testing.M) {
+	fakenode.MaybeRunFakeDocker()
+	os.Exit(m.Run())
+}
+
 func setup(t *testing.T) (*fakenode.Node, *toolkit.Context, string) {
+	n, c, v, _ := setupChain(t)
+	return n, c, v
+}
+
+func setupChain(t *testing.T) (*fakenode.Node, *toolkit.Context, string, *fakenode.Comet) {
 	t.Helper()
 	tx.ConfirmTimeout, tx.ConfirmPoll = 300*time.Millisecond, 20*time.Millisecond
 	n := fakenode.Start(t, "primium-1")
+	chain := fakenode.StartComet(t)
 	p := n.Profile(t, "eth_secp256k1")
+	fakenode.WithComet(p, chain)
 	c := &toolkit.Context{Context: context.Background(), Profile: p, AutoApproveBelow: toolkit.TierLocalChange,
 		Approver: func(*toolkit.Context, string, toolkit.Tier, map[string]any) (bool, error) { return true, nil }}
 	t.Cleanup(c.Close)
@@ -31,10 +45,21 @@ func setup(t *testing.T) (*fakenode.Node, *toolkit.Context, string) {
 	}
 	valoper, _ := tb.ValAddress()
 	n.Set(func(n *fakenode.Node) {
-		n.Validator = &stakingv1beta1.Validator{OperatorAddress: valoper,
+		n.Validator = &stakingv1beta1.Validator{OperatorAddress: valoper, ConsensusPubkey: fakenode.ConsPubAny(),
+			Status: stakingv1beta1.BondStatus_BOND_STATUS_BONDED, MinSelfDelegation: "1",
 			Description: &stakingv1beta1.Description{Moniker: "validator-01", Website: "https://primium.example", Details: "genesis validator"}}
+		n.SigningInfo = &slashingv1beta1.ValidatorSigningInfo{}
 	})
-	return n, c, valoper
+	return n, c, valoper, chain
+}
+
+// jail puts the validator in jail until `until`.
+func jail(n *fakenode.Node, until time.Time) {
+	n.Set(func(n *fakenode.Node) {
+		n.Validator.Jailed = true
+		n.Validator.Status = stakingv1beta1.BondStatus_BOND_STATUS_UNBONDING
+		n.SigningInfo.JailedUntil = timestamppb.New(until)
+	})
 }
 
 func lastMsgs(t *testing.T, n *fakenode.Node) []proto.Message {
@@ -103,6 +128,7 @@ func TestEditRejectsBadInputBeforeBroadcast(t *testing.T) {
 
 func TestUnjailAndWithdraw(t *testing.T) {
 	n, c, valoper := setup(t)
+	jail(n, time.Now().Add(-time.Minute))
 	if _, err := (unjailTool{}).Run(c, toolkit.Args{}); err != nil {
 		t.Fatal(err)
 	}

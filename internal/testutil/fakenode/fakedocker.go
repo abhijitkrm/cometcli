@@ -81,6 +81,17 @@ var (
 
 // fakeDocker emulates `docker exec -i <c> sh -c <script>` running evmd.
 func fakeDocker(args []string) int {
+	switch {
+	case len(args) > 0 && args[0] == "logs":
+		if p := os.Getenv("FAKENODE_LOGS"); p != "" {
+			b, _ := os.ReadFile(p)
+			_, _ = os.Stdout.Write(b)
+		}
+		return 0
+	case len(args) > 0 && args[0] == "inspect":
+		fmt.Println(os.Getenv("FAKENODE_INSPECT"))
+		return 0
+	}
 	if len(args) < 5 || args[0] != "exec" {
 		fmt.Fprintln(os.Stderr, "fake docker: unsupported", args)
 		return 2
@@ -203,4 +214,16 @@ func fakeSign(script string) ([]byte, error) {
 func TestPubKey() []byte {
 	priv, _ := hex.DecodeString(TestKeyHex)
 	return secp256k1.PrivKeyFromBytes(priv).PubKey().SerializeCompressed()
+}
+
+// SetNodeLogs makes `docker logs` print content and `docker inspect`
+// print inspect (call after InstallFakeDocker).
+func SetNodeLogs(t testing.TB, content, inspect string) {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "node.log")
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAKENODE_LOGS", p)
+	t.Setenv("FAKENODE_INSPECT", inspect)
 }

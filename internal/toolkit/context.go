@@ -44,6 +44,9 @@ type Context struct {
 	// type a secret (e.g. which key signs; a container keyring password).
 	Chooser Chooser
 	Secret  SecretFunc
+	// Progress, when set, receives status lines from long-running tools
+	// (shown live by front-ends instead of printed per update).
+	Progress func(string)
 	// HookDecision is a PreToolUse hook's verdict for this call:
 	// "allow" skips the prompt, "ask" forces one ("" = no opinion).
 	HookDecision string
@@ -181,7 +184,7 @@ func WithDeadline(c *Context, timeout time.Duration) (*Context, context.CancelFu
 		Audit: c.Audit, Approver: c.Approver, AutoApproveBelow: c.AutoApproveBelow,
 		Session: c.Session, Rules: c.Rules, ReadOnly: c.ReadOnly,
 		AcceptEdits: c.AcceptEdits, WorkRoot: c.WorkRoot, HookDecision: c.HookDecision, ToolName: c.ToolName,
-		Chooser: c.Chooser, Secret: c.Secret,
+		Chooser: c.Chooser, Secret: c.Secret, Progress: c.Progress,
 	}, cancel
 }
 
@@ -194,7 +197,7 @@ func WithCancel(c *Context) (*Context, context.CancelFunc) {
 		Audit: c.Audit, Approver: c.Approver, AutoApproveBelow: c.AutoApproveBelow,
 		Session: c.Session, Rules: c.Rules, ReadOnly: c.ReadOnly,
 		AcceptEdits: c.AcceptEdits, WorkRoot: c.WorkRoot, HookDecision: c.HookDecision, ToolName: c.ToolName,
-		Chooser: c.Chooser, Secret: c.Secret,
+		Chooser: c.Chooser, Secret: c.Secret, Progress: c.Progress,
 	}, cancel
 }
 

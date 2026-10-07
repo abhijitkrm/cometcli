@@ -176,7 +176,7 @@ func BroadcastMsgs(c *toolkit.Context, msgs tx.Msgs, memo string, meta map[strin
 				fmt.Fprintln(os.Stderr, "sequence drifted — rebuilding with fresh seq and retrying")
 				continue
 			}
-			return nil, fmt.Errorf("mempool rejected tx (code %d): %s", code, rawLog)
+			return nil, fmt.Errorf("mempool rejected tx (code %d): %s%s", code, rawLog, TxHint(rawLog))
 		}
 		// SYNC only means mempool-accepted; confirm the committed result.
 		final, err := tb.Confirm(c, hash)
@@ -196,13 +196,42 @@ func BroadcastMsgs(c *toolkit.Context, msgs tx.Msgs, memo string, meta map[strin
 			fmt.Fprintf(&b, "log:     %s\n", final.RawLog)
 		}
 		if final.Code != 0 {
-			return nil, fmt.Errorf("tx failed in block (code %d): %s", final.Code, final.RawLog)
+			return nil, fmt.Errorf("tx failed in block (code %d): %s%s", final.Code, final.RawLog, TxHint(final.RawLog))
 		}
 		return &toolkit.Result{Text: b.String(), Data: map[string]any{
 			"hash": hash, "height": final.Height, "code": final.Code,
 			"gas_used": final.GasUsed, "raw_log": final.RawLog, "doc": built.Doc,
 		}}, nil
 	}
+}
+
+// txHints maps SDK failure messages to their cause and the next step.
+var txHints = []struct{ match, hint string }{
+	{"validator still jailed", "the jail period isn't over yet — wait until jailed_until (wait.until condition=unjailable), then retry"},
+	{"validator not jailed", "the validator is already unjailed — verify with val.consensus"},
+	{"self delegation less than minimum", "self-delegation is below min_self_delegation — tx.delegate the difference, then retry"},
+	{"self-delegation is too low", "self-delegation is below min_self_delegation — tx.delegate the difference, then retry"},
+	{"cannot be unjailed", "check val.jail-check for what blocks the unjail"},
+	{"tombstoned", "the validator is tombstoned (double-sign) and can never be unjailed"},
+	{"validator does not exist", "the signing key isn't this validator's operator key — sign with the operator key"},
+	{"no validator", "the signing key isn't this validator's operator key — sign with the operator key"},
+	{"insufficient fee", "raise the gas price (gas-price) or fee — the node's minimum-gas-prices is higher"},
+	{"insufficient funds", "the signer account can't cover the amount plus fees — fund it"},
+	{"out of gas", "set a higher gas-limit (simulation underestimated)"},
+	{"signature verification failed", "wrong chain-id, account number or key — check the profile's chain_id and the signer"},
+	{"tx already in mempool", "an identical tx is pending — wait for it (tx.get) instead of resending"},
+	{"mempool is full", "the node's mempool is full — retry shortly or via another node"},
+}
+
+// TxHint explains a known transaction failure ("" when unknown).
+func TxHint(rawLog string) string {
+	low := strings.ToLower(rawLog)
+	for _, h := range txHints {
+		if strings.Contains(low, h.match) {
+			return "\n→ " + h.hint
+		}
+	}
+	return ""
 }
 
 // retrySeq reports whether the failure is a sequence mismatch worth one

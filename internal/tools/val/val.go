@@ -29,6 +29,8 @@ func Register(r *toolkit.Registry) {
 	r.Register(editTool{})
 	r.Register(voteTool{})
 	r.Register(createTool{})
+	r.Register(jailCheckTool{})
+	r.Register(consensusTool{})
 }
 
 type statusTool struct{}
@@ -247,6 +249,19 @@ func (unjailTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, erro
 	valoper, err := common.Valoper(c, a)
 	if err != nil {
 		return nil, err
+	}
+	// pre-flight: don't pay a fee for an unjail the chain will reject, or
+	// one that gets the validator jailed again because the node can't sign
+	if f, err := Gather(c, a); err == nil {
+		var hard []string
+		for _, b := range f.UnjailBlockers(c) {
+			if b.Hard {
+				hard = append(hard, b.Issue+" → "+b.Fix)
+			}
+		}
+		if len(hard) > 0 {
+			return nil, fmt.Errorf("not unjailing yet:\n  - %s", strings.Join(hard, "\n  - "))
+		}
 	}
 	return common.BroadcastMsgs(c, tx.Msgs{
 		&slashingv1beta1.MsgUnjail{ValidatorAddr: valoper},

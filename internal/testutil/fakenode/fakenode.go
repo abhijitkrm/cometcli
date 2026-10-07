@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
@@ -27,13 +28,16 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 
 	authv1beta1 "cosmossdk.io/api/cosmos/auth/v1beta1"
+	bankv1beta1 "cosmossdk.io/api/cosmos/bank/v1beta1"
 	abciv1beta1 "cosmossdk.io/api/cosmos/base/abci/v1beta1"
+	basev1beta1 "cosmossdk.io/api/cosmos/base/v1beta1"
 	secp256k1api "cosmossdk.io/api/cosmos/crypto/secp256k1"
 	distv1beta1 "cosmossdk.io/api/cosmos/distribution/v1beta1"
 	govv1 "cosmossdk.io/api/cosmos/gov/v1"
 	slashingv1beta1 "cosmossdk.io/api/cosmos/slashing/v1beta1"
 	stakingv1beta1 "cosmossdk.io/api/cosmos/staking/v1beta1"
 	txv1beta1 "cosmossdk.io/api/cosmos/tx/v1beta1"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/abhijitkrm/cometcli/internal/config"
 	"github.com/abhijitkrm/cometcli/internal/keys"
@@ -77,7 +81,13 @@ type Node struct {
 	Validator   *stakingv1beta1.Validator
 	SigningInfo *slashingv1beta1.ValidatorSigningInfo
 	Window      int64
-	Proposals   []*govv1.Proposal
+	// DowntimeJail is slashing's downtime_jail_duration.
+	DowntimeJail time.Duration
+	// SelfDelegation is the operator's own delegation (tokens).
+	SelfDelegation string
+	// Balance is the signer account's fee-denom balance.
+	Balance   string
+	Proposals []*govv1.Proposal
 
 	Simulations int
 	Broadcasts  []Tx     // accepted to the mempool, in order
@@ -95,6 +105,7 @@ func Start(t testing.TB, chainID string) *Node {
 		t.Fatal(err)
 	}
 	n := &Node{Addr: ln.Addr().String(), ChainID: chainID, AccNum: 7, SimGas: 100_000, Window: 10_000,
+		DowntimeJail: 10 * time.Minute, SelfDelegation: "1000000000000000000", Balance: "1000000000000000000",
 		committed: map[string]*abciv1beta1.TxResponse{}, height: 1000}
 	n.srv = grpc.NewServer()
 	authv1beta1.RegisterQueryServer(n.srv, &authSrv{n: n})
@@ -102,6 +113,7 @@ func Start(t testing.TB, chainID string) *Node {
 	stakingv1beta1.RegisterQueryServer(n.srv, &stakingSrv{n: n})
 	slashingv1beta1.RegisterQueryServer(n.srv, &slashingSrv{n: n})
 	distv1beta1.RegisterQueryServer(n.srv, &distSrv{})
+	bankv1beta1.RegisterQueryServer(n.srv, &bankSrv{n: n})
 	govv1.RegisterQueryServer(n.srv, &govSrv{n: n})
 	go func() { _ = n.srv.Serve(ln) }()
 	t.Cleanup(n.srv.Stop)
@@ -322,8 +334,32 @@ func (s *slashingSrv) SigningInfo(_ context.Context, r *slashingv1beta1.QuerySig
 func (s *slashingSrv) Params(context.Context, *slashingv1beta1.QueryParamsRequest) (*slashingv1beta1.QueryParamsResponse, error) {
 	s.n.mu.Lock()
 	defer s.n.mu.Unlock()
-	return &slashingv1beta1.QueryParamsResponse{Params: &slashingv1beta1.Params{SignedBlocksWindow: s.n.Window, MinSignedPerWindow: []byte("500000000000000000")}}, nil
+	return &slashingv1beta1.QueryParamsResponse{Params: &slashingv1beta1.Params{SignedBlocksWindow: s.n.Window, MinSignedPerWindow: []byte("500000000000000000"),
+		DowntimeJailDuration: durationpb.New(s.n.DowntimeJail)}}, nil
 }
+
+func (s *stakingSrv) Delegation(_ context.Context, r *stakingv1beta1.QueryDelegationRequest) (*stakingv1beta1.QueryDelegationResponse, error) {
+	s.n.mu.Lock()
+	defer s.n.mu.Unlock()
+	return &stakingv1beta1.QueryDelegationResponse{DelegationResponse: &stakingv1beta1.DelegationResponse{
+		Delegation: &stakingv1beta1.Delegation{DelegatorAddress: r.DelegatorAddr, ValidatorAddress: r.ValidatorAddr},
+		Balance:    &basev1beta1.Coin{Denom: "adex", Amount: s.n.SelfDelegation},
+	}}, nil
+}
+
+type bankSrv struct {
+	bankv1beta1.UnimplementedQueryServer
+	n *Node
+}
+
+func (s *bankSrv) Balance(_ context.Context, r *bankv1beta1.QueryBalanceRequest) (*bankv1beta1.QueryBalanceResponse, error) {
+	s.n.mu.Lock()
+	defer s.n.mu.Unlock()
+	return &bankv1beta1.QueryBalanceResponse{Balance: &basev1beta1.Coin{Denom: r.Denom, Amount: s.n.Balance}}, nil
+}
+
+// WithComet points a profile at a fake CometBFT RPC.
+func WithComet(p *config.Profile, c *Comet) { p.Endpoints.Comet = c.URL }
 
 type distSrv struct {
 	distv1beta1.UnimplementedQueryServer

@@ -27,6 +27,9 @@ const (
 	// EvNotice is a status line from the loop itself: continuation after
 	// an output cutoff, compaction, a refusal, a failed session save.
 	EvNotice EventKind = "notice"
+	// EvProgress is a live status line from a long-running tool (Tool,
+	// Text); front-ends show the latest one instead of printing each.
+	EvProgress EventKind = "progress"
 	// EvTodos carries the agent's updated task checklist (Todos).
 	EvTodos EventKind = "todos"
 	// EvApproval asks the human to approve a gated action; answer it via

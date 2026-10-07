@@ -66,6 +66,8 @@ func (p *Printer) Handle(e Event) {
 			p.streamed = false
 		}
 		fmt.Fprintln(p.Out, toolSt.Render(RenderTodos(e.Todos)))
+	case EvProgress:
+		fmt.Fprintf(p.Out, "%s %s\n", toolSt.Render("…"), toolSt.Render(e.Text))
 	case EvNotice:
 		if p.streamed {
 			fmt.Fprintln(p.Out)

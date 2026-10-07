@@ -641,6 +641,8 @@ func (a *Agent) toolCtx(ctx context.Context, t toolkit.Tool, args toolkit.Args) 
 	}
 	sub.AutoApproveBelow = a.Policy.AutoApproveBelow()
 	sub.ToolName = t.Name()
+	name := t.Name()
+	sub.Progress = func(s string) { a.emit(Event{Kind: EvProgress, Tool: name, Text: a.Redact.Text(s)}) }
 	if a.Policy.ReadOnly() {
 		sub.Approver = toolkit.DenyApprover
 	}
