@@ -91,6 +91,7 @@
 
 - id: cfg-prometheus-off
   title: Prometheus metrics disabled
+  kind: advisory
   severity: low
   match:
     all: ["config.prometheus == false", "profile.role == validator"]
@@ -127,6 +128,7 @@
 
 - id: upgrade-scheduled
   title: Upgrade scheduled (more than ~1 day away)
+  kind: advisory
   severity: low
   match:
     all: ["upgrade.pending == true", "upgrade.blocks_to_halt >= 20000"]

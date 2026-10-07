@@ -17,6 +17,7 @@
 
 - id: evm-json-rpc-disabled
   title: JSON-RPC disabled in app.toml on an RPC node
+  kind: advisory
   severity: medium
   chains: [cosmos-evm]
   match:
@@ -67,6 +68,7 @@
 
 - id: evm-validator-json-rpc-public
   title: Validator serves EVM JSON-RPC
+  kind: advisory
   severity: medium
   chains: [cosmos-evm]
   match:

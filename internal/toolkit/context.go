@@ -47,6 +47,9 @@ type Context struct {
 	// Progress, when set, receives status lines from long-running tools
 	// (shown live by front-ends instead of printed per update).
 	Progress func(string)
+	// GRPCFallback is set once chain queries go through
+	// endpoints.fallback_grpc because the node's own gRPC is down.
+	GRPCFallback bool
 	// HookDecision is a PreToolUse hook's verdict for this call:
 	// "allow" skips the prompt, "ask" forces one ("" = no opinion).
 	HookDecision string
@@ -55,7 +58,6 @@ type Context struct {
 	comet   *comet.Client
 	cometEr error
 	grpc    *grpcclient.Conn
-	grpcErr error
 	evm     *evmclient.Client
 	evmErr  error
 	host    host.Host
@@ -83,22 +85,32 @@ func (c *Context) Comet() (*comet.Client, error) {
 	return c.comet, c.cometEr
 }
 
-// GRPC lazily dials the Cosmos gRPC endpoint.
+// GRPC lazily dials the Cosmos gRPC endpoint. When the node's own
+// endpoint is down, chain queries go through endpoints.fallback_grpc
+// (another node of the same chain), so a dead node can still be
+// diagnosed. A failed dial isn't cached: a node restarted mid-wait is
+// picked up on the next call.
 func (c *Context) GRPC() (*grpcclient.Conn, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.Profile == nil {
 		return nil, errNoProfile
 	}
-	if c.grpc == nil && c.grpcErr == nil {
-		ep := c.Profile.Endpoints.GRPC
-		if ep == "" {
-			c.grpcErr = fmt.Errorf("profile %q has no grpc endpoint configured", c.Profile.Name)
-		} else {
-			c.grpc, c.grpcErr = grpcclient.Dial(c.Context, ep)
+	if c.grpc != nil {
+		return c.grpc, nil
+	}
+	ep := c.Profile.Endpoints.GRPC
+	if ep == "" {
+		return nil, fmt.Errorf("profile %q has no grpc endpoint configured", c.Profile.Name)
+	}
+	conn, err := grpcclient.Dial(c.Context, ep)
+	if err != nil && c.Profile.Endpoints.FallbackGRPC != "" {
+		if fb, ferr := grpcclient.Dial(c.Context, c.Profile.Endpoints.FallbackGRPC); ferr == nil {
+			conn, err, c.GRPCFallback = fb, nil, true
 		}
 	}
-	return c.grpc, c.grpcErr
+	c.grpc = conn
+	return conn, err
 }
 
 // EVM lazily connects the Ethereum JSON-RPC endpoint.
@@ -300,7 +312,7 @@ func (c *Context) Derive(ctx context.Context) *Context {
 		Session: c.Session, Rules: c.Rules, ReadOnly: c.ReadOnly,
 		AcceptEdits: c.AcceptEdits, WorkRoot: c.WorkRoot, HookDecision: c.HookDecision, ToolName: c.ToolName,
 		Chooser: c.Chooser, Secret: c.Secret, Progress: c.Progress,
-		comet: c.comet, cometEr: c.cometEr, grpc: c.grpc, grpcErr: c.grpcErr,
+		comet: c.comet, cometEr: c.cometEr, grpc: c.grpc, GRPCFallback: c.GRPCFallback,
 		evm: c.evm, evmErr: c.evmErr, host: c.host, hostErr: c.hostErr,
 	}
 }

@@ -28,6 +28,9 @@ type Case struct {
 	Title    string   `yaml:"title"`
 	Chains   []string `yaml:"chains,omitempty"` // cosmos-sdk, cosmos-evm (empty = all)
 	Severity string   `yaml:"severity"`         // critical | high | medium | low
+	// Kind is "incident" (default: something is wrong now) or "advisory"
+	// (hardening/hygiene — listed separately, never outranks an incident).
+	Kind     string   `yaml:"kind,omitempty"`
 	Symptoms string   `yaml:"symptoms"`
 	Match    struct {
 		All []string `yaml:"all,omitempty"`
@@ -57,6 +60,13 @@ func (c *Case) compile() error {
 	}
 	if _, ok := severityRank[c.Severity]; !ok {
 		return fmt.Errorf("case %s: severity %q: want critical, high, medium or low", c.ID, c.Severity)
+	}
+	switch c.Kind {
+	case "":
+		c.Kind = "incident"
+	case "incident", "advisory":
+	default:
+		return fmt.Errorf("case %s: kind %q: want incident or advisory", c.ID, c.Kind)
 	}
 	if len(c.Match.All)+len(c.Match.Any) == 0 {
 		return fmt.Errorf("case %s: match needs all or any conditions", c.ID)
@@ -188,7 +198,13 @@ func (b *Base) Match(s Signals, chain string) []Hit {
 			continue
 		}
 		if ok, matched := c.Matches(s); ok {
-			hits = append(hits, Hit{Case: c, Score: len(matched)*10 + severityRank[c.Severity]*3, Matched: matched})
+			// severity leads (a dead node beats a busy log), specificity
+			// breaks ties; advisories always sort after incidents
+			score := severityRank[c.Severity]*10 + len(matched)*7
+			if c.Kind == "advisory" {
+				score -= 1000
+			}
+			hits = append(hits, Hit{Case: c, Score: score, Matched: matched})
 		}
 	}
 	sort.Slice(hits, func(i, j int) bool {

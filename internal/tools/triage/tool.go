@@ -133,17 +133,32 @@ func Render(r *Report, hits []kb.Hit, prefix string) string {
 			fmt.Fprintf(&b, "  %s: %s\n", k, clip(r.Samples[k][0], 200))
 		}
 	}
-	if len(hits) == 0 {
+	var incidents []kb.Hit
+	var advisories []string
+	for _, h := range hits {
+		if h.Case.Kind == "advisory" {
+			advisories = append(advisories, h.Case.ID)
+		} else {
+			incidents = append(incidents, h)
+		}
+	}
+	if len(incidents) == 0 {
 		b.WriteString("matched cases: none — no known failure pattern. If something is still wrong, investigate from the signals, then record what you learn with kb.add.")
+		if len(advisories) > 0 {
+			fmt.Fprintf(&b, "\nadvisories (hardening, not incidents): %s", strings.Join(advisories, ", "))
+		}
 		return b.String()
 	}
-	b.WriteString("matched cases (best first):\n")
-	for i, h := range hits {
+	b.WriteString("matched cases (most severe first):\n")
+	for i, h := range incidents {
 		if i == 6 {
-			fmt.Fprintf(&b, "  … %d more\n", len(hits)-i)
+			fmt.Fprintf(&b, "  … %d more\n", len(incidents)-i)
 			break
 		}
 		fmt.Fprintf(&b, "  %d. %s [%s] %s — %s\n", i+1, h.Case.ID, h.Case.Severity, h.Case.Title, strings.Join(h.Matched, ", "))
+	}
+	if len(advisories) > 0 {
+		fmt.Fprintf(&b, "advisories (hardening, not incidents): %s\n", strings.Join(advisories, ", "))
 	}
 	b.WriteString("→ kb.show <id> for confirm steps, fix and verify; confirm before acting.")
 	return b.String()

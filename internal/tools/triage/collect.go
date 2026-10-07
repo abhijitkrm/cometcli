@@ -203,6 +203,7 @@ func collectChain(c *toolkit.Context, r *Report, set func(string, any)) error {
 	if err != nil {
 		return err
 	}
+	set("chain.via_fallback", c.GRPCFallback)
 	set("val.jailed", f.Jailed)
 	set("val.tombstoned", f.Tombstoned)
 	set("val.status", f.Status)

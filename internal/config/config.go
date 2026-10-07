@@ -138,6 +138,9 @@ type Endpoints struct {
 	GRPC  string `yaml:"grpc,omitempty"`  // host:port
 	LCD   string `yaml:"lcd,omitempty"`   // http(s)://host:1317
 	EVM   string `yaml:"evm,omitempty"`   // http(s)://host:8545 (RPC/sentry nodes only)
+	// FallbackGRPC is another node of the same chain (sentry, RPC node,
+	// public endpoint) used for chain queries while this node is down.
+	FallbackGRPC string `yaml:"fallback_grpc,omitempty"`
 }
 
 // Transport selects how host-plane operations reach the machine.

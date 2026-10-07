@@ -252,6 +252,12 @@ type Forensics struct {
 	Causes     map[string][]string // cause → sample lines
 	Counts     map[string]int
 	Process    string // container/service state (restarts, OOM kills)
+	// Lifecycle is the supervisor's record of stops, kills, deaths and
+	// starts since the window opened (docker events) — who stopped it.
+	Lifecycle []string
+	// Gaps are silences in the node's log (it logs every block): when it
+	// was down, and the last thing it said before.
+	Gaps []string
 	Disk       string
 	LogsSource string
 	Err        string
@@ -276,7 +282,7 @@ func Investigate(c *toolkit.Context, f *Facts) *Forensics {
 	var logCmd, procCmd string
 	switch svc.Type {
 	case "docker":
-		logCmd = fmt.Sprintf("docker logs --since %s --until %s %s 2>&1", since.UTC().Format(time.RFC3339), until.UTC().Format(time.RFC3339), common.ShellQ(svc.Unit))
+		logCmd = fmt.Sprintf("docker logs -t --since %s --until %s %s 2>&1", since.UTC().Format(time.RFC3339), until.UTC().Format(time.RFC3339), common.ShellQ(svc.Unit))
 		procCmd = fmt.Sprintf("docker inspect -f 'status={{.State.Status}} restarts={{.RestartCount}} oom_killed={{.State.OOMKilled}} started={{.State.StartedAt}}' %s", common.ShellQ(svc.Unit))
 		fo.LogsSource = "docker logs " + svc.Unit
 	case "systemd", "":
@@ -296,15 +302,27 @@ func Investigate(c *toolkit.Context, f *Facts) *Forensics {
 		if err != nil {
 			fo.Err = err.Error()
 		}
+		var prevT time.Time
+		var prevLine string
 		for _, line := range strings.Split(res.Output, "\n") {
-			if line = strings.TrimSpace(line); line == "" {
+			if line = logscan.Clean(line); line == "" {
 				continue
+			}
+			if ts, rest, ok := strings.Cut(line, " "); ok && svc.Type == "docker" {
+				if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
+					line = rest
+					if !prevT.IsZero() && t.Sub(prevT) > time.Minute && len(fo.Gaps) < 5 {
+						fo.Gaps = append(fo.Gaps, fmt.Sprintf("silent %s → %s (%s); last line before: %s",
+							prevT.UTC().Format("15:04:05"), t.UTC().Format("15:04:05"), t.Sub(prevT).Round(time.Second), clipLine(prevLine)))
+					}
+					prevT, prevLine = t, line
+				}
 			}
 			if jailLineRe.MatchString(line) && len(fo.JailLines) < 6 {
 				fo.JailLines = append(fo.JailLines, clipLine(line))
 			}
-			for _, cs := range logscan.Categories {
-				if cs.Slug != "jail" && cs.Re.MatchString(line) {
+			for _, cs := range logscan.Classify(line) {
+				if cs.Slug != "jail" {
 					fo.Counts[cs.Name]++
 					if len(fo.Causes[cs.Name]) < 3 {
 						fo.Causes[cs.Name] = append(fo.Causes[cs.Name], clipLine(line))
@@ -318,6 +336,9 @@ func Investigate(c *toolkit.Context, f *Facts) *Forensics {
 			fo.Process = strings.TrimSpace(res.Output)
 		}
 	}
+	if svc.Type == "docker" {
+		fo.Lifecycle = DockerLifecycle(ctx, h, svc.Unit, since)
+	}
 	if c.Profile.Home != "" {
 		if res, err := host.Exec(ctx, h, "df -P "+common.ShellQ(c.Profile.Home)+" 2>/dev/null | tail -1", 4096); err == nil {
 			if fs := strings.Fields(res.Output); len(fs) >= 5 {
@@ -326,6 +347,57 @@ func Investigate(c *toolkit.Context, f *Facts) *Forensics {
 		}
 	}
 	return fo
+}
+
+// stoppedBy summarizes an external stop (a SIGTERM/SIGKILL sent to the
+// container before it died), or "" if it died on its own.
+func stoppedBy(events []string) string {
+	for i, e := range events {
+		if strings.Contains(e, " kill ") || strings.HasSuffix(e, " stop") {
+			for _, d := range events[i:] {
+				if strings.Contains(d, " die") {
+					return e + " → " + d[strings.Index(d, " ")+1:]
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// DockerLifecycle lists a container's kill/stop/die/oom/start/restart
+// events since t, oldest first ("05:33:01 kill signal=15").
+func DockerLifecycle(ctx context.Context, h host.Host, container string, since time.Time) []string {
+	cmd := fmt.Sprintf("docker events --since %d --until %d --filter container=%s --format '{{.Time}} {{.Action}} exit={{index .Actor.Attributes \"exitCode\"}} signal={{index .Actor.Attributes \"signal\"}}'",
+		since.Unix(), time.Now().Unix(), common.ShellQ(container))
+	res, err := host.Exec(ctx, h, cmd, 64<<10)
+	if err != nil || res.Code != 0 {
+		return nil
+	}
+	var out []string
+	for _, l := range strings.Split(strings.TrimSpace(res.Output), "\n") {
+		f := strings.Fields(l)
+		if len(f) < 2 {
+			continue
+		}
+		switch f[1] {
+		case "kill", "stop", "die", "oom", "start", "restart", "pause", "unpause":
+		default:
+			continue
+		}
+		var ts int64
+		fmt.Sscan(f[0], &ts)
+		e := time.Unix(ts, 0).UTC().Format("15:04:05") + " " + f[1]
+		for _, kv := range f[2:] {
+			if !strings.HasSuffix(kv, "=") && !strings.HasSuffix(kv, "=<no value>") {
+				e += " " + kv
+			}
+		}
+		out = append(out, e)
+	}
+	if len(out) > 20 {
+		out = out[len(out)-20:]
+	}
+	return out
 }
 
 func clipLine(s string) string {
@@ -386,6 +458,12 @@ func (jailCheckTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, e
 	if f.Jailed || f.Tombstoned {
 		fo := Investigate(c, f)
 		data["process"], data["disk"] = fo.Process, fo.Disk
+		if len(fo.Lifecycle) > 0 {
+			data["lifecycle"] = fo.Lifecycle
+		}
+		if len(fo.Gaps) > 0 {
+			data["log_gaps"] = fo.Gaps
+		}
 		fmt.Fprintf(&b, "\nevidence (%s around the jailing):\n", orElse(fo.LogsSource, "logs"))
 		if fo.Err != "" {
 			fmt.Fprintf(&b, "  logs unavailable: %s\n", fo.Err)
@@ -405,7 +483,13 @@ func (jailCheckTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, e
 		}
 		sort.Slice(names, func(i, j int) bool { return fo.Counts[names[i]] > fo.Counts[names[j]] })
 		if len(names) == 0 {
-			b.WriteString("  no error patterns in that window — the node may have been down entirely (check the process state below)\n")
+			if stop := stoppedBy(fo.Lifecycle); stop == "" && len(fo.Gaps) > 0 {
+				b.WriteString("  no error patterns in that window — the log goes silent with no crash message (see log gap): the process was stopped or killed from outside (operator, deploy, host reboot, OOM/SIGKILL) or the host froze\n")
+			} else if stop != "" {
+				fmt.Fprintf(&b, "  no error patterns in that window — the container was STOPPED (%s), not crashed: find who/what stopped it (operator, deploy, host reboot, autoheal)\n", stop)
+			} else {
+				b.WriteString("  no error patterns in that window — the node may have been down entirely (check the process state below)\n")
+			}
 		}
 		var likely []string
 		for _, n := range names {
@@ -416,6 +500,12 @@ func (jailCheckTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, e
 			likely = append(likely, n)
 		}
 		data["likely_causes"] = likely
+		for _, g := range fo.Gaps {
+			fmt.Fprintf(&b, "  log gap (node down or hung): %s\n", g)
+		}
+		if len(fo.Lifecycle) > 0 {
+			fmt.Fprintf(&b, "  lifecycle (docker events, UTC): %s\n", strings.Join(fo.Lifecycle, " → "))
+		}
 		if fo.Process != "" {
 			fmt.Fprintf(&b, "  process: %s\n", fo.Process)
 		}

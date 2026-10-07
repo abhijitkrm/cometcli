@@ -12,6 +12,7 @@
 
 - id: cfg-min-gas-prices-empty
   title: minimum-gas-prices empty in app.toml
+  kind: advisory
   severity: medium
   match:
     all: ["app.min_gas_prices_empty == true"]
@@ -50,6 +51,7 @@
 
 - id: cfg-validator-api-exposed
   title: Validator exposes API/gRPC (attack surface, memory load)
+  kind: advisory
   severity: medium
   match:
     all: ["profile.role == validator", "app.api_enable == true"]
@@ -62,6 +64,7 @@
 
 - id: cfg-validator-pruning-nothing
   title: Validator keeps all state (pruning = nothing)
+  kind: advisory
   severity: low
   match:
     all: ["profile.role == validator", "app.pruning == nothing"]
@@ -72,6 +75,7 @@
 
 - id: cfg-no-persistent-peers
   title: No persistent peers or seeds configured
+  kind: advisory
   severity: medium
   match:
     all: ["config.persistent_peers == 0", "config.seeds == 0"]
@@ -82,6 +86,7 @@
 
 - id: cfg-double-sign-check-off
   title: double_sign_check_height disabled on a validator
+  kind: advisory
   severity: low
   match:
     all: ["profile.role == validator", "config.double_sign_check_height == 0"]

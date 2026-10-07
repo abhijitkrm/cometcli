@@ -61,6 +61,7 @@
 
 - id: state-statesync-left-enabled
   title: statesync.enable left on after the node synced
+  kind: advisory
   severity: low
   match:
     all: ["config.statesync_enable == true", "node.catching_up == false"]
@@ -71,6 +72,7 @@
 
 - id: state-no-snapshots-served
   title: Node does not produce state-sync snapshots
+  kind: advisory
   severity: low
   match:
     all: ["app.snapshot_interval == 0", "profile.role != validator"]
