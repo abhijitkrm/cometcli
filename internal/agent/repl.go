@@ -44,11 +44,36 @@ type Printer struct {
 	Out      io.Writer
 	MD       *glamour.TermRenderer
 	streamed bool
+	thinking bool
 }
 
 // Handle renders one event.
 func (p *Printer) Handle(e Event) {
+	if p.thinking && e.Kind != EvThinking {
+		fmt.Fprintln(p.Out)
+		p.thinking = false
+	}
 	switch e.Kind {
+	case EvThinking:
+		if !p.thinking {
+			fmt.Fprint(p.Out, toolSt.Render("∴ "))
+			p.thinking = true
+		}
+		fmt.Fprint(p.Out, toolSt.Render(e.Text))
+	case EvTodos:
+		if p.streamed {
+			fmt.Fprintln(p.Out)
+			p.streamed = false
+		}
+		fmt.Fprintln(p.Out, toolSt.Render(RenderTodos(e.Todos)))
+	case EvProgress:
+		fmt.Fprintf(p.Out, "%s %s\n", toolSt.Render("…"), toolSt.Render(e.Text))
+	case EvNotice:
+		if p.streamed {
+			fmt.Fprintln(p.Out)
+			p.streamed = false
+		}
+		fmt.Fprintf(p.Out, "%s %s\n", toolSt.Render("·"), toolSt.Render(e.Text))
 	case EvDelta:
 		p.streamed = true
 		fmt.Fprint(p.Out, e.Text)
@@ -82,9 +107,13 @@ func (r *REPL) Run() error {
 	pr := &Printer{Out: r.Out, MD: r.md}
 	a.OnEvent = pr.Handle
 
+	scope := "general"
+	if a.Node() {
+		scope = a.Ctx.Profile.Name
+	}
 	fmt.Fprintf(r.Out, "%s — %s/%s on %s · %s\n%s\n\n",
 		promptSt.Render("cometcli agent"), a.Provider.Name(), a.Model,
-		a.Ctx.Profile.Name, a.Policy, toolSt.Render("type /help for commands, ctrl+c cancels a running turn, /exit quits"))
+		scope, a.Policy, toolSt.Render("type /help for commands, ctrl+c cancels a running turn, /exit quits"))
 
 	sc := bufio.NewScanner(r.In)
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
@@ -142,7 +171,7 @@ func (r *REPL) slash(cmd string) (prompt string, quit bool) {
 	case "/exit", "/quit", "/q":
 		return "", true
 	case "/help":
-		fmt.Fprintln(r.Out, "Commands:\n"+CommandHelp+"\n  /exit                         quit")
+		fmt.Fprintln(r.Out, "Commands:\n"+HelpText(r.Agent)+"\n  /exit                         quit")
 		return "", false
 	}
 	res, err := RunCommand(r.Agent, r.Agent.Ctx, r.Agent.Reg, cmd)
@@ -154,6 +183,13 @@ func (r *REPL) slash(cmd string) (prompt string, quit bool) {
 	default:
 		if res.Text != "" {
 			fmt.Fprintln(r.Out, toolSt.Render(res.Text))
+		}
+		if res.Job != nil {
+			if txt, err := res.Job(r.Agent.Ctx); err != nil {
+				fmt.Fprintln(r.Out, errSt.Render(err.Error()))
+			} else if txt != "" {
+				fmt.Fprintln(r.Out, toolSt.Render(txt))
+			}
 		}
 	}
 	return res.Prompt, false
@@ -175,7 +211,7 @@ func CompactArgs(args map[string]any) string {
 	}
 	s := strings.Join(parts, " ")
 	if len(s) > 100 {
-		s = s[:100] + "…"
+		s = safeCut(s, 100) + "…"
 	}
 	return s
 }

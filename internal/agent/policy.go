@@ -16,19 +16,34 @@ const (
 	// autopilots if enabled), on-chain always confirms.
 	ModeOps Mode = "ops"
 	// ModeReadOnly: only observe/diagnose tools exist for the model;
-	// anything mutating is neither advertised nor runnable.
+	// anything mutating is neither advertised nor runnable (the shell
+	// stays, limited to read-only commands).
 	ModeReadOnly Mode = "readonly"
+	// ModeAcceptEdits: like ops, but file writes and edits inside the
+	// working root run without a prompt.
+	ModeAcceptEdits Mode = "accept-edits"
+	// ModeBypass: every local-change runs without a prompt. Transactions
+	// still always ask; key material and state resets stay refused.
+	ModeBypass Mode = "bypass"
 )
 
-// ParseMode accepts ops | readonly (plus "safe"/"ro" aliases).
+// Modes lists the approval postures in shift+tab cycling order.
+var Modes = []Mode{ModeOps, ModeAcceptEdits, ModeReadOnly, ModeBypass}
+
+// ParseMode accepts ops | readonly | accept-edits | bypass, plus Claude
+// Code's names (default, plan, acceptEdits, bypassPermissions).
 func ParseMode(s string) (Mode, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "", "ops", "rw":
+	case "", "ops", "rw", "default":
 		return ModeOps, nil
-	case "readonly", "read-only", "ro", "safe":
+	case "readonly", "read-only", "ro", "safe", "plan":
 		return ModeReadOnly, nil
+	case "accept-edits", "acceptedits", "edits":
+		return ModeAcceptEdits, nil
+	case "bypass", "bypasspermissions", "yolo":
+		return ModeBypass, nil
 	}
-	return "", fmt.Errorf("unknown mode %q — want ops or readonly", s)
+	return "", fmt.Errorf("unknown mode %q — want ops, readonly, accept-edits or bypass", s)
 }
 
 // Policy maps tool tiers to auto | confirm | deny for one session.
@@ -66,11 +81,14 @@ func (p Policy) Allows(t toolkit.Tier) bool {
 // AutoApproveBelow is the toolkit threshold this policy implies. on-chain
 // is never below it, so a tx always reaches the human.
 func (p Policy) AutoApproveBelow() toolkit.Tier {
-	if p.AutoLocal && !p.ReadOnly() {
+	if (p.AutoLocal || p.Mode == ModeBypass) && !p.ReadOnly() {
 		return toolkit.TierOnChain
 	}
 	return toolkit.TierLocalChange
 }
+
+// AcceptEdits reports whether in-root file edits skip the prompt.
+func (p Policy) AcceptEdits() bool { return p.Mode == ModeAcceptEdits }
 
 // Decision describes how a tier is handled: auto | confirm | deny.
 func (p Policy) Decision(t toolkit.Tier) string {
@@ -79,6 +97,8 @@ func (p Policy) Decision(t toolkit.Tier) string {
 		return "deny"
 	case t < p.AutoApproveBelow():
 		return "auto"
+	case t == toolkit.TierLocalChange && p.AcceptEdits():
+		return "confirm (edits in root: auto)"
 	default:
 		return "confirm"
 	}

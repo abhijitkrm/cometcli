@@ -21,6 +21,17 @@ const (
 	EvToolStart EventKind = "tool_start"
 	// EvToolResult fires after a tool runs (Err set on failure).
 	EvToolResult EventKind = "tool_result"
+	// EvThinking is streamed model reasoning (a summary, where the
+	// provider exposes one). Front-ends may show it dimmed or hide it.
+	EvThinking EventKind = "thinking"
+	// EvNotice is a status line from the loop itself: continuation after
+	// an output cutoff, compaction, a refusal, a failed session save.
+	EvNotice EventKind = "notice"
+	// EvProgress is a live status line from a long-running tool (Tool,
+	// Text); front-ends show the latest one instead of printing each.
+	EvProgress EventKind = "progress"
+	// EvTodos carries the agent's updated task checklist (Todos).
+	EvTodos EventKind = "todos"
 	// EvApproval asks the human to approve a gated action; answer it via
 	// Approval.Answer. Only emitted when the context uses EventApprover.
 	EvApproval EventKind = "approval"
@@ -36,6 +47,9 @@ type Event struct {
 	Args     map[string]any `json:"args,omitempty"`
 	Err      string         `json:"error,omitempty"`
 	Approval *Approval      `json:"approval,omitempty"`
+	Todos    []Todo         `json:"todos,omitempty"`
+	// Output is a multi-line preview of a tool's result (EvToolResult).
+	Output string `json:"output,omitempty"`
 }
 
 // Approval is a pending human decision. Answer it exactly once.

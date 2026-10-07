@@ -90,6 +90,19 @@ func ConsAddress(addr []byte, prefix string) (string, error) {
 }
 
 // Bech32ToHex converts a bech32 account address to 0x hex.
+// AccFromValoper converts a valoper address to its account address (same
+// bytes, the "valoper" suffix dropped from the prefix).
+func AccFromValoper(valoper string) (string, error) {
+	prefix, data, err := bech32.DecodeNoLimit(valoper)
+	if err != nil {
+		return "", err
+	}
+	if !strings.HasSuffix(prefix, "valoper") {
+		return "", fmt.Errorf("%s is not a valoper address", valoper)
+	}
+	return bech32.Encode(strings.TrimSuffix(prefix, "valoper"), data)
+}
+
 func Bech32ToHex(addr string) (string, error) {
 	_, data, err := bech32.DecodeNoLimit(addr)
 	if err != nil {

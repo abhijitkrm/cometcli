@@ -6,6 +6,7 @@ import (
 	authv1beta1 "cosmossdk.io/api/cosmos/auth/v1beta1"
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // DecodeAccount extracts (account_number, sequence) from an account Any.
@@ -25,6 +26,23 @@ func DecodeAccount(typeURL string, value []byte) (num, seq uint64, err error) {
 		return 0, 0, fmt.Errorf("decoding %s: %w", typeURL, err)
 	}
 	return acc.AccountNumber, acc.Sequence, nil
+}
+
+// DecodeAccountPubKey extracts the account's public key Any (nil when the
+// account has never signed a transaction).
+func DecodeAccountPubKey(typeURL string, value []byte) (*anypb.Any, error) {
+	raw := value
+	if typeURL == "/ethermint.types.v1.EthAccount" || typeURL == "/cosmos.evm.types.v1.EthAccount" {
+		raw = fieldBytes(value, 1)
+	}
+	var acc authv1beta1.BaseAccount
+	if err := proto.Unmarshal(raw, &acc); err != nil {
+		return nil, fmt.Errorf("decoding %s: %w", typeURL, err)
+	}
+	if acc.PubKey == nil || acc.PubKey.TypeUrl == "" {
+		return nil, nil
+	}
+	return &anypb.Any{TypeUrl: acc.PubKey.TypeUrl, Value: acc.PubKey.Value}, nil
 }
 
 // fieldBytes returns the bytes of a length-delimited field, or nil.

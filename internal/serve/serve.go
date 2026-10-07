@@ -378,5 +378,13 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, code, map[string]string{"error": err.Error()})
 		return
 	}
+	if res.Job != nil {
+		txt, err := res.Job(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+			return
+		}
+		res.Text = txt
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"text": res.Text, "prompt": res.Prompt})
 }

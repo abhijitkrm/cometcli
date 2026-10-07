@@ -159,8 +159,10 @@ func TestReadOnlyHidesAndBlocks(t *testing.T) {
 	if ran {
 		t.Fatal("local-change tool ran in readonly mode")
 	}
-	if len(prov.reqs[0].Tools) != 0 {
-		t.Fatalf("readonly advertised mutating tools: %+v", prov.reqs[0].Tools)
+	for _, td := range prov.reqs[0].Tools {
+		if td.Name != todoToolName && td.Name != toolSearchName && td.Name != taskToolName {
+			t.Fatalf("readonly advertised mutating tool %s", td.Name)
+		}
 	}
 }
 

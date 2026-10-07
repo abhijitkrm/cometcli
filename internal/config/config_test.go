@@ -64,3 +64,34 @@ func TestOverride(t *testing.T) {
 		t.Fatalf("override failed: %v", p.ChainID)
 	}
 }
+
+func TestAgentForMergesAndFallsBack(t *testing.T) {
+	c := &Config{
+		Active: "v1",
+		Agent:  AgentConf{Provider: "groq", Model: "openai/gpt-oss-120b", Effort: "low", Permissions: Permissions{Deny: []string{"bash(rm:*)"}}},
+		Profiles: map[string]*Profile{
+			"v1": {Agent: AgentConf{Model: "llama-3.3-70b-versatile", Permissions: Permissions{Allow: []string{"node.*"}}}},
+			"v2": {Agent: AgentConf{Provider: "gemini"}},
+		},
+	}
+	g := c.AgentFor(nil)
+	if g.Provider != "groq" || g.Model != "openai/gpt-oss-120b" {
+		t.Fatalf("general = %+v", g)
+	}
+	n := c.AgentFor(c.Profiles["v1"])
+	if n.Provider != "groq" || n.Model != "llama-3.3-70b-versatile" || n.Effort != "low" {
+		t.Fatalf("node override = %+v", n)
+	}
+	if len(n.Permissions.Deny) != 1 || len(n.Permissions.Allow) != 1 {
+		t.Fatalf("rules not accumulated: %+v", n.Permissions)
+	}
+	if m := c.AgentFor(c.Profiles["v2"]); m.Provider != "gemini" || m.Model != "" {
+		t.Fatalf("provider switch kept the old model: %+v", m)
+	}
+	// no global provider: general mode borrows the active profile's
+	c.Agent = AgentConf{}
+	c.Profiles["v1"].Agent.Provider = "gemini"
+	if g := c.AgentFor(nil); g.Provider != "gemini" {
+		t.Fatalf("fallback = %+v", g)
+	}
+}

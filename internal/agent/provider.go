@@ -26,9 +26,11 @@ type Msg struct {
 	ToolName string          // for role=tool
 	IsError  bool            // tool result flagged error
 	JSONArgs json.RawMessage // for role=assistant with calls
-	// RawSteps carries a provider's verbatim turn steps (Gemini Interactions
-	// echoes them back in stateless mode, preserving thought signatures).
-	RawSteps json.RawMessage
+	// RawSteps carries a provider's verbatim turn output (Gemini steps with
+	// thought signatures, Anthropic content blocks with thinking). It is
+	// replayed unchanged, but only to the provider named in RawProvider.
+	RawSteps    json.RawMessage
+	RawProvider string `json:",omitempty"`
 }
 
 // Call is a tool invocation requested by the model.
@@ -51,7 +53,38 @@ type Request struct {
 	System   string
 	Messages []Msg
 	Tools    []ToolDef
-	MaxTok   int
+	// MaxTok caps output tokens; 0 lets the provider pick its default.
+	MaxTok int
+	// Effort is the reasoning depth: low | medium | high | xhigh | max, or
+	// "" for the model default. Each provider maps it to its own knob.
+	Effort string
+	// OnThinking, when set, receives streamed reasoning text (providers
+	// that expose none never call it).
+	OnThinking func(string) `json:"-"`
+}
+
+// StopReason is why a model round ended, normalized across providers.
+type StopReason string
+
+const (
+	StopEnd       StopReason = "end"        // finished normally
+	StopToolUse   StopReason = "tool_use"   // wants tool results
+	StopMaxTokens StopReason = "max_tokens" // output cut off at MaxTok
+	StopRefusal   StopReason = "refusal"    // declined by a safety filter
+)
+
+// Usage is the token accounting of one model round.
+type Usage struct {
+	Input     int `json:"input"`      // prompt tokens, including cached
+	Output    int `json:"output"`     // generated tokens, including thinking
+	CacheRead int `json:"cache_read"` // prompt tokens served from cache
+}
+
+// Add accumulates u2 into u.
+func (u *Usage) Add(u2 Usage) {
+	u.Input += u2.Input
+	u.Output += u2.Output
+	u.CacheRead += u2.CacheRead
 }
 
 // Response is the model's reply.
@@ -59,7 +92,16 @@ type Response struct {
 	Text  string
 	Calls []Call
 	Done  bool // true when the model finished (no tool calls pending)
-	// RawSteps is the provider's raw step list for this turn (Gemini only).
+	// Stop is the normalized stop reason ("" when the provider didn't say).
+	Stop StopReason
+	// StopDetail explains a refusal when the provider gives a category.
+	StopDetail string
+	// Usage is this round's token accounting (zero when not reported).
+	Usage Usage
+	// Thinking is visible reasoning text, when the provider returns any.
+	Thinking string
+	// RawSteps is the provider's raw output for this turn, replayed
+	// verbatim in later requests (see Msg.RawSteps).
 	RawSteps json.RawMessage
 }
 
@@ -96,18 +138,24 @@ func NewProvider(ac config.AgentConf) (Provider, error) {
 	}
 	key := func(env string) string {
 		if ac.APIKeyEnv != "" {
-			return os.Getenv(ac.APIKeyEnv)
+			if v := os.Getenv(ac.APIKeyEnv); v != "" {
+				return v
+			}
+			return config.Credential(ac.APIKeyEnv)
 		}
 		if v := os.Getenv("COMETCLI_LLM_API_KEY"); v != "" {
 			return v
 		}
-		return os.Getenv(env)
+		if v := os.Getenv(env); v != "" {
+			return v
+		}
+		return config.Credential(env) // saved by `cometcli config set-key`
 	}
 	switch strings.ToLower(ac.Provider) {
 	case "anthropic", "claude":
 		return &anthropic{
 			key:   key("ANTHROPIC_API_KEY"),
-			model: def(ac.Model, "claude-sonnet-4-5"),
+			model: def(ac.Model, "claude-opus-5-5"),
 			base:  def(ac.BaseURL, "https://api.anthropic.com"),
 		}, nil
 	case "openai":
@@ -124,6 +172,15 @@ func NewProvider(ac config.AgentConf) (Provider, error) {
 			model: def(ac.Model, "llama-3.3-70b-versatile"),
 			base:  def(ac.BaseURL, "https://api.groq.com/openai"),
 		}, nil
+	case "openrouter":
+		// OpenRouter — https://openrouter.ai; openrouter/free routes each
+		// request to a free model that supports what it needs (tools…)
+		return &openai{
+			name:  "openrouter",
+			key:   key("OPENROUTER_API_KEY"),
+			model: def(ac.Model, "openrouter/free"),
+			base:  def(ac.BaseURL, "https://openrouter.ai/api"),
+		}, nil
 	case "gemini", "google":
 		// Gemini Interactions API — https://aistudio.google.com/apikey
 		return &gemini{
@@ -137,12 +194,13 @@ func NewProvider(ac config.AgentConf) (Provider, error) {
 			base = "http://localhost:11434" // ollama default
 		}
 		return &openai{
+			name:  "openai-compat",
 			key:   key("OLLAMA_API_KEY"),
 			model: def(ac.Model, "qwen3:32b"),
 			base:  base,
 		}, nil
 	case "off", "none", "":
-		return nil, fmt.Errorf("agent disabled — set agent.provider in the profile")
+		return nil, fmt.Errorf("no agent provider — run `cometcli config set agent.provider openrouter` (or groq, gemini, anthropic, openai, openai-compat), or set one in a profile")
 	default:
 		return nil, fmt.Errorf("unknown agent.provider %q", ac.Provider)
 	}

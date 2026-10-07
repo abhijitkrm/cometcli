@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Tier is the safety classification of a tool. It drives the approval
@@ -170,6 +171,20 @@ func (r *Registry) Register(t Tool) {
 	r.tools[t.Name()] = t
 }
 
+// Upsert adds or replaces a tool (dynamic tools: MCP servers).
+func (r *Registry) Upsert(t Tool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.tools[t.Name()] = t
+}
+
+// Remove drops a tool by name.
+func (r *Registry) Remove(name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.tools, name)
+}
+
 // Get fetches a tool by name.
 func (r *Registry) Get(name string) (Tool, bool) {
 	r.mu.RLock()
@@ -204,7 +219,17 @@ func (r *Registry) FuncSchemas() []map[string]any {
 }
 
 // ResolveName maps an agent-side function name back to a tool name.
-func ResolveName(fnName string) string { return strings.ReplaceAll(fnName, "__", ".") }
+func ResolveName(fnName string) string {
+	if strings.HasPrefix(fnName, "mcp__") {
+		return fnName // MCP tools keep their mcp__server__tool name
+	}
+	return strings.ReplaceAll(fnName, "__", ".")
+}
+
+// RuleHint is the approval-detail key carrying a suggested allow rule
+// for this kind of action. Keys starting with "_" are for front-ends, not
+// for display.
+const RuleHint = "_rule"
 
 // Approver asks the human for confirmation. It must return true to proceed.
 type Approver func(c *Context, prompt string, tier Tier, detail map[string]any) (bool, error)
@@ -219,6 +244,15 @@ func DenyApprover(_ *Context, _ string, tier Tier, _ map[string]any) (bool, erro
 func RequireApproval(c *Context, prompt string, tier Tier, detail map[string]any) error {
 	if c.Approver == nil {
 		return fmt.Errorf("approval required but no approver configured: %s", prompt)
+	}
+	// suggest an allow rule for "don't ask again" — never for transactions
+	if tier < TierOnChain && c.ToolName != "" {
+		if detail == nil {
+			detail = map[string]any{}
+		}
+		if _, ok := detail[RuleHint]; !ok {
+			detail[RuleHint] = c.ToolName
+		}
 	}
 	ok, err := c.Approver(c, prompt, tier, detail)
 	if err != nil {
@@ -235,4 +269,68 @@ func RequireApproval(c *Context, prompt string, tier Tier, detail map[string]any
 		return fmt.Errorf("denied: %s", prompt)
 	}
 	return nil
+}
+
+// Dynamic is implemented by tools whose risk depends on their arguments
+// (a shell command, a file path). They gate themselves via Context.Check,
+// so the agent advertises them even in read-only mode.
+type Dynamic interface {
+	DynamicTier() bool
+}
+
+// IsDynamic reports whether t decides its tier per call.
+func IsDynamic(t Tool) bool {
+	d, ok := t.(Dynamic)
+	return ok && d.DynamicTier()
+}
+
+// AgentOnly is implemented by general-purpose tools (bash, read, edit…)
+// that exist for the agent loop only: they get no CLI subcommand and are
+// not exported over MCP, where the client has its own equivalents.
+type AgentOnly interface {
+	AgentOnly() bool
+}
+
+// IsAgentOnly reports whether t is agent-only.
+func IsAgentOnly(t Tool) bool {
+	a, ok := t.(AgentOnly)
+	return ok && a.AgentOnly()
+}
+
+// Timeouter lets a tool set its own deadline per call (the default is 90s).
+type Timeouter interface {
+	Timeout(args Args) time.Duration
+}
+
+// OutputLimiter lets a tool raise how much of its output reaches the model.
+type OutputLimiter interface {
+	OutputLimit() int
+}
+
+// OperatorOnly is implemented by tools the agent must never call — key
+// management, whose output (a generated mnemonic) or input (a mnemonic
+// read from stdin) must stay between the operator and their terminal.
+// They remain CLI subcommands.
+type OperatorOnly interface {
+	OperatorOnly() bool
+}
+
+// IsOperatorOnly reports whether t is operator-only.
+func IsOperatorOnly(t Tool) bool {
+	o, ok := t.(OperatorOnly)
+	return ok && o.OperatorOnly()
+}
+
+// CallTimeout is how long one call of t may take: its own Timeout() when
+// it has one; on-chain tools get 10 minutes, since the clock also runs
+// while the operator reads the approval prompt and the signer may be a
+// slow container; everything else 90 seconds.
+func CallTimeout(t Tool, args Args) time.Duration {
+	if to, ok := t.(Timeouter); ok {
+		return to.Timeout(args)
+	}
+	if t.Tier() == TierOnChain {
+		return 10 * time.Minute
+	}
+	return 90 * time.Second
 }

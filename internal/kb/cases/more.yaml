@@ -1,0 +1,158 @@
+- id: val-signing-degraded
+  title: Validator intermittently missing blocks
+  severity: medium
+  match:
+    all: ["val.in_set == true", "val.signed_recent_pct >= 50", "val.signed_recent_pct < 90"]
+  confirm:
+    - "val.consensus window=100 — pattern of misses; host.load_per_cpu, logs.clock, node.peers"
+  causes:
+    - overloaded host or slow disk, flaky network to other validators, clock drift, remote signer latency
+  fix:
+    - "[read] node.consensus round info; bash: iostat/top on the host"
+    - "[change] remove load / improve peers (sentries) / fix NTP"
+  verify:
+    - "val.signed_recent_pct >= 98 over a few hundred blocks"
+  test:
+    signals: {val.in_set: true, val.signed_recent_pct: 75}
+
+- id: val-in-set-while-syncing
+  title: Validator in the active set while its node is catching up
+  severity: critical
+  symptoms: every block missed until synced; jail risk grows each block
+  match:
+    all: ["val.in_set == true", "node.catching_up == true"]
+  fix:
+    - "[read] wait.until synced and watch val.downtime_budget_used_pct"
+    - "[change] if it won't make it in time, the fastest sync path (snap.statesync on a NEW data dir) — never a second signer"
+  warnings:
+    - do not bring up a backup node with the same key while this one runs
+  test:
+    signals: {val.in_set: true, node.catching_up: true}
+
+- id: node-restarted-recently
+  title: Node restarted in the last few minutes
+  severity: low
+  match:
+    all: ["proc.uptime_s < 300", "proc.restarts > 0"]
+  confirm:
+    - "node.logs from before the restart (since=15m) — crash or manual?"
+  fix:
+    - "[read] find who/what restarted it; watch for a crash loop (re-triage in 10 min)"
+  test:
+    signals: {proc.uptime_s: 120, proc.restarts: 1}
+
+- id: node-killed-sigkill
+  title: Node exited with 137 (SIGKILL — OOM killer or forced stop)
+  explains: [node-process-down, node-rpc-down, evm-rpc-down, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
+  severity: high
+  match:
+    all: ["proc.running == false", "proc.exit_code == 137"]
+  confirm:
+    - "bash: dmesg -T | grep -i -E 'killed process|oom'; docker events / journalctl for a stop timeout"
+  causes:
+    - kernel OOM killer; a stop that exceeded the stop timeout (container stop -t / TimeoutStopSec)
+  fix:
+    - "[change] OOM: follow host-oom-killed; stop timeout: raise it so the node flushes state on shutdown"
+  test:
+    signals: {proc.running: false, proc.exit_code: 137}
+
+- id: node-exit-config-error
+  title: Node exits at startup with a config / flag error
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
+  severity: critical
+  match:
+    all: ["proc.running == false", "logs.config_parse > 0"]
+  fix:
+    - "[read] node.logs — the exact field/flag"
+    - "[change] fix config (edit) or the service's command flags; start"
+  test:
+    signals: {proc.running: false, logs.config_parse: 1, proc.exit_code: 1}
+
+- id: host-disk-free-low
+  title: Less than 20 GB free on the data volume
+  severity: high
+  match:
+    all: ["host.disk_free_gb < 20"]
+  fix:
+    - "[read] snap.prune; du of data dirs"
+    - "[change] prune / clean / grow the volume before the next state growth or upgrade migration"
+  warnings:
+    - upgrades often run store migrations that need extra free space
+  test:
+    signals: {host.disk_free_gb: 8}
+
+- id: cfg-grpc-disabled
+  title: gRPC disabled in app.toml (queries and cometcli chain tools fail)
+  severity: medium
+  match:
+    all: ["app.grpc_enable == false"]
+  fix:
+    - "[change] [grpc] enable = true, address 127.0.0.1:9090 on validators; restart"
+  test:
+    signals: {app.grpc_enable: false}
+
+- id: cfg-prometheus-off
+  title: Prometheus metrics disabled
+  kind: advisory
+  severity: low
+  match:
+    all: ["config.prometheus == false", "profile.role == validator"]
+  fix:
+    - "[change] [instrumentation] prometheus = true (listen on localhost or a private interface) and scrape it"
+  test:
+    signals: {config.prometheus: false, profile.role: validator}
+
+- id: val-local-privval-errors
+  title: Local priv_validator errors (file key)
+  explains: [val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
+  severity: high
+  match:
+    all: ["config.remote_signer == false", "logs.privval > 0"]
+  confirm:
+    - "sec.perms on config/priv_validator_key.json and data/priv_validator_state.json (owner, mode, read-only fs?)"
+  causes:
+    - key or state file unreadable / not writable by the node user (ownership, mode, read-only filesystem)
+    - "'no SignBytes found': priv_validator_state.json was hand-edited (or restored) to a height/round/step without its sign bytes — the signer refuses that exact HRS and recovers on the next height"
+  fix:
+    - "[change] fix ownership/permissions so the node user can read the key and write the state file; restart"
+  warnings:
+    - never edit or reset priv_validator_state.json to silence errors
+  test:
+    signals: {config.remote_signer: false, logs.privval: 6}
+
+- id: evm-indexer-behind
+  title: EVM endpoint reports syncing while the node is synced
+  severity: medium
+  chains: [cosmos-evm]
+  match:
+    all: ["evm.syncing == true", "node.catching_up == false"]
+  fix:
+    - "[read] evm.syncing details; logs.evm_rpc samples"
+    - "[change] restart the node; if persistent, rebuild the EVM indexer per the chain docs"
+  test:
+    signals: {evm.syncing: true, node.catching_up: false}
+
+- id: upgrade-scheduled
+  title: Upgrade scheduled (more than ~1 day away)
+  kind: advisory
+  severity: low
+  match:
+    all: ["upgrade.pending == true", "upgrade.blocks_to_halt >= 20000"]
+  fix:
+    - "[read] upgrade.check — release notes, required version, config changes"
+    - "[change] upgrade.prepare well before the height"
+  test:
+    signals: {upgrade.pending: true, upgrade.blocks_to_halt: 80000}
+
+- id: node-behind-but-not-reporting
+  title: Node far behind while reporting catching_up=false and peers present
+  severity: high
+  match:
+    all: ["node.stalled == true", "node.peers > 0"]
+    any: ["logs.apphash > 0", "logs.panic > 0", "logs.db_corrupt > 0", "logs.disk_io > 0"]
+  confirm:
+    - "node.logs around the stall height — the block it is stuck on"
+  fix:
+    - "[read] kb.show the matching state/host case (apphash, db corruption, disk)"
+  test:
+    signals: {node.stalled: true, node.peers: 6, logs.apphash: 2}

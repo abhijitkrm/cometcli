@@ -1,0 +1,97 @@
+- id: upgrade-halt-binary-missing
+  title: Chain halted at an upgrade height — new binary not running
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, state-apphash-mismatch]
+  severity: critical
+  symptoms: logs show UPGRADE "<name>" NEEDED at height; node stopped or crash-looping
+  match:
+    any: ["logs.upgrade_needed > 0", "upgrade.blocks_to_halt <= 0"]
+  confirm:
+    - "logs.upgrade_name; chain.upgrade-plan; upgrade.check (local version vs required)"
+    - "is the whole chain halted? (other validators' heights / a public RPC) — an upgrade halt is chain-wide"
+  fix:
+    - "[read] upgrade.check — find the release for the plan name"
+    - "[change] upgrade.prepare (download + checksum verify + stage for cosmovisor, or swap the binary/image)"
+    - "[change] node.service restart with the new binary"
+    - "[change] ONLY if the chain's coordinators announce skipping this upgrade: restart with --unsafe-skip-upgrades <height> (needs ≥2/3 of voting power doing the same); remove the flag afterwards"
+  verify:
+    - "node.block_age_s < 30 after the network reaches 2/3; val.consensus"
+  warnings:
+    - never skip the upgrade by restarting the old binary with --unsafe-skip-upgrades unless the chain coordinators say so
+  test:
+    signals: {logs.upgrade_needed: 3, logs.upgrade_name: v2.0.0, proc.restarts: 4}
+
+- id: upgrade-imminent
+  title: Scheduled upgrade soon — binary must be staged
+  severity: high
+  match:
+    all: ["upgrade.pending == true", "upgrade.blocks_to_halt > 0", "upgrade.blocks_to_halt < 20000"]
+  confirm:
+    - "upgrade.check — is the new binary staged (cosmovisor upgrades/<name>/bin)?"
+  fix:
+    - "[change] upgrade.prepare now"
+    - "[read] upgrade.watch near the height"
+  verify:
+    - "upgrade.check shows staged and checksum-verified"
+  test:
+    signals: {upgrade.pending: true, upgrade.blocks_to_halt: 5000, upgrade.name: v2.0.0}
+
+- id: upgrade-binary-too-early
+  title: New binary started before the upgrade height
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, state-apphash-mismatch]
+  severity: critical
+  match:
+    any: ["logs.binary_early > 0"]
+  confirm:
+    - "node.logs grep 'BINARY UPDATED BEFORE TRIGGER'; upgrade.check"
+  fix:
+    - "[change] switch back to the previous binary until the upgrade height, then switch"
+  test:
+    signals: {logs.binary_early: 1}
+
+- id: upgrade-halt-height-set
+  title: halt-height configured in app.toml
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
+  severity: high
+  match:
+    all: ["app.halt_height > 0"]
+  confirm:
+    - "node.config app.toml halt-height"
+  causes:
+    - left over from a manual coordinated upgrade
+  fix:
+    - "[change] set halt-height = 0 after the coordinated halt is done; restart"
+  test:
+    signals: {app.blocks_to_halt_height: 200, app.halt_height: 1200}
+
+- id: upgrade-version-behind
+  title: Upgrade passed but node still on an older version
+  severity: high
+  match:
+    all: ["upgrade.pending == false", "logs.apphash > 0", "node.catching_up == false"]
+  confirm:
+    - "node.version-check; compare with the version other validators run"
+  fix:
+    - "[change] upgrade.prepare the current release; restart"
+  test:
+    signals: {upgrade.pending: false, logs.apphash: 2, node.catching_up: false}
+
+- id: upgrade-replay-past-upgrade
+  title: Node syncing from an old height halts at an upgrade the chain already passed
+  explains: [upgrade-halt-binary-missing, node-crash-loop, node-process-down, node-rpc-down, node-restarted-recently, node-catching-up, node-stalled, evm-rpc-down, val-jailed-downtime, val-jailed-waiting-period, val-not-signing]
+  severity: critical
+  symptoms: a catching-up node logs UPGRADE "x" NEEDED, but the chain has no pending plan — it is replaying history
+  match:
+    all: ["logs.upgrade_needed > 0", "upgrade.pending == false"]
+  confirm:
+    - "logs.upgrade_name and the halt height vs the chain's current height (far above it)"
+    - "how did the network pass that height: an upgrade binary, or a coordinated --unsafe-skip-upgrades?"
+  causes:
+    - block-syncing from genesis or an old snapshot with only the latest binary
+  fix:
+    - "[change] the network applied the upgrade: run each historical binary up to its upgrade height (cosmovisor with every upgrades/<name>/bin staged), or"
+    - "[change] the network skipped it: start with --unsafe-skip-upgrades <height> like the validators did"
+    - "[change] or avoid replay entirely: snap.statesync / a recent trusted snapshot"
+  verify:
+    - "node.height passes the upgrade height; wait.until synced"
+  test:
+    signals: {logs.upgrade_needed: 2, upgrade.pending: false, node.catching_up: true}

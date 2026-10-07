@@ -106,6 +106,10 @@ func (prepareTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, err
 			repo, tag, binary, strings.TrimPrefix(tag, "v"), runtime.GOOS, runtime.GOARCH)
 	}
 	detail := map[string]any{"url": url, "upgrade": name, "binary": binary}
+	checksum := strings.ToLower(strings.TrimSpace(a.String("checksum", "")))
+	if checksum == "" {
+		detail["warning"] = "no checksum given — the downloaded binary will NOT be verified"
+	}
 	if err := c.Approve(fmt.Sprintf("download %s and stage for cosmovisor upgrade %q", url, name),
 		toolkit.TierLocalChange, detail); err != nil {
 		return nil, err
@@ -114,21 +118,24 @@ func (prepareTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, err
 	if err != nil {
 		return nil, err
 	}
-	// download on the host, extract, verify checksum, stage into cosmovisor
+	// download on the host, find the binary anywhere in the archive
+	// (releases often nest it under bin/), verify the checksum against the
+	// archive or the binary (releases publish either), then stage it
 	dir := fmt.Sprintf("%s/cosmovisor/upgrades/%s/bin", c.Profile.Home, name)
 	cmd := fmt.Sprintf(`set -e
-mkdir -p %s
-cd "$(mktemp -d)"
-curl -fsSL %s -o asset.tar.gz
+work=$(mktemp -d); trap 'rm -rf "$work"' EXIT; cd "$work"
+sha() { (sha256sum "$1" 2>/dev/null || shasum -a 256 "$1") | cut -d' ' -f1; }
+curl -fsSL %[1]s -o asset.tar.gz
 tar xzf asset.tar.gz
-`, common.ShellQ(dir), common.ShellQ(url))
-	if cs := a.String("checksum", ""); cs != "" {
-		// sum goes to a file so a failing first tool doesn't consume the
-		// pipe before the fallback runs
-		cmd += fmt.Sprintf("printf '%%s  %%s\\n' %s %s > expected.sum && (sha256sum -c expected.sum 2>/dev/null || shasum -a 256 -c expected.sum)\n",
-			common.ShellQ(cs), common.ShellQ("./"+binary))
-	}
-	cmd += fmt.Sprintf("install -m 0755 ./%s %s/\n", common.ShellQ(binary), common.ShellQ(dir))
+bin=$(find . -type f -name %[2]s | head -1)
+[ -n "$bin" ] || { echo "no %[2]s binary in the archive" >&2; exit 3; }
+want=%[3]s
+if [ -n "$want" ] && [ "$(sha asset.tar.gz)" != "$want" ] && [ "$(sha "$bin")" != "$want" ]; then
+  echo "checksum mismatch: archive $(sha asset.tar.gz), binary $(sha "$bin"), expected $want" >&2; exit 4
+fi
+mkdir -p %[4]s
+install -m 0755 "$bin" %[4]s/%[2]s
+`, common.ShellQ(url), common.ShellQ(binary), common.ShellQ(checksum), common.ShellQ(dir))
 	out, code, err := h.Run(c, cmd)
 	c.LogShell("upgrade.prepare "+name, code)
 	if err != nil {
@@ -137,9 +144,13 @@ tar xzf asset.tar.gz
 	// verify sha256 of staged binary for the audit trail
 	sum, _, _ := h.Run(c, fmt.Sprintf("shasum -a 256 %s/%s 2>/dev/null || sha256sum %s/%s",
 		common.ShellQ(dir), binary, common.ShellQ(dir), binary))
+	text := fmt.Sprintf("staged %s → %s\nsha256: %s", url, dir+"/"+binary, sha256Str(sum))
+	if checksum == "" {
+		text += "\nUNVERIFIED: no checksum was given — compare the sha256 above with the release's published checksum before the upgrade height"
+	}
 	return &toolkit.Result{
-		Text: fmt.Sprintf("staged %s → %s\nsha256: %s", url, dir+"/"+binary, strings.TrimSpace(sum)),
-		Data: map[string]any{"dir": dir, "sha256": sha256Str(sum)},
+		Text: text,
+		Data: map[string]any{"dir": dir, "sha256": sha256Str(sum), "verified": checksum != ""},
 	}, nil
 }
 

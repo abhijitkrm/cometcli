@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -87,21 +86,97 @@ func (o *openai) body(r *Request) map[string]any {
 	if len(tools) > 0 {
 		body["tools"] = tools
 	}
+	if r.MaxTok > 0 {
+		if o.hosted() {
+			body["max_completion_tokens"] = r.MaxTok
+		} else {
+			body["max_tokens"] = r.MaxTok // llama.cpp / older vLLM / Ollama
+		}
+	}
+	if r.Effort != "" && o.hosted() {
+		// local OpenAI-compatible servers may reject unknown fields
+		body["reasoning_effort"] = oaiEffort(r.Effort)
+	}
+	if o.Name() == "openrouter" {
+		// OpenRouter's normalized knob: always ask for the reasoning
+		// stream (models without reasoning ignore it)
+		rs := map[string]any{"enabled": true}
+		if r.Effort != "" {
+			rs["effort"] = oaiEffort(r.Effort)
+		}
+		body["reasoning"] = rs
+	}
 	return body
 }
 
+// hosted reports whether this is OpenAI or Groq proper (vs a local
+// OpenAI-compatible server that may lack newer request fields).
+func (o *openai) hosted() bool {
+	n := o.Name()
+	return n == "openai" || n == "groq"
+}
+
+// oaiEffort maps the neutral effort scale onto reasoning_effort, which
+// tops out at "high" on OpenAI and Groq reasoning models.
+func oaiEffort(e string) string {
+	switch e {
+	case "xhigh", "max":
+		return "high"
+	}
+	return e
+}
+
+func oaiStop(finish string) StopReason {
+	switch finish {
+	case "stop":
+		return StopEnd
+	case "tool_calls", "function_call":
+		return StopToolUse
+	case "length":
+		return StopMaxTokens
+	case "content_filter":
+		return StopRefusal
+	}
+	return ""
+}
+
+// oaiUsage is the chat-completions usage object.
+type oaiUsage struct {
+	Prompt     int `json:"prompt_tokens"`
+	Completion int `json:"completion_tokens"`
+	Details    struct {
+		Cached int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details"`
+}
+
+func (u *oaiUsage) usage() Usage {
+	if u == nil {
+		return Usage{}
+	}
+	return Usage{Input: u.Prompt, Output: u.Completion, CacheRead: u.Details.Cached}
+}
+
 func (o *openai) post(ctx context.Context, body map[string]any) (*http.Response, error) {
-	raw, _ := json.Marshal(body)
-	url := strings.TrimSuffix(o.base, "/") + "/v1/chat/completions"
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(raw))
+	raw, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("content-type", "application/json")
+	hdr := map[string]string{}
 	if o.key != "" {
-		req.Header.Set("authorization", "Bearer "+o.key)
+		hdr["authorization"] = "Bearer " + o.key
 	}
-	return o.client().Do(req)
+	if o.Name() == "openrouter" {
+		hdr["x-title"] = "cometcli" // app attribution on openrouter.ai
+	}
+	resp, err := doHTTP(ctx, o.client(), strings.TrimSuffix(o.base, "/")+"/v1/chat/completions", raw, hdr)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode/100 != 2 {
+		defer resp.Body.Close()
+		return nil, apiError(o.Name(), resp)
+	}
+	return resp, nil
 }
 
 func (o *openai) Chat(ctx context.Context, r *Request) (*Response, error) {
@@ -113,11 +188,15 @@ func (o *openai) Chat(ctx context.Context, r *Request) (*Response, error) {
 	var out struct {
 		Choices []struct {
 			Message struct {
-				Content   string        `json:"content"`
-				ToolCalls []oaiToolCall `json:"tool_calls"`
+				Content   string `json:"content"`
+				Reasoning string `json:"reasoning"`
+				// DeepSeek / vLLM / some OpenRouter upstreams
+				ReasoningContent string        `json:"reasoning_content"`
+				ToolCalls        []oaiToolCall `json:"tool_calls"`
 			} `json:"message"`
 			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
+		Usage *oaiUsage `json:"usage"`
 		Error *struct {
 			Message string `json:"message"`
 		} `json:"error"`
@@ -132,7 +211,13 @@ func (o *openai) Chat(ctx context.Context, r *Request) (*Response, error) {
 		return nil, fmt.Errorf("%s: no choices", o.Name())
 	}
 	ch := out.Choices[0].Message
-	res := &Response{Text: ch.Content, Done: len(ch.ToolCalls) == 0}
+	if ch.Reasoning == "" {
+		ch.Reasoning = ch.ReasoningContent
+	}
+	res := &Response{
+		Text: ch.Content, Thinking: ch.Reasoning, Done: len(ch.ToolCalls) == 0,
+		Stop: oaiStop(out.Choices[0].FinishReason), Usage: out.Usage.usage(),
+	}
 	for _, tc := range ch.ToolCalls {
 		res.Calls = append(res.Calls, Call{
 			ID: tc.ID, Name: tc.Function.Name, Args: json.RawMessage(tc.Function.Arguments),
@@ -148,29 +233,34 @@ func (o *openai) Chat(ctx context.Context, r *Request) (*Response, error) {
 func (o *openai) Stream(ctx context.Context, r *Request, onText func(string)) (*Response, error) {
 	body := o.body(r)
 	body["stream"] = true
+	if o.Name() == "openai" {
+		body["stream_options"] = map[string]any{"include_usage": true}
+	}
 	resp, err := o.post(ctx, body)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode/100 != 2 {
-		return nil, apiError(o.Name(), resp)
-	}
 	type partial struct {
 		id, name string
 		args     strings.Builder
 	}
 	calls := map[int]*partial{}
-	var text strings.Builder
+	var text, reasoning strings.Builder
+	var finish string
+	var usage *oaiUsage
 	err = readSSE(resp.Body, func(data string) error {
 		if data == "[DONE]" {
 			return nil
 		}
 		var ch struct {
 			Choices []struct {
-				Delta struct {
-					Content   string `json:"content"`
-					ToolCalls []struct {
+				FinishReason string `json:"finish_reason"`
+				Delta        struct {
+					Content          string `json:"content"`
+					Reasoning        string `json:"reasoning"`
+					ReasoningContent string `json:"reasoning_content"`
+					ToolCalls        []struct {
 						Index    int    `json:"index"`
 						ID       string `json:"id"`
 						Function struct {
@@ -180,6 +270,10 @@ func (o *openai) Stream(ctx context.Context, r *Request, onText func(string)) (*
 					} `json:"tool_calls"`
 				} `json:"delta"`
 			} `json:"choices"`
+			Usage *oaiUsage `json:"usage"`
+			XGroq *struct {
+				Usage *oaiUsage `json:"usage"`
+			} `json:"x_groq"` // Groq reports stream usage here
 			Error *struct {
 				Message string `json:"message"`
 			} `json:"error"`
@@ -190,10 +284,27 @@ func (o *openai) Stream(ctx context.Context, r *Request, onText func(string)) (*
 		if ch.Error != nil {
 			return fmt.Errorf("%s: %s", o.Name(), ch.Error.Message)
 		}
+		if ch.Usage != nil {
+			usage = ch.Usage
+		} else if ch.XGroq != nil && ch.XGroq.Usage != nil {
+			usage = ch.XGroq.Usage
+		}
 		if len(ch.Choices) == 0 {
 			return nil
 		}
+		if f := ch.Choices[0].FinishReason; f != "" {
+			finish = f
+		}
 		d := ch.Choices[0].Delta
+		if d.Reasoning == "" {
+			d.Reasoning = d.ReasoningContent
+		}
+		if d.Reasoning != "" {
+			reasoning.WriteString(d.Reasoning)
+			if r.OnThinking != nil {
+				r.OnThinking(d.Reasoning)
+			}
+		}
 		if d.Content != "" {
 			text.WriteString(d.Content)
 			onText(d.Content)
@@ -217,7 +328,7 @@ func (o *openai) Stream(ctx context.Context, r *Request, onText func(string)) (*
 	if err != nil {
 		return nil, err
 	}
-	res := &Response{Text: text.String()}
+	res := &Response{Text: text.String(), Thinking: reasoning.String(), Stop: oaiStop(finish), Usage: usage.usage()}
 	idx := make([]int, 0, len(calls))
 	for i := range calls {
 		idx = append(idx, i)

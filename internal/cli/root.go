@@ -6,10 +6,12 @@ package cli
 import (
 	"bufio"
 	"fmt"
+	"golang.org/x/term"
 	"io"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -28,38 +30,53 @@ var (
 // NewRoot builds the root command and registers all subcommands.
 func NewRoot(reg *toolkit.Registry, extra []*cobra.Command) *cobra.Command {
 	root := &cobra.Command{
-		Use:   "cometcli",
-		Short: "Agentic SRE terminal for Cosmos-EVM validators",
-		Long: `cometcli — an agentic SRE terminal for Cosmos-EVM validators.
+		Use:   "cometcli [prompt]",
+		Short: "Agentic SRE terminal — general ops, plus Cosmos-EVM validators",
+		Long: `cometcli — an agentic SRE terminal.
 
-Every capability is a deterministic subcommand (cometcli val status,
-cometcli doctor, cometcli tx unjail) AND a tool the agent can call.
-Run 'cometcli' with no arguments to open the chat terminal, 'cometcli
-ask "..."' for one-shot questions, or 'cometcli serve' for a local web chat.`,
+  cometcli                       chat on this machine (shell, files, web)
+  cometcli "why is disk full?"   start the chat with a prompt
+  cometcli -p "…"                answer once and exit (scripts, pipes, CI)
+  cmd | cometcli -p "…"          piped input becomes context
+  cometcli one [profile] […]     node mode: validator tools, rules, live snapshot
+
+Every node capability is also a deterministic subcommand (cometcli val
+status, cometcli doctor, cometcli tx unjail) and a tool the agent calls.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		Args:          cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			// Bare `cometcli` opens the chat TUI when there's a terminal and
-			// a profile; otherwise it's the classic help screen.
-			if !isTerminal(cmd.InOrStdin()) || !hasProfile() {
-				if isTerminal(cmd.InOrStdin()) {
-					fmt.Fprint(cmd.OutOrStdout(), "no profile yet — run `cometcli init` to connect a node, then `cometcli` opens the chat.\n\n")
+		Args:          cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// an explicit --profile means node mode, like `cometcli one`
+			var p *config.Profile
+			if cmd.Flags().Changed("profile") {
+				cfg, err := config.Load()
+				if err != nil {
+					return err
 				}
-				return cmd.Help()
+				if p, err = cfg.ActiveProfile(flagProfile); err != nil {
+					return err
+				}
 			}
-			return runUI(cmd, reg, 5*time.Second)
+			return runChat(cmd, reg, p, args)
 		},
 	}
 	pf := root.PersistentFlags()
 	pf.StringVar(&flagProfile, "profile", "", "profile to use (env COMETCLI_PROFILE)")
 	pf.BoolVar(&flagJSON, "json", false, "emit structured JSON")
 	pf.BoolVarP(&flagYes, "yes", "y", false, "auto-approve observe/diagnose prompts (never on-chain)")
+	agentFlags(root)
+	printFlags(root)
+	pf.Bool("debug", false, "log every LLM API attempt (status, timing, retries) to stderr")
+	root.PersistentPreRun = func(cmd *cobra.Command, _ []string) {
+		if d, _ := cmd.Flags().GetBool("debug"); d {
+			_ = os.Setenv("COMETCLI_DEBUG", "1")
+		}
+	}
 
 	for _, c := range toolGroupCommands(reg) {
 		root.AddCommand(c)
 	}
-	root.AddCommand(profileCmd(), auditCmd(), versionCmd(), initCmd())
+	root.AddCommand(profileCmd(), auditCmd(), versionCmd(), initCmd(), sessionsCmd(), oneCmd(reg), configCmd(), trustCmd())
 	root.AddCommand(extra...)
 	return root
 }
@@ -69,8 +86,8 @@ func toolGroupCommands(reg *toolkit.Registry) []*cobra.Command {
 	groups := map[string]*cobra.Command{}
 	for _, t := range reg.All() {
 		domain, _, ok := strings.Cut(t.Name(), ".")
-		if !ok {
-			continue
+		if !ok || toolkit.IsAgentOnly(t) {
+			continue // general agent tools (bash, read, …) have no subcommand
 		}
 		parent, ok := groups[domain]
 		if !ok {
@@ -79,7 +96,7 @@ func toolGroupCommands(reg *toolkit.Registry) []*cobra.Command {
 		}
 		parent.AddCommand(toolCmd(t))
 	}
-	preferred := []string{"node", "val", "chain", "evm", "keys", "tx", "upgrade", "snap", "mon", "sec", "net", "runbook", "fleet"}
+	preferred := []string{"node", "val", "chain", "gov", "evm", "keys", "tx", "upgrade", "snap", "mon", "sec", "net", "runbook", "fleet"}
 	var out []*cobra.Command
 	for _, d := range preferred {
 		if p, ok := groups[d]; ok {
@@ -165,7 +182,7 @@ func RunTool(cmd *cobra.Command, t toolkit.Tool, args toolkit.Args) error {
 	}
 	defer c.Close()
 	if !toolkit.IsLongRunning(t) {
-		sub, cancel := toolkit.WithDeadline(c, 90*time.Second)
+		sub, cancel := toolkit.WithDeadline(c, toolkit.CallTimeout(t, args))
 		defer cancel()
 		defer sub.Close()
 		c = sub
@@ -218,28 +235,44 @@ func NewCtx(cmd *cobra.Command, requireProfile bool) (*toolkit.Context, error) {
 	if flagYes {
 		c.AutoApproveBelow = toolkit.TierLocalChange
 	}
-	c.Approver = StdinApprover(cmd.InOrStdin())
+	c.Approver, c.Chooser = StdinPrompts(cmd.InOrStdin())
+	c.Secret = TTYSecret
 	return c, nil
-}
-
-// hasProfile reports whether an active profile is configured.
-func hasProfile() bool {
-	cfg, err := config.Load()
-	if err != nil {
-		return false
-	}
-	p, err := cfg.ActiveProfile(flagProfile)
-	return err == nil && p != nil
 }
 
 // StdinApprover prompts y/N on the terminal.
 func StdinApprover(in io.Reader) toolkit.Approver {
+	a, _ := StdinPrompts(in)
+	return a
+}
+
+// StdinPrompts returns a y/N approver and a numbered chooser sharing one
+// reader (two readers on one stdin would steal each other's input).
+func StdinPrompts(in io.Reader) (toolkit.Approver, toolkit.Chooser) {
 	reader := bufio.NewReader(in)
+	choose := func(c *toolkit.Context, prompt string, options []string) (int, error) {
+		fmt.Fprintf(c.Out, "\n%s\n", prompt)
+		for i, o := range options {
+			fmt.Fprintf(c.Out, "  %d. %s\n", i+1, o)
+		}
+		fmt.Fprintf(c.Out, "Choose [1-%d]: ", len(options))
+		line, err := reader.ReadString('\n')
+		if err != nil && strings.TrimSpace(line) == "" {
+			return 0, fmt.Errorf("no choice made: stdin closed")
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(line))
+		if err != nil || n < 1 || n > len(options) {
+			return 0, fmt.Errorf("invalid choice %q", strings.TrimSpace(line))
+		}
+		return n - 1, nil
+	}
 	return func(c *toolkit.Context, prompt string, tier toolkit.Tier, detail map[string]any) (bool, error) {
 		fmt.Fprintf(c.Out, "\n⚠  [%s] %s\n", tier, prompt)
 		keys := make([]string, 0, len(detail))
 		for k := range detail {
-			keys = append(keys, k)
+			if !strings.HasPrefix(k, "_") { // front-end hints, not for display
+				keys = append(keys, k)
+			}
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
@@ -255,9 +288,29 @@ func StdinApprover(in io.Reader) toolkit.Approver {
 		}
 		fmt.Fprint(c.Out, "Proceed? [y/N] ")
 		line, err := reader.ReadString('\n')
-		if err != nil {
+		if err == io.EOF && strings.TrimSpace(line) == "" {
+			fmt.Fprintln(c.Out)
+			return false, fmt.Errorf("not approved: no terminal to answer on (stdin closed) — run interactively, or allow it with --allowedTools / agent.permissions")
+		}
+		if err != nil && err != io.EOF {
 			return false, err
 		}
 		return strings.EqualFold(strings.TrimSpace(line), "y"), nil
+	}, choose
+}
+
+// TTYSecret reads a secret from the controlling terminal with echo off.
+func TTYSecret(c *toolkit.Context, prompt string) (string, error) {
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		return "", fmt.Errorf("%s: no terminal available", prompt)
 	}
+	defer tty.Close()
+	fmt.Fprintf(tty, "%s: ", prompt)
+	b, err := term.ReadPassword(int(tty.Fd()))
+	fmt.Fprintln(tty)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }

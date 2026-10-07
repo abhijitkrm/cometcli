@@ -163,8 +163,11 @@ func TestLoop_IterationLimit(t *testing.T) {
 			return &toolkit.Result{Text: "ok"}, nil
 		}})
 	_, err := a.Run(context.Background(), "loop forever")
-	if err == nil || !strings.Contains(err.Error(), "iterations") {
-		t.Fatalf("expected iteration limit error, got %v", err)
+	if err != nil {
+		t.Fatalf("the step limit pauses the turn, it doesn't fail it: %v", err)
+	}
+	if prov.calls != a.MaxIter {
+		t.Fatalf("ran %d rounds, limit %d", prov.calls, a.MaxIter)
 	}
 }
 

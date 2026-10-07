@@ -1,0 +1,110 @@
+- id: cfg-parse-error
+  title: Config file fails to parse / unknown field
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, node-exit-config-error]
+  severity: critical
+  match:
+    any: ["config.parse_error == true", "app.parse_error == true", "logs.config_parse > 0"]
+  confirm:
+    - "node.config show config.toml / app.toml; node.logs for the exact error"
+  fix:
+    - "[change] fix the TOML (edit) — compare with a freshly generated config of the same version"
+  test:
+    signals: {logs.config_parse: 2, proc.running: false}
+
+- id: cfg-min-gas-prices-empty
+  title: minimum-gas-prices empty in app.toml
+  kind: advisory
+  severity: medium
+  match:
+    all: ["app.min_gas_prices_empty == true"]
+  causes:
+    - fresh config; the node accepts zero-fee spam (some versions refuse to start)
+  fix:
+    - "[change] set minimum-gas-prices to the chain's recommended value (e.g. 0.025<denom>); restart"
+  test:
+    signals: {app.min_gas_prices_empty: true}
+
+- id: cfg-db-backend-mismatch
+  title: config.toml db_backend differs from app.toml app-db-backend
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
+  severity: high
+  match:
+    all: ["config.db_backend_mismatch == true"]
+  confirm:
+    - "node.config both files; which backend does the existing data use (ls data/*.db — pebble vs goleveldb files)?"
+  fix:
+    - "[change] set both to the backend the data was created with; restart"
+  warnings:
+    - switching backend on existing data does not convert it — the node fails to open or starts empty
+  test:
+    signals: {config.db_backend_mismatch: true, config.db_backend: goleveldb, app.app_db_backend: pebbledb}
+
+- id: cfg-mempool-mismatch
+  title: CometBFT app mempool selected but the app mempool is disabled
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
+  severity: high
+  match:
+    all: ["config.mempool_mismatch == true"]
+  confirm:
+    - "node.config: config.toml [mempool] type vs app.toml [mempool] max-txs"
+  fix:
+    - "[change] set app.toml mempool.max-txs >= 0 (e.g. 5000), or use the flood mempool in config.toml; restart"
+  test:
+    signals: {config.mempool_mismatch: true, config.mempool_type: app, app.mempool_max_txs: -1}
+
+- id: cfg-validator-api-exposed
+  title: Validator exposes API/gRPC (attack surface, memory load)
+  kind: advisory
+  severity: medium
+  match:
+    all: ["profile.role == validator", "app.api_enable == true"]
+  confirm:
+    - "sec.exposure — bound to 0.0.0.0?"
+  fix:
+    - "[change] disable [api] on the validator or bind to 127.0.0.1; serve queries from sentries/RPC nodes"
+  test:
+    signals: {profile.role: validator, app.api_enable: true}
+
+- id: cfg-validator-pruning-nothing
+  title: Validator keeps all state (pruning = nothing)
+  kind: advisory
+  severity: low
+  match:
+    all: ["profile.role == validator", "app.pruning == nothing"]
+  fix:
+    - "[change] pruning=custom keep-recent=100 interval=10 on validators (archive belongs on dedicated nodes)"
+  test:
+    signals: {profile.role: validator, app.pruning: nothing}
+
+- id: cfg-no-persistent-peers
+  title: No persistent peers or seeds configured
+  kind: advisory
+  severity: medium
+  match:
+    all: ["config.persistent_peers == 0", "config.seeds == 0"]
+  fix:
+    - "[change] net.add-peer a few reliable peers (sentries for validators)"
+  test:
+    signals: {config.persistent_peers: 0, config.seeds: 0}
+
+- id: cfg-double-sign-check-off
+  title: double_sign_check_height disabled on a validator
+  kind: advisory
+  severity: low
+  match:
+    all: ["profile.role == validator", "config.double_sign_check_height == 0"]
+  fix:
+    - "[change] set consensus.double_sign_check_height = 10: the node refuses to start signing if its key signed recently elsewhere"
+  test:
+    signals: {profile.role: validator, config.double_sign_check_height: 0}
+
+- id: cfg-mempool-full
+  title: Mempool full — txs rejected
+  severity: medium
+  match:
+    all: ["logs.mempool_full > 0"]
+  fix:
+    - "[read] evm.txpool / unconfirmed txs; is the chain congested or is this node stuck?"
+    - "[change] raise mempool size (config.toml [mempool] size or app max-txs) if resources allow; restart"
+  test:
+    signals: {logs.mempool_full: 50}

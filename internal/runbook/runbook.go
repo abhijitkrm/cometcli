@@ -101,6 +101,20 @@ func Get(name string) (*Runbook, error) {
 
 // Run executes a runbook against a context, printing progress.
 func Run(rb *Runbook, c *toolkit.Context, reg *toolkit.Registry, out io.Writer) error {
+	// validate every step before running any: a typo in step 5 must not
+	// surface after steps 1-4 already changed things
+	for _, s := range rb.Steps {
+		if s.Manual != "" || s.Tool == "" {
+			continue
+		}
+		t, ok := reg.Get(s.Tool)
+		if !ok {
+			return fmt.Errorf("runbook %q step %q references unknown tool %q", rb.Name, s.Name, s.Tool)
+		}
+		if toolkit.IsOperatorOnly(t) && c.ToolName != "" {
+			return fmt.Errorf("runbook %q step %q uses %s, which handles key material — run the runbook yourself with `cometcli runbook run %s`", rb.Name, s.Name, s.Tool, rb.Name)
+		}
+	}
 	fmt.Fprintf(out, "▶ runbook: %s — %s\n\n", rb.Name, rb.Desc)
 	for i, s := range rb.Steps {
 		fmt.Fprintf(out, "── step %d/%d: %s\n", i+1, len(rb.Steps), s.Name)
@@ -114,10 +128,10 @@ func Run(rb *Runbook, c *toolkit.Context, reg *toolkit.Registry, out io.Writer) 
 			}
 			continue
 		}
-		t, ok := reg.Get(s.Tool)
-		if !ok {
-			return fmt.Errorf("runbook references unknown tool %q", s.Tool)
+		if s.Tool == "" {
+			continue // note-only step
 		}
+		t, _ := reg.Get(s.Tool)
 		res, err := t.Run(c, s.Args)
 		if err != nil {
 			if s.Optional {

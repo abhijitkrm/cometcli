@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"fmt"
+	"os"
+
 	"github.com/spf13/cobra"
 
 	"github.com/abhijitkrm/cometcli/internal/agent"
@@ -20,8 +23,13 @@ func runAgentImpl(cmd *cobra.Command, reg *toolkit.Registry, oneshot string) err
 	if err != nil {
 		return err
 	}
-	if err := applyAgentFlags(cmd, a); err != nil {
+	defer a.Close()
+	note, err := applyAgentFlags(cmd, a)
+	if err != nil {
 		return err
+	}
+	if note != "" {
+		fmt.Fprintln(cmd.ErrOrStderr(), note)
 	}
 	if oneshot != "" {
 		pr := &agent.Printer{Out: c.Out}
@@ -33,13 +41,19 @@ func runAgentImpl(cmd *cobra.Command, reg *toolkit.Registry, oneshot string) err
 	return repl.Run()
 }
 
-// applyAgentFlags layers --mode/--safe/--autopilot/--budget/--max-iter/
-// --no-stream over the profile's agent defaults.
-func applyAgentFlags(cmd *cobra.Command, a *agent.Agent) error {
-	if m, _ := cmd.Flags().GetString("mode"); m != "" {
+// applyAgentFlags layers the agent and session flags over the profile's
+// agent defaults, turns on session saving, and resumes a session when
+// asked (--continue / --resume). Flags a command doesn't define read as
+// unset. The returned note describes a resumed session.
+func applyAgentFlags(cmd *cobra.Command, a *agent.Agent) (string, error) {
+	m, _ := cmd.Flags().GetString("mode")
+	if pm, _ := cmd.Flags().GetString("permission-mode"); pm != "" {
+		m = pm
+	}
+	if m != "" {
 		mode, err := agent.ParseMode(m)
 		if err != nil {
-			return err
+			return "", err
 		}
 		a.Policy.Mode = mode
 	}
@@ -49,7 +63,7 @@ func applyAgentFlags(cmd *cobra.Command, a *agent.Agent) error {
 	if tiers, _ := cmd.Flags().GetStringSlice("autopilot"); len(tiers) > 0 {
 		for _, t := range tiers {
 			if err := a.Policy.SetAutopilot(t, true); err != nil {
-				return err
+				return "", err
 			}
 		}
 	}
@@ -66,5 +80,53 @@ func applyAgentFlags(cmd *cobra.Command, a *agent.Agent) error {
 		// hard-refuse anything that slips past filtering
 		a.Ctx.Approver = toolkit.DenyApprover
 	}
-	return nil
+	if m, _ := cmd.Flags().GetString("model"); m != "" {
+		a.Model = m
+	}
+	for list, flag := range map[string]string{"allow": "allowedTools", "deny": "disallowedTools"} {
+		rules, _ := cmd.Flags().GetStringSlice(flag)
+		for _, r := range rules {
+			if err := a.Rules.Add(list, r); err != nil {
+				return "", fmt.Errorf("--%s: %w", flag, err)
+			}
+		}
+	}
+	if e, _ := cmd.Flags().GetString("effort"); e != "" {
+		if err := agent.ValidEffort(e); err != nil {
+			return "", err
+		}
+		a.Effort = e
+	}
+	if n, _ := cmd.Flags().GetInt("max-tokens"); n > 0 {
+		a.MaxTokens = n
+	}
+	a.Persist = true
+	return resumeSession(cmd, a)
+}
+
+// resumeSession loads the session named by --resume, or the latest one in
+// this directory for --continue.
+func resumeSession(cmd *cobra.Command, a *agent.Agent) (string, error) {
+	id, _ := cmd.Flags().GetString("resume")
+	cont, _ := cmd.Flags().GetBool("continue")
+	var sf *agent.SessionFile
+	var err error
+	switch {
+	case id != "":
+		sf, err = agent.LoadSession(id)
+	case cont:
+		cwd, _ := os.Getwd()
+		profile := ""
+		if a.Ctx.Profile != nil {
+			profile = a.Ctx.Profile.Name
+		}
+		sf, err = agent.LatestSession(cwd, profile)
+	default:
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	a.Restore(sf)
+	return fmt.Sprintf("resumed session %s — %s (%d messages)", sf.ID, sf.Title, len(sf.History)), nil
 }

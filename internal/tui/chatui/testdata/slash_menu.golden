@@ -1,0 +1,8 @@
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ > /c                                                                         │
+╰──────────────────────────────────────────────────────────────────────────────╯
+❯ /clear   clear conversation, start a new audit session
+  /compact [focus]  summarize the conversation to free context
+  /cost   token usage for this session
+ ? for shortcuts                                               general · fake/m

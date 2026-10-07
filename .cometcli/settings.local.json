@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "bash(./cometcli query:*)",
+      "bash(date +%H:%M:%S:*)"
+    ]
+  }
+}

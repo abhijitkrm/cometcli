@@ -13,6 +13,7 @@ import (
 	"github.com/abhijitkrm/cometcli/internal/config"
 	"github.com/abhijitkrm/cometcli/internal/monitor"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
+	"github.com/abhijitkrm/cometcli/internal/tools/shell"
 )
 
 // Register adds fleet.* tools.
@@ -228,8 +229,26 @@ func (shellTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error
 	if len(names) == 0 {
 		return nil, fmt.Errorf("no profiles configured")
 	}
-	if err := c.Approve(fmt.Sprintf("run on %d host(s): %s", len(names), cmd),
-		toolkit.TierLocalChange, map[string]any{"cmd": cmd, "profiles": names}); err != nil {
+	// same classification and gate as the bash tool: key material and
+	// state resets refused, transactions always asked, rules applied
+	binary := ""
+	if p := c.Cfg.Profiles[names[0]]; p != nil {
+		binary = p.Binary
+	}
+	v := shell.Classify(cmd, shell.Opts{Binary: binary})
+	tier, why := v.Tier, v.Reason
+	if strings.HasPrefix(why, "runs script") {
+		// scripts can't be inspected on every remote host: treat a fleet-
+		// wide script run like a transaction — it always asks
+		tier, why = toolkit.TierOnChain, why+" on every host (not inspectable remotely)"
+	}
+	if err := c.Check(toolkit.Gate{
+		Request:   toolkit.Request{Tool: "fleet.shell", Specs: v.Segments, Kind: "command"},
+		Tier:      tier,
+		Prompt:    fmt.Sprintf("run on %d host(s): %s", len(names), cmd),
+		Detail:    map[string]any{"command": cmd, "profiles": strings.Join(names, ", "), "why": why},
+		Forbidden: v.Forbidden,
+	}); err != nil {
 		return nil, err
 	}
 	to := time.Duration(a.Int("timeout", 30)) * time.Second

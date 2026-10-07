@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"time"
 
@@ -10,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/abhijitkrm/cometcli/internal/agent"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
 	"github.com/abhijitkrm/cometcli/internal/tui"
 )
@@ -27,11 +27,13 @@ func UICmd(reg *toolkit.Registry) *cobra.Command {
 		},
 	}
 	cmd.Flags().IntVar(&interval, "interval", 5, "refresh interval seconds")
+	sessionFlags(cmd)
 	return cmd
 }
 
-func isTerminal(r io.Reader) bool {
-	f, ok := r.(*os.File)
+// isTerminal reports whether a stream (stdin or stdout) is a terminal.
+func isTerminal(s any) bool {
+	f, ok := s.(*os.File)
 	return ok && term.IsTerminal(int(f.Fd()))
 }
 
@@ -46,5 +48,7 @@ func runUI(cmd *cobra.Command, reg *toolkit.Registry, interval time.Duration) er
 	}
 	defer c.Close()
 	defer c.Audit.Close()
-	return tui.RunApp(c, reg, interval)
+	return tui.RunApp(c, reg, interval, func(a *agent.Agent) (string, error) {
+		return applyAgentFlags(cmd, a)
+	})
 }

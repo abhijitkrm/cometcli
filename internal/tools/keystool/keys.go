@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/abhijitkrm/cometcli/internal/config"
@@ -49,6 +50,7 @@ func (addTool) Schema() map[string]any {
 	}, "name")
 }
 func (addTool) Tier() toolkit.Tier { return toolkit.TierLocalChange }
+func (addTool) OperatorOnly() bool { return true }
 
 func (addTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
 	name := a.String("name", "")
@@ -183,6 +185,7 @@ func (rmTool) Schema() map[string]any {
 	return toolkit.ObjSchema(map[string]any{"name": toolkit.Str("key name")}, "name")
 }
 func (rmTool) Tier() toolkit.Tier { return toolkit.TierLocalChange }
+func (rmTool) OperatorOnly() bool { return true }
 
 func (rmTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
 	name := a.String("name", "")
@@ -198,6 +201,8 @@ func (rmTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
 	}
 	return &toolkit.Result{Text: "deleted " + name, Data: map[string]any{"deleted": name}}, nil
 }
+
+var hexAddrRe = regexp.MustCompile(`^0x[0-9a-fA-F]{40}$`)
 
 type convertTool struct{}
 
@@ -217,6 +222,9 @@ func (convertTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, err
 	addr := a.String("address", "")
 	var b strings.Builder
 	if strings.HasPrefix(addr, "0x") {
+		if !hexAddrRe.MatchString(addr) {
+			return nil, fmt.Errorf("%q is not a 0x address (want 0x + 40 hex characters)", addr)
+		}
 		prefix := a.String("prefix", "")
 		if prefix == "" && c.Profile != nil {
 			prefix = c.Profile.Bech32Prefix

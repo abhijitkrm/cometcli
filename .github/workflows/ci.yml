@@ -16,12 +16,18 @@ jobs:
           cache: true
       - name: vet
         run: go vet ./...
-      - name: test
-        run: go test ./... -count=1
+      - name: test (race detector, coverage)
+        run: |
+          go test -race -count=1 -coverprofile=cover.out ./...
+          go tool cover -func=cover.out | tail -1
       - name: build
         run: go build -o cometcli ./cmd/cometcli
       - name: smoke
-        run: ./cometcli --help && ./cometcli doctor --help
+        run: |
+          ./cometcli --help && ./cometcli doctor --help && ./cometcli one --help
+          ./cometcli config show
+          # no provider configured: headless mode must fail fast, not hang
+          ! ./cometcli -p "hi" </dev/null
 
   lint:
     runs-on: ubuntu-latest
