@@ -44,11 +44,11 @@ func (balanceTool) Tier() toolkit.Tier { return toolkit.TierObserve }
 func (balanceTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
 	addr := a.String("address", "")
 	if addr == "" {
-		var err error
-		addr, err = common.Account(c)
+		tb, err := c.Tx() // read-only: no signer prompt
 		if err != nil {
 			return nil, err
 		}
+		addr = tb.Address()
 	}
 	g, err := c.GRPC()
 	if err != nil {

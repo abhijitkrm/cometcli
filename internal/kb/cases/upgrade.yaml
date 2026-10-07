@@ -4,13 +4,15 @@
   severity: critical
   symptoms: logs show UPGRADE "<name>" NEEDED at height; node stopped or crash-looping
   match:
-    any: ["logs.upgrade_needed > 0"]
+    any: ["logs.upgrade_needed > 0", "upgrade.blocks_to_halt <= 0"]
   confirm:
     - "logs.upgrade_name; chain.upgrade-plan; upgrade.check (local version vs required)"
+    - "is the whole chain halted? (other validators' heights / a public RPC) — an upgrade halt is chain-wide"
   fix:
     - "[read] upgrade.check — find the release for the plan name"
     - "[change] upgrade.prepare (download + checksum verify + stage for cosmovisor, or swap the binary/image)"
     - "[change] node.service restart with the new binary"
+    - "[change] ONLY if the chain's coordinators announce skipping this upgrade: restart with --unsafe-skip-upgrades <height> (needs ≥2/3 of voting power doing the same); remove the flag afterwards"
   verify:
     - "node.block_age_s < 30 after the network reaches 2/3; val.consensus"
   warnings:

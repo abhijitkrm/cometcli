@@ -123,11 +123,13 @@ func TestSignerChoiceWhenBothAvailable(t *testing.T) {
 		t.Fatal("container signer was not used")
 	}
 	// headless: no chooser → explain, don't guess
+	c.ResetSigner()
 	c.Chooser = nil
 	if _, err := BroadcastMsgs(c, send("cosmos1dest"), "", nil, tx.Options{}); err == nil || !strings.Contains(err.Error(), "signer.mode") {
 		t.Fatalf("err = %v", err)
 	}
 	c.Profile.Signer.Mode = "local"
+	c.ResetSigner()
 	if _, err := BroadcastMsgs(c, send("cosmos1dest"), "", nil, tx.Options{}); err != nil {
 		t.Fatalf("signer.mode local: %v", err)
 	}
@@ -162,7 +164,26 @@ func TestLocalKeyOfAnotherAccountIsNeverOffered(t *testing.T) {
 		t.Fatal("the other account's local key signed")
 	}
 	c.Profile.Signer.Mode = "local"
+	c.ResetSigner()
 	if _, err := BroadcastMsgs(c, send("cosmos1dest"), "", nil, tx.Options{}); err == nil || !strings.Contains(err.Error(), "not this validator's operator account") {
 		t.Fatalf("signer.mode local with the wrong key: %v", err)
+	}
+}
+
+func TestMessageAddressAndSignerAgree(t *testing.T) {
+	_, c, _ := containerSetup(t, "test")
+	c.Profile.Signer.Key = "ops"
+	picks := 0
+	c.Chooser = func(*toolkit.Context, string, []string) (int, error) { picks++; return 1, nil }
+	acct, err := Account(c) // what a tool puts in its message
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := c.TxSigner() // what BroadcastMsgs signs with
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acct != b.Address() || picks != 1 {
+		t.Fatalf("message %s, signer %s, asked %d times", acct, b.Address(), picks)
 	}
 }

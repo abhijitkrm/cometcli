@@ -170,6 +170,14 @@ func containerSignError(s *ContainerSigner, out string, err error) error {
 		return fmt.Errorf("container %s is not running", s.Container)
 	}
 	msg := strings.TrimSpace(out)
+	// a CLI failure prints "Error: …" then its whole --help: the error
+	// line is the news, not the tail of the flag list
+	for _, l := range strings.Split(out, "\n") {
+		if l = strings.TrimSpace(l); strings.HasPrefix(l, "Error:") {
+			msg = l
+			break
+		}
+	}
 	if len(msg) > 400 {
 		msg = msg[len(msg)-400:]
 	}

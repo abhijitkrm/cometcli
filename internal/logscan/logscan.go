@@ -137,17 +137,23 @@ func classify(line string) []Category {
 	return out
 }
 
-var valconsRe = regexp.MustCompile(`[a-z]+valcons1[0-9a-z]+`)
+var validatorAddrRe = regexp.MustCompile(`[a-z]+val(cons|oper)1[0-9a-z]+`)
 
-// OwnJailLine reports whether a jail/slashing line can be about the
-// validator with consensus address cons: it names cons, or names no
-// validator at all. Lines about other validators are dropped — every
-// node logs every validator's jailing.
-func OwnJailLine(line, cons string) bool {
-	if cons == "" || strings.Contains(line, cons) {
-		return true
+// OwnJailLine reports whether a jail/slashing line can be about our
+// validator (ids: its valcons and/or valoper address): it names one of
+// them, or names no validator at all. Lines about other validators are
+// dropped — every node logs every validator's jailing and slashing.
+func OwnJailLine(line string, ids ...string) bool {
+	known := false
+	for _, id := range ids {
+		if id != "" {
+			known = true
+			if strings.Contains(line, id) {
+				return true
+			}
+		}
 	}
-	return !valconsRe.MatchString(line)
+	return !known || !validatorAddrRe.MatchString(line)
 }
 
 // Name returns a category's label by slug.

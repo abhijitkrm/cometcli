@@ -44,6 +44,10 @@ func TestOwnJailLine(t *testing.T) {
 	if !OwnJailLine("INF validator jailed validator=cosmosvalcons1aaa", me) || OwnJailLine("INF validator jailed validator=cosmosvalcons1bbb", me) {
 		t.Fatal("address filter")
 	}
+	if OwnJailLine("INF validator slashed by slash factor validator=cosmosvaloper1other", me, "cosmosvaloper1mine") ||
+		!OwnJailLine("INF validator slashed validator=cosmosvaloper1mine", me, "cosmosvaloper1mine") {
+		t.Fatal("valoper filter")
+	}
 	if !OwnJailLine("INF slashing and jailing validator due to liveness fault height=5", me) {
 		t.Fatal("line without an address dropped")
 	}

@@ -235,6 +235,7 @@ func collectChain(c *toolkit.Context, r *Report, set func(string, any)) error {
 	if f.ConsAddr != "" {
 		set("val.cons_addr", f.ConsAddr)
 	}
+	set("val.valoper", f.Valoper)
 	if len(f.ConsHex) > 0 {
 		set("val.cons_addr_hex", strings.ToUpper(fmt.Sprintf("%x", f.ConsHex)))
 		if f.CometErr == "" {
@@ -758,7 +759,7 @@ func derive(r *Report) {
 		n := 0.0
 		var own []string
 		for _, l := range r.jailLines {
-			if logscan.OwnJailLine(l, cons) {
+			if logscan.OwnJailLine(l, cons, valoperOf(s)) {
 				n++
 				own = append(own, l)
 			}
@@ -844,6 +845,8 @@ func derive(r *Report) {
 }
 
 // --- helpers ------------------------------------------------------------------
+
+func valoperOf(s kb.Signals) string { v, _ := s["val.valoper"].(string); return v }
 
 func getter(m map[string]any) func(path ...string) any {
 	return func(path ...string) any {

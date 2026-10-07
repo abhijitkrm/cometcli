@@ -55,6 +55,36 @@ func (c *Context) TxSigner() (*tx.Builder, error) {
 	if c.Profile == nil {
 		return nil, errNoProfile
 	}
+	// one choice per context: the address a tool puts in its messages and
+	// the key that signs them must be the same
+	c.mu.Lock()
+	cached := c.signerB
+	c.mu.Unlock()
+	if cached != nil {
+		return cached, nil
+	}
+	b, err := c.chooseSigner()
+	if err == nil {
+		c.mu.Lock()
+		c.signerB = b
+		c.mu.Unlock()
+	}
+	return b, err
+}
+
+// wrongAccount explains why a local key can't sign for this profile's
+// validator ("" when it can, or there's no valoper to check against).
+func (c *Context) wrongAccount(b *tx.Builder) string {
+	if c.Profile.Metadata["valoper"] == "" {
+		return ""
+	}
+	if want, err := keys.AccFromValoper(c.Profile.Metadata["valoper"]); err == nil && want != b.Address() {
+		return fmt.Sprintf("cometcli keyring key %q is %s, not this validator's operator account %s", c.Profile.Signer.Key, b.Address(), want)
+	}
+	return ""
+}
+
+func (c *Context) chooseSigner() (*tx.Builder, error) {
 	g, err := c.GRPC()
 	if err != nil {
 		return nil, err
@@ -68,10 +98,9 @@ func (c *Context) TxSigner() (*tx.Builder, error) {
 	}
 	// a key that isn't this validator's operator account would sign a
 	// valid tx as someone else (a shared keyring, a copied profile)
-	if localErr == nil && c.Profile.Metadata["valoper"] != "" {
-		if want, err := keys.AccFromValoper(c.Profile.Metadata["valoper"]); err == nil && want != localB.Address() {
-			localErr = fmt.Errorf("cometcli keyring key %q is %s, not this validator's operator account %s", c.Profile.Signer.Key, localB.Address(), want)
-			localB = nil
+	if localErr == nil {
+		if why := c.wrongAccount(localB); why != "" {
+			localErr, localB = fmt.Errorf("%s", why), nil
 		}
 	}
 	container, ckey := c.signerContainer(), c.containerKey()
@@ -195,4 +224,12 @@ func shq(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'
 func lastLine(s string) string {
 	lines := strings.Split(strings.TrimSpace(s), "\n")
 	return strings.TrimSpace(lines[len(lines)-1])
+}
+
+// ResetSigner forgets the signer choice, so the next TxSigner asks again
+// (a new operation on a long-lived context).
+func (c *Context) ResetSigner() {
+	c.mu.Lock()
+	c.signerB = nil
+	c.mu.Unlock()
 }

@@ -64,6 +64,7 @@ type Context struct {
 	hostErr error
 	txb     *tx.Builder
 	txErr   error
+	signerB *tx.Builder // TxSigner's choice, reused for the context's life
 }
 
 var errNoProfile = fmt.Errorf("no active profile — run `cometcli profile add`")
@@ -193,6 +194,11 @@ func (c *Context) Tx() (*tx.Builder, error) {
 	defer c.mu.Unlock()
 	if c.txb == nil && c.txErr == nil {
 		c.txb, c.txErr = tx.NewBuilder(c.Context, g, c.Profile, c.Audit)
+		if c.txErr == nil {
+			if why := c.wrongAccount(c.txb); why != "" {
+				c.txb, c.txErr = nil, fmt.Errorf("%s", why)
+			}
+		}
 		if c.txErr != nil && c.signerContainer() != "" && c.containerKey() != "" {
 			// no local key: the node container's key answers for the address
 			c.mu.Unlock()

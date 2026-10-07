@@ -38,9 +38,10 @@ func Valoper(c *toolkit.Context, args toolkit.Args) (string, error) {
 	return tb.ValAddress()
 }
 
-// Account resolves the signer's bech32 account address.
+// Account resolves the bech32 address of the key that will sign — the
+// same choice BroadcastMsgs uses, so messages and signature always agree.
 func Account(c *toolkit.Context) (string, error) {
-	tb, err := c.Tx()
+	tb, err := c.TxSigner()
 	if err != nil {
 		return "", err
 	}

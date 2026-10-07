@@ -386,7 +386,7 @@ func Investigate(c *toolkit.Context, f *Facts) *Forensics {
 	// every node logs every validator's jailing: prefer our own lines
 	var own []string
 	for _, l := range fo.JailLines {
-		if logscan.OwnJailLine(l, f.ConsAddr) {
+		if logscan.OwnJailLine(l, f.ConsAddr, f.Valoper) {
 			own = append(own, l)
 		}
 	}

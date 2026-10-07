@@ -111,7 +111,7 @@ func Render(r *Report, hits []kb.Hit, prefix string) string {
 		if strings.HasPrefix(k, "logs.") && v == float64(0) && k != "logs.lines" {
 			continue
 		}
-		if strings.HasSuffix(k, "cons_addr_hex") || k == "val.cons_addr" || v == "" { // matching-only / empty
+		if strings.HasSuffix(k, "cons_addr_hex") || k == "val.cons_addr" || k == "val.valoper" || v == "" { // matching-only / empty
 			continue
 		}
 		if strings.HasPrefix(k, "node.inside_") && r.Signals["node.reachable"] == true { // only news when the host can't reach it

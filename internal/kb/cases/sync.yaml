@@ -44,8 +44,7 @@
   explains: [node-process-down, node-rpc-down, evm-rpc-down, node-restarted-recently, node-killed-sigkill, node-catching-up, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
   severity: critical
   match:
-    all: ["proc.restarts >= 3"]
-    any: ["proc.uptime_s < 600", "logs.panic > 0"]
+    all: ["proc.restarts >= 3", "proc.uptime_s < 600"]
   confirm:
     - "node.logs for the panic/exit message repeated each start"
   causes:
