@@ -40,6 +40,10 @@ cometcli is a local-first operations terminal for validators running
 No dashboards to wire up. No context-switching between `evmd`, `systemctl`,
 `curl`, and explorer tabs.
 
+<p align="center">
+  <img src="docs/images/cometcli-startup.png" alt="cometcli starting in the terminal: a comet streaking over the COMETCLI wordmark, the welcome box and the prompt" width="820" />
+</p>
+
 Every capability is a deterministic subcommand **and** a tool the optional AI
 agent can call — one registry, two front-ends. The deterministic layer is
 boring and correct; the agent composes it. See [PLAN.md](PLAN.md) for the
