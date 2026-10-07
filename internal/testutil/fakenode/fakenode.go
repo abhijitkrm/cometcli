@@ -76,6 +76,15 @@ type Node struct {
 	DeliverCode uint32
 	DeliverLog  string
 	NeverCommit bool
+	// CheckFailOnce rejects the next broadcast at CheckTx with this code
+	// and log, then clears itself.
+	CheckFailOnce *struct {
+		Code uint32
+		Log  string
+	}
+	// OnCommit runs (under the node's lock) for each accepted tx — tests
+	// use it to apply a tx's effect to the simulated chain.
+	OnCommit func(n *Node, tx Tx)
 	// Validator, SigningInfo and Proposals back the staking/slashing/gov
 	// queries tools make.
 	Validator   *stakingv1beta1.Validator
@@ -282,9 +291,17 @@ func (s *txSrv) BroadcastTx(_ context.Context, r *txv1beta1.BroadcastTxRequest) 
 	if n.CheckCode != 0 {
 		return reject(n.CheckCode, n.CheckLog)
 	}
+	if f := n.CheckFailOnce; f != nil {
+		n.CheckFailOnce = nil
+		return reject(f.Code, f.Log)
+	}
 	n.Seq++
 	n.StaleSeq = nil
-	n.Broadcasts = append(n.Broadcasts, Tx{Hash: hash, Seq: d.seq, Msgs: d.body.Messages, Memo: d.body.Memo, Fee: d.auth.Fee})
+	tx := Tx{Hash: hash, Seq: d.seq, Msgs: d.body.Messages, Memo: d.body.Memo, Fee: d.auth.Fee}
+	n.Broadcasts = append(n.Broadcasts, tx)
+	if n.OnCommit != nil && n.DeliverCode == 0 {
+		n.OnCommit(n, tx)
+	}
 	n.height++
 	n.committed[hash] = &abciv1beta1.TxResponse{Txhash: hash, Height: n.height, Code: n.DeliverCode, RawLog: n.DeliverLog, GasUsed: int64(n.SimGas)}
 	return &txv1beta1.BroadcastTxResponse{TxResponse: &abciv1beta1.TxResponse{Txhash: hash}}, nil

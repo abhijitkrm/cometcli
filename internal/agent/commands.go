@@ -425,11 +425,21 @@ func RunCommand(a *Agent, c *toolkit.Context, reg *toolkit.Registry, line string
 			Prompt: fmt.Sprintf("Run runbook %q with runbook.run, then summarize each step's outcome and anything that needs my attention.", rb.Name),
 		}, nil
 	}
+	name := strings.TrimPrefix(f[0], "/")
+	args := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), f[0]))
 	if a != nil && a.ext != nil {
-		if cmd, ok := a.ext.Commands[strings.TrimPrefix(f[0], "/")]; ok {
-			args := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), f[0]))
+		if cmd, ok := a.ext.Commands[name]; ok {
 			return a.runCustomCommand(c, cmd, args)
 		}
+	}
+	if cmd, ok := builtinCommands[name]; ok {
+		if err := needAgent(); err != nil {
+			return CmdResult{}, err
+		}
+		if builtinNeedsNode[name] && !a.Node() {
+			return CmdResult{}, fmt.Errorf("/%s needs node mode — /one <profile> first", name)
+		}
+		return CmdResult{Text: "/" + name, Prompt: cmd.Expand(args, nil, nil)}, nil
 	}
 	return CmdResult{}, ErrUnknownCommand
 }

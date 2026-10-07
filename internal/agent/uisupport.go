@@ -52,6 +52,12 @@ func Commands(a *Agent) []CmdInfo {
 			add(CmdInfo{Name: strings.TrimSuffix(n, ","), Args: args, Desc: m[3]})
 		}
 	}
+	for _, c := range settings.SortedCommands(builtinCommands) {
+		if a != nil && a.ext != nil && a.ext.Commands[c.Name] != nil {
+			continue // overridden
+		}
+		add(CmdInfo{Name: "/" + c.Name, Args: c.ArgHint, Desc: c.Description})
+	}
 	if a != nil && a.ext != nil {
 		for _, c := range settings.SortedCommands(a.ext.Commands) {
 			add(CmdInfo{Name: "/" + c.Name, Args: c.ArgHint, Desc: c.Description + " (" + c.Scope + ")"})

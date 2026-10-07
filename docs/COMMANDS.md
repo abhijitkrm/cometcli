@@ -63,6 +63,53 @@ Messages typed while a turn runs are queued and sent when it ends. Approvals off
 
 `cometcli ui` still opens the full-screen dashboard (overview, fleet, logs, send).
 
+## Incidents
+
+Tools built for running an incident to resolution — usable directly or by the agent:
+
+```bash
+cometcli val jail-check                       # why jailed, root-cause evidence from the node's logs,
+                                              # restarts/OOM/disk, and every unjail blocker with its fix
+cometcli val consensus --window 50            # bonded, in the validator set, signing recent blocks?
+cometcli wait until --condition synced        # block until caught up (live progress, ETA)
+cometcli wait until --condition unjailable    # until the jail period is over
+cometcli wait until --condition in-consensus --window 50 --min_signed_pct 95
+cometcli wait until --condition tx-committed --value <hash>
+cometcli wait until --condition proposal-status --value 12:PASSED
+```
+
+`wait.until` polls in-process, so an agent waiting on it spends no tokens; it returns
+`done=false` with the last state on timeout. `val.unjail` refuses on hard blockers
+(jail period not over, node not synced, self-delegation below minimum, no fee balance,
+tombstoned) instead of paying for a doomed tx, and every rejected transaction comes back
+with a cause → next step hint.
+
+In a node-mode session, **`/recover-jail [notes]`** runs the whole procedure: diagnose →
+stop if tombstoned → fix the root cause → wait for sync → wait out the jail → unjail
+(you approve) → on failure fix the cause and retry → verify it signs → report.
+
+### Signing transactions
+
+Two signers; when both can sign, you're asked at signing time (after approving the tx):
+
+- **cometcli's keyring** — `signer.key` (import with `cometcli keys add --recover`).
+- **the node container's own keyring** — the key never leaves the node: cometcli builds
+  and simulates the tx, you approve, then `evmd tx sign` runs inside the container (a file
+  keyring's password is asked for then, never stored or sent to the model).
+
+```yaml
+signer:
+  key: ops                      # cometcli keyring (optional)
+  mode: ""                      # "" = ask when both work | local | container
+  container: primium-validator0 # default: service.unit for docker services
+  container_key: val0           # key name in the container's keyring
+  container_keyring: ""         # test | file — detected when empty
+  container_home: /data/node0/evmd
+```
+
+Headless runs (`-p`) must set `signer.mode`; a container file-keyring password comes from
+`COMETCLI_CONTAINER_KEYRING_PASSWORD` there.
+
 ## Setup
 
 ```bash
@@ -286,6 +333,7 @@ saved after each turn to `~/.cometcli/sessions/` (0600, already redacted).
 | `/memory`, `/remember [--user\|--node] <text>` | memory files loaded; add a line to COMET.md |
 | `/mcp`, `/agents` | connected MCP servers; subagents for the task tool |
 | `/<custom>` | commands from `.cometcli/commands/*.md` — see [EXTENDING.md](EXTENDING.md) |
+| `/recover-jail [notes]` | node mode: run the full jail-recovery procedure |
 | `/one [profile\|off]` | switch the session to node mode for a profile, or back to general (conversation kept) |
 
 ### General tools and permissions

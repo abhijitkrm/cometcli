@@ -135,9 +135,10 @@ func TestWaitHeightAndBadArgs(t *testing.T) {
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	c.Context = ctx
+	cc := &toolkit.Context{Context: ctx, Profile: c.Profile}
+	defer cc.Close()
 	after(30*time.Millisecond, cancel)
-	if _, err := (Until{}).Run(c, toolkit.Args{"condition": "height", "value": "999999", "timeout": float64(10), "interval": 0.05}); err == nil {
+	if _, err := (Until{}).Run(cc, toolkit.Args{"condition": "height", "value": "999999", "timeout": float64(10), "interval": 0.05}); err == nil {
 		t.Fatal("cancel didn't stop the wait")
 	}
 }

@@ -248,12 +248,18 @@ func (a *Agent) grantTurnRules() func() {
 // HelpText is the slash-command help, including custom commands.
 func HelpText(a *Agent) string {
 	s := CommandHelp + "\n  /memory, /remember <text>     show memory files; add a line to COMET.md\n  /mcp                          connected MCP servers\n  /agents                       subagents available to the task tool"
-	if a == nil || a.ext == nil || len(a.ext.Commands) == 0 {
-		return s
+	cmds := map[string]*settings.Command{}
+	for n, c := range builtinCommands {
+		cmds[n] = c
+	}
+	if a != nil && a.ext != nil {
+		for n, c := range a.ext.Commands {
+			cmds[n] = c
+		}
 	}
 	var b strings.Builder
-	b.WriteString(s + "\ncustom commands:")
-	for _, c := range settings.SortedCommands(a.ext.Commands) {
+	b.WriteString(s + "\nprocedures and custom commands:")
+	for _, c := range settings.SortedCommands(cmds) {
 		name := "/" + c.Name
 		if c.ArgHint != "" {
 			name += " " + c.ArgHint
