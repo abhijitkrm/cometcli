@@ -134,6 +134,14 @@ func (a *Agent) memoryText() string {
 	return a.Redact.Text(settings.RenderMemory(a.ext.memory))
 }
 
+// loadMemory reads the memory files if the system prompt hasn't yet
+// (cheap: no node probe, unlike building the whole prompt).
+func (a *Agent) loadMemory() {
+	if a.ext != nil && a.ext.memory == nil {
+		a.memoryText()
+	}
+}
+
 // --- hooks -----------------------------------------------------------------
 
 func (a *Agent) hookInput(event string) hooks.Input {

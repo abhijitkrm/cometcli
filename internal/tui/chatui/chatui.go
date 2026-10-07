@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -20,8 +21,12 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/glamour/ansi"
 	"github.com/charmbracelet/glamour/styles"
 	"github.com/charmbracelet/lipgloss"
+	reflowansi "github.com/muesli/reflow/ansi"
+	"github.com/muesli/reflow/wordwrap"
+	"github.com/muesli/reflow/wrap"
 
 	"github.com/abhijitkrm/cometcli/internal/agent"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
@@ -108,6 +113,8 @@ type pendingApproval struct {
 
 // --- styles ----------------------------------------------------------------
 
+var ansiRe = regexp.MustCompile(`\x1b\[[0-9;?]*[A-Za-z]`)
+
 var (
 	accent   = lipgloss.Color("#D97757")
 	dim      = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
@@ -120,6 +127,7 @@ var (
 	userSt   = lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Background(lipgloss.Color("236"))
 	addSt    = lipgloss.NewStyle().Foreground(lipgloss.Color("114"))
 	delSt    = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
+	thinkSt  = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Italic(true)
 )
 
 // --- model -----------------------------------------------------------------
@@ -169,6 +177,13 @@ type model struct {
 	notes    []string
 	progress string   // latest live status from a long-running tool
 	printed  []string // everything printed, for tests
+
+	pending    []agent.Event // tool calls started, not finished (shown live)
+	thinkStart time.Time     // when the current thinking began
+	thoughts   []string      // finished thinking, newest last (ctrl+o)
+	lastFull   string        // the last collapsed tool output (ctrl+r)
+	verb       string        // this turn's spinner verb
+	started2   bool          // banner printed
 }
 
 func newModel(o Options) *model {
@@ -200,7 +215,20 @@ func newModel(o Options) *model {
 }
 
 func (m *model) Init() tea.Cmd {
-	cmds := []tea.Cmd{textarea.Blink, m.print(m.banner())}
+	// the banner waits for the first window size so it fits the terminal
+	// (startBanner runs it anyway if the terminal never reports one)
+	return tea.Batch(textarea.Blink, tea.Tick(300*time.Millisecond, func(time.Time) tea.Msg { return startMsg{} }))
+}
+
+type startMsg struct{}
+
+// start prints the banner and submits the initial prompt, once.
+func (m *model) start() tea.Cmd {
+	if m.started2 {
+		return nil
+	}
+	m.started2 = true
+	cmds := []tea.Cmd{m.print(m.banner())}
 	if m.initial != "" {
 		cmds = append(cmds, m.submit(m.initial))
 		m.initial = ""
@@ -208,14 +236,50 @@ func (m *model) Init() tea.Cmd {
 	return tea.Sequence(cmds...)
 }
 
-// print commits lines to the scrollback above the live region.
+// print commits lines to the scrollback above the live region, wrapped
+// to the terminal: a line the terminal wraps itself throws off the
+// redraw of the live region below it.
 func (m *model) print(lines ...string) tea.Cmd {
 	s := strings.Join(lines, "\n")
 	if s == "" {
 		return nil
 	}
+	s = fitWidth(s, max(20, m.width-1))
 	m.printed = append(m.printed, s)
 	return tea.Println(s)
+}
+
+// fitWidth wraps each over-long line at w columns (ANSI-aware), keeping
+// its indentation as a hanging indent ("  ⎿  " results stay aligned).
+func fitWidth(s string, w int) string {
+	lines := strings.Split(s, "\n")
+	var out []string
+	for _, l := range lines {
+		if reflowansi.PrintableRuneWidth(l) <= w {
+			out = append(out, l)
+			continue
+		}
+		plain := ansiRe.ReplaceAllString(l, "")
+		indent := len(plain) - len(strings.TrimLeft(plain, " "))
+		if strings.HasPrefix(plain, "  ⎿  ") {
+			indent = 5
+		}
+		if indent > w/2 {
+			indent = 0
+		}
+		ww := wordwrap.NewWriter(w - indent)
+		ww.Breakpoints = nil // break at spaces only: paths and hashes stay whole until hard-wrapped
+		_, _ = ww.Write([]byte(l))
+		_ = ww.Close()
+		parts := strings.Split(wrap.String(ww.String(), w-indent), "\n")
+		for i, p := range parts {
+			if i > 0 {
+				p = strings.Repeat(" ", indent) + strings.TrimLeft(p, " ")
+			}
+			out = append(out, p)
+		}
+	}
+	return strings.Join(out, "\n")
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -226,7 +290,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.width = v.Width
 		m.ta.SetWidth(max(20, v.Width-6))
-		return m, nil
+		return m, m.start()
+	case startMsg:
+		return m, m.start()
 	case spinner.TickMsg:
 		if !m.running {
 			return m, nil
@@ -308,6 +374,21 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 	case "shift+tab":
 		m.cycleMode()
 		return nil
+	case "ctrl+r":
+		if m.lastFull == "" {
+			m.hint = "nothing collapsed to expand"
+			return nil
+		}
+		full := m.lastFull
+		m.lastFull = ""
+		return m.print(result(full))
+	case "ctrl+o":
+		if len(m.thoughts) == 0 {
+			m.hint = "no thinking to show"
+			return nil
+		}
+		t := m.thoughts[len(m.thoughts)-1]
+		return m.print("", thinkSt.Render("∴ Thinking…"), result(thinkSt.Render(lipgloss.NewStyle().Width(min(m.width-8, 110)).Render(t))))
 	case "tab":
 		if len(m.sugg) > 0 {
 			m.acceptSuggestion()
@@ -429,6 +510,7 @@ func (m *model) submit(raw string) tea.Cmd {
 		m.queue = append(m.queue, text)
 		return m.print(userLine(text), result(dim.Render("queued — sent when the current turn ends")))
 	}
+	m.ta.Placeholder = "" // the example is for an empty session only
 	return tea.Sequence(m.print(userLine(text)), m.startTurn(m.a.ExpandMentions(text)))
 }
 
@@ -436,7 +518,8 @@ func (m *model) startTurn(prompt string) tea.Cmd {
 	ctx, cancel := context.WithCancel(m.a.Ctx.Context)
 	m.cancel, m.running, m.started = cancel, true, time.Now()
 	m.live.Reset()
-	m.think = ""
+	m.think, m.pending = "", nil
+	m.verb = verbs[int(time.Now().UnixNano()/1e6)%len(verbs)]
 	a := m.a
 	return tea.Batch(m.sp.Tick, func() tea.Msg {
 		defer cancel()
@@ -557,52 +640,133 @@ func (m *model) onExecDone(v execDoneMsg) tea.Cmd {
 
 func (m *model) onEvent(e agent.Event) tea.Cmd {
 	switch e.Kind {
-	case agent.EvDelta:
-		m.live.WriteString(e.Text)
-		return nil
 	case agent.EvThinking:
+		if m.think == "" {
+			m.thinkStart = time.Now()
+		}
 		m.think += e.Text
 		return nil
+	case agent.EvDelta:
+		cmd := m.flushThinking()
+		m.live.WriteString(e.Text)
+		return cmd
 	case agent.EvText:
+		cmd := m.flushThinking()
 		m.live.Reset()
-		m.think = ""
-		return m.print("", accentSt.Render("● ")+strings.TrimLeft(m.markdown(e.Text), "\n "))
+		return tea.Sequence(cmd, m.print("", "⏺ "+strings.TrimLeft(m.markdown(e.Text), "\n ")))
 	case agent.EvToolStart:
-		m.think = ""
-		return m.print("", accentSt.Render("● ")+toolHeader(e))
+		cmd := m.flushThinking()
+		m.pending = append(m.pending, e)
+		return cmd
 	case agent.EvToolResult:
 		m.progress = ""
+		start := e
+		for i, p := range m.pending { // the oldest running call of this tool
+			if p.Tool == e.Tool {
+				start = p
+				m.pending = append(m.pending[:i:i], m.pending[i+1:]...)
+				break
+			}
+		}
+		bullet := okSt.Render("⏺")
 		if e.Err != "" {
-			return m.print(result(errSt.Render(e.Err)))
+			bullet = errSt.Render("⏺")
 		}
-		out := e.Output
-		if out == "" {
-			out = e.Text
-		}
-		return m.print(result(colorDiff(out)))
+		return m.print("", bullet+" "+toolHeader(start), result(m.toolBody(start, e)))
 	case agent.EvNotice:
 		return m.print(result(dim.Render(e.Text)))
 	case agent.EvProgress:
 		m.progress = e.Text
 		return nil
 	case agent.EvTodos:
-		return m.print("", accentSt.Render("● ")+bold.Render("Update todos"), result(todoLines(e.Todos)))
+		return m.print("", okSt.Render("⏺")+" "+bold.Render("Update Todos"), result(todoLines(e.Todos)))
 	}
 	return nil
 }
 
+// flushThinking closes a finished stretch of thinking into a collapsed
+// line, the way Claude Code shows it; ctrl+o prints the text.
+func (m *model) flushThinking() tea.Cmd {
+	t := strings.TrimSpace(m.think)
+	m.think = ""
+	if t == "" {
+		return nil
+	}
+	m.thoughts = append(m.thoughts, t)
+	secs := int(time.Since(m.thinkStart).Round(time.Second).Seconds())
+	return m.print("", thinkSt.Render(fmt.Sprintf("∴ Thought for %ds", max(secs, 1)))+dim.Render(" (ctrl+o to show thinking)"))
+}
+
+// toolCollapse is how many output lines a finished tool shows.
+const toolCollapse = 3
+
+// toolBody is what a finished tool call shows under its header: a summary
+// for reads, the diff for edits, otherwise the first lines of output.
+func (m *model) toolBody(start, e agent.Event) string {
+	if e.Err != "" {
+		return m.collapse(errSt.Render("Error: " + e.Err))
+	}
+	out := e.Output
+	if out == "" {
+		out = e.Text
+	}
+	switch strings.TrimPrefix(start.Tool, "↳ ") {
+	case "read":
+		n := strings.Count(strings.TrimRight(out, "\n"), "\n") + 1
+		if strings.TrimSpace(out) == "" {
+			n = 0
+		}
+		return fmt.Sprintf("Read %s %s", bold.Render(strconv.Itoa(n)), plural(n, "line"))
+	case "edit", "write":
+		return colorDiff(capLines(out, 40))
+	case "todo_write":
+		return ""
+	}
+	return m.collapse(colorDiff(out))
+}
+
+// collapse keeps the first lines and remembers the rest for ctrl+r.
+func (m *model) collapse(s string) string {
+	s = strings.TrimRight(s, "\n")
+	lines := strings.Split(s, "\n")
+	if len(lines) <= toolCollapse+1 {
+		return s
+	}
+	m.lastFull = s
+	return strings.Join(lines[:toolCollapse], "\n") + "\n" +
+		faint.Render(fmt.Sprintf("… +%d lines ", len(lines)-toolCollapse)) + dim.Render("(ctrl+r to expand)")
+}
+
+func capLines(s string, n int) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if len(lines) <= n {
+		return strings.Join(lines, "\n")
+	}
+	return strings.Join(lines[:n], "\n") + "\n" + faint.Render(fmt.Sprintf("… +%d lines", len(lines)-n))
+}
+
+func plural(n int, w string) string {
+	if n == 1 {
+		return w
+	}
+	return w + "s"
+}
+
 func (m *model) onDone(v doneMsg) tea.Cmd {
 	m.running, m.cancel, m.progress = false, nil, ""
-	var cmds []tea.Cmd
+	cmds := []tea.Cmd{m.flushThinking()}
 	if s := strings.TrimSpace(m.live.String()); s != "" && v.err != nil {
-		cmds = append(cmds, m.print("", accentSt.Render("● ")+s)) // partial text before an error
+		cmds = append(cmds, m.print("", "⏺ "+strings.TrimLeft(m.markdown(s), "\n "))) // partial text before an error
 	}
+	for _, p := range m.pending { // calls cut off by an interrupt or error
+		cmds = append(cmds, m.print("", errSt.Render("⏺")+" "+toolHeader(p)))
+	}
+	m.pending = nil
 	m.live.Reset()
-	m.think = ""
 	switch {
 	case v.err == nil:
 	case errors.Is(v.err, context.Canceled):
-		cmds = append(cmds, m.print(result(warnSt.Render("Interrupted")+dim.Render(" · what should cometcli do instead?"))))
+		cmds = append(cmds, m.print(result(errSt.Render("Interrupted")+dim.Render(" · What should cometcli do instead?"))))
 		m.queue = nil
 	default:
 		cmds = append(cmds, m.print(result(errSt.Render(v.err.Error()))))
@@ -821,17 +985,37 @@ func (m *model) View() string {
 	w := max(40, m.width)
 	if m.running {
 		if s := strings.TrimSpace(m.live.String()); s != "" {
-			b.WriteString(lastLines(lipgloss.NewStyle().Width(w-2).Render(accentSt.Render("● ")+s), 14) + "\n")
-		} else if t := strings.TrimSpace(m.think); t != "" {
-			b.WriteString(faint.Render(lastLines(lipgloss.NewStyle().Width(w-4).Render("∴ "+oneLine(t, 400)), 3)) + "\n")
+			b.WriteString("\n" + lastLines("⏺ "+strings.TrimLeft(m.markdown(s), "\n "), 16) + "\n")
 		}
-		if m.progress != "" {
-			b.WriteString(accentSt.Render("  ⎿  ") + dim.Render(oneLine(m.progress, w-8)) + "\n")
+		// running tool calls: blinking bullet, like Claude Code
+		blink := "⏺"
+		if time.Now().UnixMilli()/500%2 == 1 {
+			blink = " "
 		}
-		u, _ := m.a.Usage()
-		fmt.Fprintf(&b, "\n%s %s %s\n", m.sp.View(), accentSt.Render(working(m.started)),
-			dim.Render(fmt.Sprintf("(%s · ↑ %s tokens · esc to interrupt)", time.Since(m.started).Round(time.Second), humanTok(u.Input+u.Output))))
+		for i, p := range m.pending {
+			b.WriteString("\n" + blink + " " + toolHeader(p) + "\n")
+			status := "Running…"
+			if m.approval != nil || m.choice != nil || m.secretReq != nil {
+				status = "Waiting for your answer…"
+			} else if i == len(m.pending)-1 && m.progress != "" {
+				status = oneLine(m.progress, w-8)
+			}
+			b.WriteString(faint.Render("  ⎿  ") + dim.Render(status) + "\n")
+		}
+		verb := m.verb
+		if verb == "" {
+			verb = verbs[0]
+		}
+		if strings.TrimSpace(m.think) != "" && m.live.Len() == 0 {
+			verb = "Thinking"
+		}
+		if m.approval == nil && m.choice == nil && m.secretReq == nil { // paused while asking
+			u, _ := m.a.Usage()
+			fmt.Fprintf(&b, "\n%s %s %s\n", m.sp.View(), accentSt.Render(verb+"…"),
+				dim.Render(fmt.Sprintf("(%s · ↑ %s tokens · esc to interrupt)", time.Since(m.started).Round(time.Second), humanTok(u.Input+u.Output))))
+		}
 	}
+	b.WriteString("\n")
 	switch {
 	case m.secretReq != nil:
 		b.WriteString(m.dialogView(w, m.secretReq.prompt, m.secretReq.input.View()+"\n"+dim.Render("enter to submit · esc to cancel · never stored or sent to the model")))
@@ -853,7 +1037,7 @@ func (m *model) View() string {
 		return b.String()
 	}
 	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("240")).Width(w-2).Padding(0, 1)
-	b.WriteString(box.Render(accentSt.Render("❯ ") + m.ta.View()))
+	b.WriteString(box.Render("> " + m.ta.View()))
 	b.WriteString("\n")
 	switch {
 	case m.ta.Value() == "?":
@@ -874,9 +1058,9 @@ func (m *model) View() string {
 	return b.String()
 }
 
-const shortcuts = `  ! run in your terminal    / commands         @ attach a file     # remember
-  shift+tab cycle mode      esc interrupt      ↑↓ history          ctrl+j newline
-  ctrl+c clear / exit       \⏎ newline         tab complete        ctrl+d exit`
+const shortcuts = `  ! for bash mode            / for commands         @ for file paths       # to memorize
+  shift+tab to cycle modes   esc to interrupt       ctrl+r expand output   ctrl+o show thinking
+  ↑↓ history                 \⏎ or ctrl+j newline   ctrl+c clear / exit    tab to complete`
 
 func (m *model) footer(w int) string {
 	left := dim.Render("? for shortcuts")
@@ -992,20 +1176,37 @@ func describe(p *pendingApproval) (string, string) {
 // --- rendering helpers -------------------------------------------------------
 
 func (m *model) banner() string {
-	scope := "general mode — shell, files and web on this machine"
-	if m.a.Node() {
-		p := m.a.Ctx.Profile
-		scope = fmt.Sprintf("node mode — %s (%s, %s)", p.Name, p.ChainID, orDefault(p.Transport.Type, "local"))
-	}
 	cwd := m.a.WorkRoot
 	if home, _ := os.UserHomeDir(); home != "" && strings.HasPrefix(cwd, home) {
 		cwd = "~" + strings.TrimPrefix(cwd, home)
 	}
-	inner := accentSt.Render("✻") + " " + bold.Render("cometcli") + "\n\n" +
-		dim.Render("  "+scope) + "\n" +
-		dim.Render("  "+m.a.Provider.Name()+"/"+m.a.Model+" · "+cwd)
-	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(accent).Padding(0, 1).Render(inner)
-	out := []string{box, dim.Render(" /help for commands · ! runs in your terminal · # remembers · @ attaches a file · shift+tab changes mode"), ""}
+	// a fixed-width box that never wraps: long paths lose their middle
+	inner := min(max(40, m.width-4), 58)
+	fit := func(s string) string {
+		if lipgloss.Width(s) <= inner-4 {
+			return s
+		}
+		r := []rune(s)
+		keep := inner - 5
+		return string(r[:keep/3]) + "…" + string(r[len(r)-(keep-keep/3):])
+	}
+	fitEnd := func(s string) string {
+		if r := []rune(s); len(r) > inner-4 {
+			return string(r[:inner-5]) + "…"
+		}
+		return s
+	}
+	scope := "general — this machine"
+	if m.a.Node() {
+		p := m.a.Ctx.Profile
+		scope = fmt.Sprintf("node %s (%s)", p.Name, p.ChainID)
+	}
+	body := accentSt.Render("✻") + " Welcome to " + bold.Render("cometcli") + "!\n\n" +
+		dim.Render(fit("  /help for help, /status for your current setup")) + "\n\n" +
+		dim.Render(fit("  cwd: "+cwd)) + "\n" +
+		dim.Render(fitEnd("  "+scope+" · "+m.a.Provider.Name()+"/"+m.a.Model))
+	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(accent).Padding(0, 1).Width(inner).Render(body)
+	out := []string{box}
 	for _, n := range m.notes {
 		out = append(out, result(dim.Render(n)))
 	}
@@ -1013,10 +1214,35 @@ func (m *model) banner() string {
 		// resumed: show where we left off
 		for i := len(h) - 1; i >= 0; i-- {
 			if h[i].Role == "assistant" && strings.TrimSpace(h[i].Text) != "" {
-				out = append(out, dim.Render(" last answer:"), accentSt.Render("● ")+strings.TrimLeft(m.markdown(h[i].Text), "\n "))
+				out = append(out, "", dim.Render(" last answer:"), "⏺ "+strings.TrimLeft(m.markdown(h[i].Text), "\n "))
 				break
 			}
 		}
+		return strings.Join(out, "\n")
+	}
+	tips := []string{
+		`Ask about this machine, e.g. "why is the disk filling up?"`,
+		"Work on a validator: " + bold.Render("/one <profile>") + " (or start with cometcli one <profile>)",
+		bold.Render("!") + " runs a command in your terminal · " + bold.Render("#") + " saves to memory · " + bold.Render("@") + " attaches a file",
+	}
+	if m.a.Node() {
+		tips = []string{
+			`Ask about this node, e.g. "is my validator healthy?"`,
+			bold.Render("/incident") + " works a problem end to end: triage → known case → fix → verify",
+			bold.Render("/one off") + " returns to general mode · " + bold.Render("!") + " runs a command in your terminal",
+		}
+	}
+	out = append(out, "", dim.Render(" Tips for getting started:"), "")
+	wrap := lipgloss.NewStyle().Width(max(30, m.width-5))
+	for i, t := range tips {
+		lines := strings.Split(wrap.Render(t), "\n") // hanging indent under the number
+		for j := range lines {
+			lines[j] = strings.TrimRight(lines[j], " ")
+			if j > 0 {
+				lines[j] = "    " + lines[j]
+			}
+		}
+		out = append(out, dim.Render(fmt.Sprintf(" %d. ", i+1))+strings.Join(lines, "\n"))
 	}
 	return strings.Join(out, "\n")
 }
@@ -1033,6 +1259,15 @@ func (m *model) markdown(s string) string {
 		zero := uint(0)
 		cfg.Document.Margin = &zero
 		cfg.Document.BlockPrefix, cfg.Document.BlockSuffix = "", ""
+		// Claude Code look: "- " bullets, headings as bold text
+		cfg.Item.BlockPrefix = "- "
+		// inline code: just a color, no padding or background
+		codeColor := "#B1B9F9"
+		cfg.Code.Prefix, cfg.Code.Suffix, cfg.Code.BackgroundColor, cfg.Code.Color = "", "", nil, &codeColor
+		t := true
+		for _, h := range []*ansi.StyleBlock{&cfg.H1, &cfg.H2, &cfg.H3, &cfg.H4, &cfg.H5, &cfg.H6} {
+			h.Prefix, h.Suffix, h.BackgroundColor, h.Bold = "", "", nil, &t
+		}
 		if r, err := glamour.NewTermRenderer(glamour.WithStyles(cfg), glamour.WithWordWrap(w)); err == nil {
 			m.md, m.mdWidth = r, w
 		}
@@ -1178,11 +1413,9 @@ func todoLines(ts []agent.Todo) string {
 	return strings.Join(out, "\n")
 }
 
-var verbs = []string{"Working", "Investigating", "Checking", "Digging", "Reasoning", "Inspecting"}
-
-func working(start time.Time) string {
-	return verbs[int(time.Since(start)/(6*time.Second))%len(verbs)] + "…"
-}
+// verbs for the spinner, one picked per turn (Claude Code style)
+var verbs = []string{"Thinking", "Pondering", "Investigating", "Digging", "Checking", "Inspecting", "Crunching",
+	"Mulling", "Percolating", "Synthesizing", "Ruminating", "Deliberating", "Tinkering", "Sleuthing", "Untangling"}
 
 func lastLines(s string, n int) string {
 	lines := strings.Split(s, "\n")

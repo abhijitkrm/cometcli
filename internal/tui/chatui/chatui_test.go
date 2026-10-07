@@ -175,9 +175,14 @@ func TestEventRendering(t *testing.T) {
 	m.onEvent(agent.Event{Kind: agent.EvToolResult, Tool: "bash", Output: "primium-validator0\nprimium-validator1"})
 	m.onEvent(agent.Event{Kind: agent.EvToolResult, Tool: "edit", Output: "--- f\n- a = 1\n+ a = 2"})
 	m.onEvent(agent.Event{Kind: agent.EvToolStart, Tool: "mcp__grafana__query", Args: map[string]any{}})
+	m.running = true
+	if v := m.View(); !strings.Contains(v, "grafana · query (MCP)") || !strings.Contains(v, "Running…") {
+		t.Errorf("running call not shown live:\n%s", v)
+	}
+	m.running = false
 	m.onEvent(agent.Event{Kind: agent.EvTodos, Todos: []agent.Todo{{Content: "stop", Status: "completed"}, {Content: "swap", Status: "in_progress"}}})
 	out := strings.Join(m.printed, "\n")
-	for _, want := range []string{"Bash", "(docker ps)", "⎿", "primium-validator1", "+ a = 2", "grafana · query (MCP)", "swap"} {
+	for _, want := range []string{"Bash", "(docker ps)", "⎿", "primium-validator1", "+ a = 2", "swap"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
@@ -213,5 +218,37 @@ func TestShellCommandLocalAndSSH(t *testing.T) {
 	m.onExecDone(execDoneMsg{cmd: "./vote.sh", code: 0})
 	if !strings.Contains(m.printed[len(m.printed)-1], "the agent will know") {
 		t.Fatal("exec result not shown")
+	}
+}
+
+func TestCollapseThinkingAndExpand(t *testing.T) {
+	m, _ := newTestModel(t)
+	m.running = true
+	m.onEvent(agent.Event{Kind: agent.EvThinking, Text: "first I should list the containers"})
+	if !strings.Contains(m.View(), "Thinking…") {
+		t.Fatalf("spinner should say Thinking…:\n%s", m.View())
+	}
+	m.onEvent(agent.Event{Kind: agent.EvToolStart, Tool: "bash", Args: map[string]any{"command": "seq 1 10"}})
+	m.onEvent(agent.Event{Kind: agent.EvToolResult, Tool: "bash", Output: "1\n2\n3\n4\n5\n6\n7\n8\n9\n10"})
+	out := strings.Join(m.printed, "\n")
+	if !strings.Contains(out, "Thought for") || strings.Contains(out, "list the containers") {
+		t.Fatalf("thinking not collapsed:\n%s", out)
+	}
+	if !strings.Contains(out, "… +7 lines") || strings.Contains(out, "\n     9") {
+		t.Fatalf("output not collapsed:\n%s", out)
+	}
+	n := len(m.printed)
+	key(m, tea.KeyCtrlR)
+	if len(m.printed) == n || !strings.Contains(m.printed[len(m.printed)-1], "10") {
+		t.Fatal("ctrl+r did not expand")
+	}
+	key(m, tea.KeyCtrlO)
+	if !strings.Contains(m.printed[len(m.printed)-1], "list the containers") {
+		t.Fatal("ctrl+o did not show thinking")
+	}
+	m.onEvent(agent.Event{Kind: agent.EvToolStart, Tool: "read", Args: map[string]any{"file_path": "app.toml"}})
+	m.onEvent(agent.Event{Kind: agent.EvToolResult, Tool: "read", Output: "a\nb\nc"})
+	if !strings.Contains(m.printed[len(m.printed)-1], "Read") || !strings.Contains(m.printed[len(m.printed)-1], "3") {
+		t.Fatalf("read summary: %q", m.printed[len(m.printed)-1])
 	}
 }

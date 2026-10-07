@@ -41,7 +41,7 @@ const CommandHelp = `  /mode [ops|accept-edits|readonly|bypass]  show or set the
   /profile                      active profile
   /audit                        audit log path + session id
   /reset, /clear                clear conversation, start a new audit session
-  /status                       live node snapshot (node mode)
+  /status                       current setup: model, mode, scope, memory, MCP (+ live node snapshot in node mode)
   /compact [focus]              summarize the conversation to free context
   /cost                         token usage for this session
   /effort [low|medium|high|xhigh|max|default]  show or set reasoning depth
@@ -74,12 +74,44 @@ func RunCommand(a *Agent, c *toolkit.Context, reg *toolkit.Registry, line string
 		return RunCommand(a, c, reg, "/reset")
 
 	case "/status":
-		if a == nil || !a.Node() {
-			return CmdResult{Text: "general mode — /one <profile> for a node status"}, nil
+		if err := needAgent(); err != nil {
+			return CmdResult{}, err
 		}
-		return CmdResult{Text: "probing " + a.Ctx.Profile.Name + "…", Job: func(ctx context.Context) (string, error) {
-			return strings.TrimSpace(a.Redact.Text(SnapshotText(a.Ctx))), nil
-		}}, nil
+		// the current setup, like Claude Code's /status; in node mode also
+		// a live snapshot of the node (as a background job: never block)
+		a.loadMemory()
+		var b strings.Builder
+		scope := "general (this machine)"
+		if a.Node() {
+			p := a.Ctx.Profile
+			scope = fmt.Sprintf("node %s — %s, %s via %s", p.Name, p.ChainID, p.Role, orNone(p.Transport.Type))
+		}
+		fmt.Fprintf(&b, "scope:    %s\n", scope)
+		fmt.Fprintf(&b, "model:    %s/%s", a.Provider.Name(), a.Model)
+		if a.Effort != "" {
+			fmt.Fprintf(&b, " · effort %s", a.Effort)
+		}
+		fmt.Fprintf(&b, "\nmode:     %s\n", strings.TrimPrefix(a.Policy.String(), "mode "))
+		fmt.Fprintf(&b, "cwd:      %s\n", a.WorkRoot)
+		fmt.Fprintf(&b, "session:  %s", a.ID())
+		if pct := a.ContextPercent(); pct > 0 {
+			fmt.Fprintf(&b, " · context %d%% used", pct)
+		}
+		var mem []string
+		if a.ext != nil {
+			for _, m := range a.ext.memory {
+				mem = append(mem, m.Path)
+			}
+		}
+		fmt.Fprintf(&b, "\nmemory:   %s\n", orNone(strings.Join(mem, ", ")))
+		fmt.Fprintf(&b, "mcp:      %s", orNone(strings.Join(a.MCPServers(), ", ")))
+		res := CmdResult{Text: b.String()}
+		if a.Node() {
+			res.Job = func(ctx context.Context) (string, error) {
+				return strings.TrimSpace(a.Redact.Text(SnapshotText(a.Ctx))), nil
+			}
+		}
+		return res, nil
 
 	case "/profile":
 		if c == nil || c.Profile == nil {
@@ -342,7 +374,7 @@ func RunCommand(a *Agent, c *toolkit.Context, reg *toolkit.Registry, line string
 		if err := needAgent(); err != nil {
 			return CmdResult{}, err
 		}
-		a.system()
+		a.loadMemory()
 		var b strings.Builder
 		if a.ext == nil || len(a.ext.memory) == 0 {
 			b.WriteString("no memory files loaded\n")

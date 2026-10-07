@@ -1,5 +1,6 @@
+
 ╭──────────────────────────────────────────────────────────────────────────────╮
-│ ❯ /c                                                                         │
+│ > /c                                                                         │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ❯ /clear   clear conversation, start a new audit session
   /compact [focus]  summarize the conversation to free context

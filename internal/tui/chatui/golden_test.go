@@ -4,7 +4,6 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +14,6 @@ import (
 
 var update = flag.Bool("update", false, "rewrite golden files")
 
-var ansiRe = regexp.MustCompile(`\x1b\[[0-9;?]*[A-Za-z]`)
 
 // golden compares a rendered screen (ANSI stripped, trailing spaces
 // trimmed) with testdata/<name>.golden.
