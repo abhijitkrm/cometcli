@@ -141,7 +141,7 @@ func (s *ContainerSigner) Sign(ctx context.Context, b *Builder, p *Prepared) ([]
 		home = " --home " + q(s.Home)
 	}
 	inner := fmt.Sprintf(`set -e
-u=$(mktemp); s=$(mktemp); trap 'rm -f "$u" "$s"' EXIT
+umask 077; u=/tmp/cometcli-$$-unsigned.json; s=/tmp/cometcli-$$-signed.json; trap 'rm -f "$u" "$s"' EXIT
 printf %%s %s | base64 -d > "$u"
 %s%s tx sign "$u" --from %s --keyring-backend %s --chain-id %s --offline --account-number %d --sequence %d --sign-mode direct --output-document "$s"
 printf '%s%%s\n' "$(%s%s tx encode "$s")"`,

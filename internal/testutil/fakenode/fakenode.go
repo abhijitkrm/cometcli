@@ -211,8 +211,12 @@ func (n *Node) verifyTx(raw []byte, accNum uint64, simulate bool) (*decoded, err
 	if simulate && len(tr.Signatures[0]) == 0 {
 		return &decoded{body: &body, auth: &ai, seq: ai.SignerInfos[0].Sequence}, nil
 	}
-	if len(tr.Signatures[0]) != 64 {
-		return nil, fmt.Errorf("expected a 64-byte signature")
+	sig := tr.Signatures[0]
+	if len(sig) == 65 && keccakKey(ai.SignerInfos[0]) {
+		sig = sig[:64] // cosmos-evm ethsecp256k1 accepts r||s||v and drops v
+	}
+	if len(sig) != 64 {
+		return nil, fmt.Errorf("expected a 64-byte signature (65 with a recovery id for eth_secp256k1)")
 	}
 	si := ai.SignerInfos[0]
 	if si.ModeInfo.GetSingle().GetMode().String() != "SIGN_MODE_DIRECT" {
@@ -248,8 +252,8 @@ func (n *Node) verifyTx(raw []byte, accNum uint64, simulate bool) (*decoded, err
 		h = s[:]
 	}
 	var r, s secp256k1.ModNScalar
-	r.SetByteSlice(tr.Signatures[0][:32])
-	s.SetByteSlice(tr.Signatures[0][32:])
+	r.SetByteSlice(sig[:32])
+	s.SetByteSlice(sig[32:64])
 	if !ecdsa.NewSignature(&r, &s).Verify(h, pub) {
 		return nil, fmt.Errorf("signature verification failed; please verify account number (%d) and chain-id (%s): unauthorized", accNum, n.ChainID)
 	}
@@ -395,6 +399,10 @@ func (s *govSrv) Proposals(context.Context, *govv1.QueryProposalsRequest) (*govv
 
 func (s *govSrv) Vote(_ context.Context, r *govv1.QueryVoteRequest) (*govv1.QueryVoteResponse, error) {
 	return nil, status.Error(codes.NotFound, fmt.Sprintf("voter %s has not voted on proposal %d", r.Voter, r.ProposalId))
+}
+
+func keccakKey(s *txv1beta1.SignerInfo) bool {
+	return s.PublicKey.GetTypeUrl() == "/cosmos.evm.crypto.v1.ethsecp256k1.PubKey"
 }
 
 func fieldBytes(b []byte, num protowire.Number) []byte {
