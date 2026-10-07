@@ -1,6 +1,7 @@
 package val
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -135,5 +136,22 @@ func TestUnjailBlockedOnWrongConsensusKey(t *testing.T) {
 	}
 	if !strings.Contains(res.Text, "but the validator is registered with") || res.Data["can_unjail_now"] != false {
 		t.Fatalf("wrong key not a blocker:\n%s", res.Text)
+	}
+}
+
+func TestGatherFallsBackWhenNodeCantAnswer(t *testing.T) {
+	n, c, valoper, _ := setupChain(t)
+	jail(n, time.Now().Add(time.Minute))
+	loading := fakenode.Start(t, "primium-1") // up, but knows nothing yet
+	p := *c.Profile
+	p.Endpoints.GRPC, p.Endpoints.FallbackGRPC = loading.Addr, n.Addr
+	c2 := &toolkit.Context{Context: context.Background(), Profile: &p}
+	t.Cleanup(c2.Close)
+	f, err := Gather(c2, toolkit.Args{"validator": valoper})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !f.Jailed || !c2.GRPCFallback {
+		t.Fatalf("jailed=%v fallback=%v", f.Jailed, c2.GRPCFallback)
 	}
 }

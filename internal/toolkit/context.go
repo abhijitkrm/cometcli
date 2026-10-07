@@ -113,6 +113,26 @@ func (c *Context) GRPC() (*grpcclient.Conn, error) {
 	return conn, err
 }
 
+// FallbackGRPC switches chain queries to endpoints.fallback_grpc — for a
+// node that dialed fine but can't answer yet (just restarted, still
+// loading state). It returns false when there is no fallback.
+func (c *Context) FallbackGRPC() (*grpcclient.Conn, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.Profile == nil || c.Profile.Endpoints.FallbackGRPC == "" {
+		return nil, false
+	}
+	if c.GRPCFallback && c.grpc != nil {
+		return c.grpc, true
+	}
+	fb, err := grpcclient.Dial(c.Context, c.Profile.Endpoints.FallbackGRPC)
+	if err != nil {
+		return nil, false
+	}
+	c.grpc, c.GRPCFallback = fb, true // the node's own conn is closed with the context's
+	return fb, true
+}
+
 // EVM lazily connects the Ethereum JSON-RPC endpoint.
 func (c *Context) EVM() (*evmclient.Client, error) {
 	c.mu.Lock()

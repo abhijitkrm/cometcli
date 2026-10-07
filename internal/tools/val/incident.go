@@ -85,7 +85,18 @@ func Gather(c *toolkit.Context, a toolkit.Args) (*Facts, error) {
 		return nil, err
 	}
 	vr, err := g.Staking.Validator(c, &stakingv1beta1.QueryValidatorRequest{ValidatorAddr: valoper})
+	if err != nil && !c.GRPCFallback {
+		// the node may be up but not answering yet (just restarted,
+		// loading state): ask another node of the chain
+		if fb, ok := c.FallbackGRPC(); ok {
+			g = fb
+			vr, err = g.Staking.Validator(c, &stakingv1beta1.QueryValidatorRequest{ValidatorAddr: valoper})
+		}
+	}
 	if err != nil {
+		if strings.Contains(err.Error(), "invalid height") || strings.Contains(err.Error(), "context did not contain latest block height") {
+			return nil, fmt.Errorf("the node is up but can't answer chain queries yet (still loading state after a restart) — retry in a few seconds, or set endpoints.fallback_grpc to query another node: %w", err)
+		}
 		return nil, fmt.Errorf("validator %s: %w", valoper, err)
 	}
 	v := vr.Validator
