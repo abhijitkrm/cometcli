@@ -1,5 +1,6 @@
 - id: upgrade-halt-binary-missing
   title: Chain halted at an upgrade height — new binary not running
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, state-apphash-mismatch]
   severity: critical
   symptoms: logs show UPGRADE "<name>" NEEDED at height; node stopped or crash-looping
   match:
@@ -34,6 +35,7 @@
 
 - id: upgrade-binary-too-early
   title: New binary started before the upgrade height
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, state-apphash-mismatch]
   severity: critical
   match:
     any: ["logs.binary_early > 0"]
@@ -46,6 +48,7 @@
 
 - id: upgrade-halt-height-set
   title: halt-height configured in app.toml
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
   severity: high
   match:
     all: ["app.halt_height > 0"]

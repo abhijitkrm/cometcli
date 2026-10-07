@@ -124,12 +124,18 @@ func TestTriageJailedEVMValidator(t *testing.T) {
 			t.Errorf("missing case %s in %v", id, got)
 		}
 	}
-	if got[0] != "val-jailed-waiting-period" && got[0] != "val-jailed-downtime" {
+	// the disk is the root; the jail and the lag are its symptoms
+	if got[0] != "host-disk-full" {
 		t.Errorf("top case %s", got[0])
+	}
+	for _, h := range hits {
+		if h.Case.ID == "val-jailed-downtime" && h.SymptomOf != "host-disk-full" {
+			t.Errorf("jail symptom of %q", h.SymptomOf)
+		}
 	}
 	text := Render(r, hits, "")
 	t.Log("\n" + text)
-	for _, sub := range []string{"val: ", "jailed=true", "matched cases", "kb.show", "disk_io:"} {
+	for _, sub := range []string{"val: ", "jailed=true", "matched cases", "symptoms of the above", "kb.show", "disk_io:"} {
 		if !strings.Contains(text, sub) {
 			t.Errorf("render lacks %q:\n%s", sub, text)
 		}

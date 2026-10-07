@@ -144,3 +144,30 @@ func TestSearch(t *testing.T) {
 		t.Fatalf("search: %v", cs)
 	}
 }
+
+func TestExplainsAreKnownAndRootsFirst(t *testing.T) {
+	b := Load("", "")
+	for id, c := range b.Cases {
+		for _, x := range c.Explains {
+			if _, ok := b.Cases[x]; !ok {
+				t.Errorf("%s explains unknown case %s", id, x)
+			}
+		}
+	}
+	// a bad config.toml: crash loop, RPC down, jailed — the config is the root
+	s := Signals{"config.parse_error": true, "proc.running": false, "proc.restarts": 9.0, "proc.uptime_s": 7.0,
+		"logs.panic": 0.0, "logs.config_parse": 4.0, "node.reachable": false, "val.jailed": true, "val.tombstoned": false,
+		"val.jail_remaining_s": 20.0, "profile.role": "validator", "app.api_enable": true}
+	hits := b.Match(s, "cosmos-evm")
+	if hits[0].Case.ID != "cfg-parse-error" && hits[0].Case.ID != "node-exit-config-error" {
+		t.Fatalf("root = %s", hits[0].Case.ID)
+	}
+	for _, h := range hits {
+		if h.Case.ID == "val-jailed-downtime" && h.SymptomOf == "" {
+			t.Error("jail not marked as a symptom")
+		}
+	}
+	if last := hits[len(hits)-1]; last.Case.Kind != "advisory" {
+		t.Errorf("advisory not last: %s", last.Case.ID)
+	}
+}

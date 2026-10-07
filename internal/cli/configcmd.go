@@ -1,12 +1,15 @@
 package cli
 
 import (
+	"bufio"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 
 	"github.com/abhijitkrm/cometcli/internal/agent"
@@ -71,6 +74,29 @@ func configCmd() *cobra.Command {
 		keys = append(keys, "agent."+k)
 	}
 	sort.Strings(keys)
+	cmd.AddCommand(&cobra.Command{
+		Use:   "set-key <ENV_NAME>",
+		Short: "Save an API key (read from stdin) to ~/.cometcli/credentials (0600), e.g. set-key OPENROUTER_API_KEY",
+		Long: "Reads the key from stdin (hidden when it's a terminal) and saves it to ~/.cometcli/credentials, mode 0600. " +
+			"Providers use it when the environment variable isn't set. An empty input removes the key.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			v, err := readSecretStdin(cmd, args[0])
+			if err != nil {
+				return err
+			}
+			if err := config.SetCredential(args[0], strings.TrimSpace(v)); err != nil {
+				return err
+			}
+			p, _ := config.Path("credentials")
+			if strings.TrimSpace(v) == "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "removed %s from %s\n", args[0], p)
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "saved %s to %s (0600)\n", args[0], p)
+			}
+			return nil
+		},
+	})
 	cmd.AddCommand(&cobra.Command{
 		Use:   "show",
 		Short: "Print the global agent section",
@@ -137,4 +163,19 @@ func configCmd() *cobra.Command {
 		},
 	})
 	return cmd
+}
+
+// readSecretStdin reads one line from stdin, without echo on a terminal.
+func readSecretStdin(cmd *cobra.Command, name string) (string, error) {
+	if fd := int(os.Stdin.Fd()); term.IsTerminal(fd) {
+		fmt.Fprintf(cmd.ErrOrStderr(), "%s: ", name)
+		b, err := term.ReadPassword(fd)
+		fmt.Fprintln(cmd.ErrOrStderr())
+		return string(b), err
+	}
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil && line == "" {
+		return "", fmt.Errorf("no key on stdin")
+	}
+	return line, nil
 }

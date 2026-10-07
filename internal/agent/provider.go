@@ -138,12 +138,18 @@ func NewProvider(ac config.AgentConf) (Provider, error) {
 	}
 	key := func(env string) string {
 		if ac.APIKeyEnv != "" {
-			return os.Getenv(ac.APIKeyEnv)
+			if v := os.Getenv(ac.APIKeyEnv); v != "" {
+				return v
+			}
+			return config.Credential(ac.APIKeyEnv)
 		}
 		if v := os.Getenv("COMETCLI_LLM_API_KEY"); v != "" {
 			return v
 		}
-		return os.Getenv(env)
+		if v := os.Getenv(env); v != "" {
+			return v
+		}
+		return config.Credential(env) // saved by `cometcli config set-key`
 	}
 	switch strings.ToLower(ac.Provider) {
 	case "anthropic", "claude":
@@ -166,6 +172,15 @@ func NewProvider(ac config.AgentConf) (Provider, error) {
 			model: def(ac.Model, "llama-3.3-70b-versatile"),
 			base:  def(ac.BaseURL, "https://api.groq.com/openai"),
 		}, nil
+	case "openrouter":
+		// OpenRouter — https://openrouter.ai; openrouter/free routes each
+		// request to a free model that supports what it needs (tools…)
+		return &openai{
+			name:  "openrouter",
+			key:   key("OPENROUTER_API_KEY"),
+			model: def(ac.Model, "openrouter/free"),
+			base:  def(ac.BaseURL, "https://openrouter.ai/api"),
+		}, nil
 	case "gemini", "google":
 		// Gemini Interactions API — https://aistudio.google.com/apikey
 		return &gemini{
@@ -185,7 +200,7 @@ func NewProvider(ac config.AgentConf) (Provider, error) {
 			base:  base,
 		}, nil
 	case "off", "none", "":
-		return nil, fmt.Errorf("no agent provider — run `cometcli config set agent.provider groq` (or gemini, anthropic, openai, openai-compat), or set one in a profile")
+		return nil, fmt.Errorf("no agent provider — run `cometcli config set agent.provider openrouter` (or groq, gemini, anthropic, openai, openai-compat), or set one in a profile")
 	default:
 		return nil, fmt.Errorf("unknown agent.provider %q", ac.Provider)
 	}

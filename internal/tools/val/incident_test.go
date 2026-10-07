@@ -16,7 +16,8 @@ E[2026-10-06|21:41:13] Stopping peer for error err="read tcp 172.18.0.3:26656: i
 E[2026-10-06|21:41:15] Stopping peer for error err="EOF" module=p2p
 E[2026-10-06|21:41:40] dial tcp 10.0.0.2:26656: connect: connection refused module=p2p
 E[2026-10-06|21:43:02] Failed to sign vote err="error signing vote: remote signer timed out" module=consensus
-INF slashing and jailing validator due to liveness fault height=162050 jailed_until=2026-10-06T21:54:31Z min_height=152050 module=x/slashing threshold=5000 validator=cosmosvalcons1xyz
+INF slashing and jailing validator due to liveness fault height=162050 jailed_until=2026-10-06T21:54:31Z min_height=152050 module=x/slashing threshold=5000
+INF validator jailed module=x/staking validator=cosmosvalcons1someoneelse000
 `
 
 func TestJailCheckExplainsAndBlocks(t *testing.T) {
@@ -32,6 +33,9 @@ func TestJailCheckExplainsAndBlocks(t *testing.T) {
 	res, err := (jailCheckTool{}).Run(c, toolkit.Args{"validator": valoper})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if strings.Contains(res.Text, "someoneelse") {
+		t.Error("another validator's jailing shown as evidence")
 	}
 	for _, want := range []string{"reason:    downtime", "liveness fault height=162050", "peer loss / network ×3",
 		"signer / privval", "remote signer timed out", "restarts=3", "jail period runs until", "node not synced", "wait.until condition=synced"} {

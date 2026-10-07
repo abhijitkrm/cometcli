@@ -40,6 +40,8 @@ type Report struct {
 	Sources map[string]string // collector → "ok" or why it was unavailable
 	Samples map[string][]string
 	Since   time.Duration // log window
+
+	jailLines []string
 }
 
 // ChainType decides which case set applies: profile metadata chain_type
@@ -145,6 +147,10 @@ func CollectFor(c *toolkit.Context, since time.Duration, names []string) *Report
 					r.Samples = v.(map[string][]string)
 					continue
 				}
+				if k == "_jail_lines" {
+					r.jailLines = v.([]string)
+					continue
+				}
 				r.Signals[k] = v
 			}
 			if err != nil {
@@ -225,6 +231,9 @@ func collectChain(c *toolkit.Context, r *Report, set func(string, any)) error {
 	}
 	if f.FeeBalance != "" {
 		set("val.fee_balance_zero", f.FeeBalance == "0")
+	}
+	if f.ConsAddr != "" {
+		set("val.cons_addr", f.ConsAddr)
 	}
 	if len(f.ConsHex) > 0 {
 		set("val.cons_addr_hex", strings.ToUpper(fmt.Sprintf("%x", f.ConsHex)))
@@ -445,10 +454,14 @@ func collectLogs(c *toolkit.Context, r *Report, set func(string, any)) error {
 	for _, cat := range logscan.Categories {
 		set("logs."+cat.Slug, float64(sc.Counts[cat.Slug]))
 	}
+	if sc.LastError != "" {
+		set("logs.last_error", sc.LastError)
+	}
 	if sc.UpgradeName != "" {
 		set("logs.upgrade_name", sc.UpgradeName)
 	}
 	set("_samples", sc.Samples)
+	set("_jail_lines", sc.JailLines)
 	return nil
 }
 
@@ -588,6 +601,23 @@ func collectEVM(c *toolkit.Context, r *Report, set func(string, any)) error {
 // derive computes signals that need more than one collector.
 func derive(r *Report) {
 	s := r.Signals
+	// every node logs every validator's jailing: keep only ours
+	if cons, ok := s["val.cons_addr"].(string); ok && cons != "" && s["logs.jail"] != nil {
+		n := 0.0
+		var own []string
+		for _, l := range r.jailLines {
+			if logscan.OwnJailLine(l, cons) {
+				n++
+				own = append(own, l)
+			}
+		}
+		s["logs.jail"] = n
+		if len(own) > 0 {
+			r.Samples["jail"] = own[:min(len(own), 3)]
+		} else {
+			delete(r.Samples, "jail")
+		}
+	}
 	f := func(k string) (float64, bool) { v, ok := s[k].(float64); return v, ok }
 	if age, ok := f("node.block_age_s"); ok {
 		s["node.stalled"] = s["node.catching_up"] == false && age > 60

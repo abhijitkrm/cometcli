@@ -1,5 +1,6 @@
 - id: host-disk-full
   title: Disk full or nearly full on the node data volume
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, state-db-corrupt, host-disk-high, host-disk-free-low]
   severity: critical
   match:
     any: ["host.disk_used_pct >= 95", "logs.disk_io > 0"]
@@ -33,6 +34,7 @@
 
 - id: host-inodes-exhausted
   title: Inodes exhausted
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
   severity: critical
   match:
     all: ["host.inode_used_pct >= 95"]
@@ -45,6 +47,7 @@
 
 - id: host-oom-killed
   title: Node killed for out-of-memory
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, host-memory-pressure]
   severity: critical
   match:
     any: ["proc.oom_killed == true", "logs.oom > 0"]
@@ -73,6 +76,7 @@
 
 - id: host-overloaded
   title: Host CPU overloaded
+  explains: [node-consensus-timeouts, val-signing-degraded, node-blocksync-slow]
   severity: medium
   match:
     all: ["host.load_per_cpu >= 2"]
@@ -84,6 +88,7 @@
 
 - id: host-clock-unsynced
   title: System clock not NTP-synchronized
+  explains: [node-consensus-timeouts, val-signing-degraded, val-jail-imminent]
   severity: high
   match:
     all: ["clock.ntp_synced == false"]
@@ -98,6 +103,7 @@
 
 - id: host-too-many-files
   title: Too many open files
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, node-low-peers, node-no-peers]
   severity: high
   match:
     all: ["logs.too_many_files > 0"]
@@ -110,6 +116,7 @@
 
 - id: host-port-in-use
   title: Node can't bind a port (address already in use)
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
   severity: high
   match:
     all: ["logs.port_in_use > 0"]

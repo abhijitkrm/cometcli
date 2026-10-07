@@ -36,6 +36,10 @@ type Case struct {
 		All []string `yaml:"all,omitempty"`
 		Any []string `yaml:"any,omitempty"`
 	} `yaml:"match"`
+	// Explains lists cases this one causes (a crash loop explains the
+	// RPC being down and the downtime jail): when both match, this one
+	// is the root and ranks first.
+	Explains []string `yaml:"explains,omitempty"`
 	Confirm  []string `yaml:"confirm,omitempty"`
 	Causes   []string `yaml:"causes,omitempty"`
 	Fix      []string `yaml:"fix,omitempty"` // "[read] …", "[change] …", "[tx] …"
@@ -86,6 +90,11 @@ func (c *Case) compile() error {
 		}
 		c.any = append(c.any, cond)
 	}
+	for _, x := range c.Explains {
+		if x == c.ID {
+			return fmt.Errorf("case %s explains itself", c.ID)
+		}
+	}
 	for _, f := range c.Fix {
 		if !strings.HasPrefix(f, "[read]") && !strings.HasPrefix(f, "[change]") && !strings.HasPrefix(f, "[tx]") {
 			return fmt.Errorf("case %s: fix step %q must start with [read], [change] or [tx]", c.ID, f)
@@ -112,6 +121,8 @@ type Hit struct {
 	Case    *Case
 	Score   int
 	Matched []string // the conditions that held
+	// SymptomOf is the matched case that explains this one ("" = root).
+	SymptomOf string
 }
 
 // Matches reports whether the case's conditions hold for the signals.
@@ -207,11 +218,45 @@ func (b *Base) Match(s Signals, chain string) []Hit {
 			hits = append(hits, Hit{Case: c, Score: score, Matched: matched})
 		}
 	}
-	sort.Slice(hits, func(i, j int) bool {
+	byScore := func(i, j int) bool {
 		if hits[i].Score != hits[j].Score {
 			return hits[i].Score > hits[j].Score
 		}
 		return hits[i].Case.ID < hits[j].Case.ID
+	}
+	sort.Slice(hits, byScore)
+	// a hit explained by another matched hit (that it doesn't explain
+	// back) is a symptom: roots first, each in score order
+	matched := map[string]*Case{}
+	for _, h := range hits {
+		matched[h.Case.ID] = h.Case
+	}
+	explains := func(a *Case, id string) bool {
+		for _, x := range a.Explains {
+			if x == id {
+				return true
+			}
+		}
+		return false
+	}
+	for i := range hits {
+		for _, h := range hits { // best-scored explainer wins
+			if h.Case.ID != hits[i].Case.ID && explains(h.Case, hits[i].Case.ID) && !explains(hits[i].Case, h.Case.ID) {
+				hits[i].SymptomOf = h.Case.ID
+				break
+			}
+		}
+	}
+	sort.SliceStable(hits, func(i, j int) bool {
+		ai, aj := hits[i].Case.Kind == "advisory", hits[j].Case.Kind == "advisory"
+		if ai != aj {
+			return aj
+		}
+		ri, rj := hits[i].SymptomOf == "", hits[j].SymptomOf == ""
+		if ri != rj {
+			return ri
+		}
+		return byScore(i, j)
 	})
 	return hits
 }

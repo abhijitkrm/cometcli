@@ -100,6 +100,7 @@
 
 - id: val-key-mismatch
   title: Node runs a different consensus key than the validator registered on chain
+  explains: [val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, val-in-set-while-syncing]
   severity: critical
   symptoms: node status shows a consensus address different from the validator's; node is not signing
   match:
@@ -144,6 +145,7 @@
 
 - id: val-self-delegation-below-min
   title: Self-delegation below min_self_delegation
+  explains: [val-not-in-active-set]
   severity: high
   match:
     all: ["val.self_below_min == true"]
@@ -220,6 +222,7 @@
 
 - id: val-remote-signer-down
   title: Remote signer (tmkms/horcrux) connection failing
+  explains: [val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
   severity: critical
   match:
     all: ["config.remote_signer == true"]
@@ -241,6 +244,7 @@
 
 - id: val-pvs-ahead
   title: priv_validator_state height ahead of the chain — signing refused
+  explains: [val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, val-local-privval-errors]
   severity: high
   symptoms: node synced but won't sign; logs show height regression / conflicting data
   match:
@@ -260,6 +264,7 @@
 
 - id: val-double-sign-evidence
   title: Double-sign evidence in logs
+  explains: [val-tombstoned]
   severity: critical
   match:
     any: ["logs.double_sign > 0"]

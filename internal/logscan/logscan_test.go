@@ -21,3 +21,30 @@ func TestScanLevelsAndColors(t *testing.T) {
 		t.Errorf("upgrade name %q", r.UpgradeName)
 	}
 }
+
+func TestScanIgnoresUsageText(t *testing.T) {
+	logs := "Error: While parsing config: toml: expected character ]\nUsage:\n  evmd start [flags]\nFlags:\n" +
+		"      --consensus.double_sign_check_height int   how many blocks to look back\n" +
+		"      --log_level string   (trace|debug|info|warn|error|fatal|panic|disabled)\n" +
+		"  -h, --help   help for start\n"
+	r := Scan(logs)
+	if r.Counts["double_sign"] != 0 || r.Counts["panic"] != 0 {
+		t.Errorf("usage text classified: %v", r.Counts)
+	}
+	if r.Counts["config_parse"] != 1 || r.Counts["startup_error"] != 1 {
+		t.Errorf("startup error missed: %v", r.Counts)
+	}
+	if r.LastError != "Error: While parsing config: toml: expected character ]" {
+		t.Errorf("last error %q", r.LastError)
+	}
+}
+
+func TestOwnJailLine(t *testing.T) {
+	me := "cosmosvalcons1aaa"
+	if !OwnJailLine("INF validator jailed validator=cosmosvalcons1aaa", me) || OwnJailLine("INF validator jailed validator=cosmosvalcons1bbb", me) {
+		t.Fatal("address filter")
+	}
+	if !OwnJailLine("INF slashing and jailing validator due to liveness fault height=5", me) {
+		t.Fatal("line without an address dropped")
+	}
+}

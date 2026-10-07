@@ -97,6 +97,15 @@ func (o *openai) body(r *Request) map[string]any {
 		// local OpenAI-compatible servers may reject unknown fields
 		body["reasoning_effort"] = oaiEffort(r.Effort)
 	}
+	if o.Name() == "openrouter" {
+		// OpenRouter's normalized knob: always ask for the reasoning
+		// stream (models without reasoning ignore it)
+		rs := map[string]any{"enabled": true}
+		if r.Effort != "" {
+			rs["effort"] = oaiEffort(r.Effort)
+		}
+		body["reasoning"] = rs
+	}
 	return body
 }
 
@@ -156,6 +165,9 @@ func (o *openai) post(ctx context.Context, body map[string]any) (*http.Response,
 	if o.key != "" {
 		hdr["authorization"] = "Bearer " + o.key
 	}
+	if o.Name() == "openrouter" {
+		hdr["x-title"] = "cometcli" // app attribution on openrouter.ai
+	}
 	resp, err := doHTTP(ctx, o.client(), strings.TrimSuffix(o.base, "/")+"/v1/chat/completions", raw, hdr)
 	if err != nil {
 		return nil, err
@@ -176,9 +188,11 @@ func (o *openai) Chat(ctx context.Context, r *Request) (*Response, error) {
 	var out struct {
 		Choices []struct {
 			Message struct {
-				Content   string        `json:"content"`
-				Reasoning string        `json:"reasoning"`
-				ToolCalls []oaiToolCall `json:"tool_calls"`
+				Content   string `json:"content"`
+				Reasoning string `json:"reasoning"`
+				// DeepSeek / vLLM / some OpenRouter upstreams
+				ReasoningContent string        `json:"reasoning_content"`
+				ToolCalls        []oaiToolCall `json:"tool_calls"`
 			} `json:"message"`
 			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
@@ -197,6 +211,9 @@ func (o *openai) Chat(ctx context.Context, r *Request) (*Response, error) {
 		return nil, fmt.Errorf("%s: no choices", o.Name())
 	}
 	ch := out.Choices[0].Message
+	if ch.Reasoning == "" {
+		ch.Reasoning = ch.ReasoningContent
+	}
 	res := &Response{
 		Text: ch.Content, Thinking: ch.Reasoning, Done: len(ch.ToolCalls) == 0,
 		Stop: oaiStop(out.Choices[0].FinishReason), Usage: out.Usage.usage(),
@@ -240,9 +257,10 @@ func (o *openai) Stream(ctx context.Context, r *Request, onText func(string)) (*
 			Choices []struct {
 				FinishReason string `json:"finish_reason"`
 				Delta        struct {
-					Content   string `json:"content"`
-					Reasoning string `json:"reasoning"`
-					ToolCalls []struct {
+					Content          string `json:"content"`
+					Reasoning        string `json:"reasoning"`
+					ReasoningContent string `json:"reasoning_content"`
+					ToolCalls        []struct {
 						Index    int    `json:"index"`
 						ID       string `json:"id"`
 						Function struct {
@@ -278,6 +296,9 @@ func (o *openai) Stream(ctx context.Context, r *Request, onText func(string)) (*
 			finish = f
 		}
 		d := ch.Choices[0].Delta
+		if d.Reasoning == "" {
+			d.Reasoning = d.ReasoningContent
+		}
 		if d.Reasoning != "" {
 			reasoning.WriteString(d.Reasoning)
 			if r.OnThinking != nil {

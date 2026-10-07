@@ -38,8 +38,9 @@ var Categories = []Category{
 	{"mempool_full", "mempool full", regexp.MustCompile(`(?i)mempool is full`), false},
 	{"statesync_fail", "state sync failure", regexp.MustCompile(`(?i)state ?sync.*(fail|error|abort)|failed to (apply|restore|verify) snapshot|no available snapshots|no suitable snapshots`), false},
 	{"port_in_use", "port in use", regexp.MustCompile(`(?i)address already in use`), false},
-	{"config_parse", "config error", regexp.MustCompile(`(?i)error reading config|failed to (load|parse|unmarshal|decode).*(config|toml)|unknown (field|flag)|invalid (config|minimum gas)`), false},
+	{"config_parse", "config error", regexp.MustCompile(`(?i)error reading config|parsing config|failed to (load|parse|unmarshal|decode).*(config|toml)|toml: |unknown (field|flag)|invalid (config|minimum gas)`), false},
 	{"chain_mismatch", "chain / genesis mismatch", regexp.MustCompile(`(?i)different network|genesis.*(mismatch|doesn't match|hash)|wrong genesis|incompatible chain.?id|invalid chain.?id`), false},
+	{"startup_error", "startup error (process exits)", regexp.MustCompile(`^Error: `), true},
 	{"jail", "jail / slashing", regexp.MustCompile(`(?i)\bjail|liveness fault|tombston|slashing`), true},
 	{"evm_rpc", "EVM JSON-RPC errors", regexp.MustCompile(`(?i)json-?rpc.*(error|fail)|failed to start.*(json-?rpc|evm)|evm.*indexer.*(error|fail)`), false},
 	{"p2p_auth", "p2p handshake / auth", regexp.MustCompile(`(?i)auth failure|handshake.*fail|filtered|incompatible|peer.*rejected`), false},
@@ -52,6 +53,11 @@ type Result struct {
 	Samples map[string][]string // slug → up to MaxSamples lines
 	// UpgradeName is the plan name from an "UPGRADE "x" NEEDED" line.
 	UpgradeName string
+	// LastError is the most recent error-level line.
+	LastError string
+	// JailLines are jail/slashing lines (any validator's — callers filter
+	// by their consensus address), up to 50.
+	JailLines []string
 }
 
 // MaxSamples caps sample lines kept per category.
@@ -60,6 +66,9 @@ var MaxSamples = 3
 var (
 	ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 	// info/debug level in CometBFT plain ("INF", "I[…]"), json and logfmt
+	// cobra usage output: flag docs, section headers
+	helpRe = regexp.MustCompile(`^(-\w, )?--[\w.-]+( |$)|^(Usage|Flags|Global Flags|Available Commands|Aliases|Examples):$`)
+	errRe  = regexp.MustCompile(`^Error: |^(\S+\s+)?(ERR|ERROR|FTL)\s|^E\[\d{4}-|"level":"(error|fatal)"|\blevel=(error|fatal)\b|^panic: `)
 	infoRe = regexp.MustCompile(`^(\S+\s+)?(INF|DBG|TRC)\s|^[ID]\[\d{4}-|"level":"(info|debug|trace)"|\blevel=(info|debug|trace)\b`)
 )
 
@@ -72,8 +81,17 @@ func Scan(text string) *Result {
 		if line = strings.TrimSpace(ansiRe.ReplaceAllString(line, "")); line == "" {
 			continue
 		}
+		if helpRe.MatchString(line) {
+			continue // a startup failure prints the whole --help: flag docs aren't events
+		}
 		r.Lines++
+		if errRe.MatchString(line) {
+			r.LastError = Clip(line)
+		}
 		for _, c := range classify(line) {
+			if c.Slug == "jail" && len(r.JailLines) < 50 {
+				r.JailLines = append(r.JailLines, Clip(line))
+			}
 			r.Counts[c.Slug]++
 			if len(r.Samples[c.Slug]) < MaxSamples {
 				r.Samples[c.Slug] = append(r.Samples[c.Slug], Clip(line))
@@ -95,6 +113,9 @@ func Classify(line string) []Category {
 }
 
 func classify(line string) []Category {
+	if helpRe.MatchString(line) {
+		return nil
+	}
 	quiet := infoRe.MatchString(line)
 	var out []Category
 	for _, c := range Categories {
@@ -103,6 +124,19 @@ func classify(line string) []Category {
 		}
 	}
 	return out
+}
+
+var valconsRe = regexp.MustCompile(`[a-z]+valcons1[0-9a-z]+`)
+
+// OwnJailLine reports whether a jail/slashing line can be about the
+// validator with consensus address cons: it names cons, or names no
+// validator at all. Lines about other validators are dropped — every
+// node logs every validator's jailing.
+func OwnJailLine(line, cons string) bool {
+	if cons == "" || strings.Contains(line, cons) {
+		return true
+	}
+	return !valconsRe.MatchString(line)
 }
 
 // Name returns a category's label by slug.

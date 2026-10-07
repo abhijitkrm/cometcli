@@ -1,5 +1,6 @@
 - id: node-rpc-down
   title: Node RPC unreachable (process down or RPC disabled)
+  explains: [evm-rpc-down, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
   severity: critical
   match:
     all: ["node.reachable == false"]
@@ -20,6 +21,7 @@
 
 - id: node-process-down
   title: Node process/container not running
+  explains: [node-rpc-down, evm-rpc-down, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
   severity: critical
   match:
     all: ["proc.running == false"]
@@ -39,6 +41,7 @@
 
 - id: node-crash-loop
   title: Node crash-looping (restarting repeatedly)
+  explains: [node-process-down, node-rpc-down, evm-rpc-down, node-restarted-recently, node-killed-sigkill, node-catching-up, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
   severity: critical
   match:
     all: ["proc.restarts >= 3"]
@@ -55,6 +58,7 @@
 
 - id: node-catching-up
   title: Node catching up (block sync in progress)
+  explains: [val-not-signing, val-jail-imminent, val-signing-degraded]
   severity: medium
   match:
     all: ["node.catching_up == true"]
@@ -72,6 +76,7 @@
 
 - id: node-stalled
   title: Node stalled — not catching up but no new blocks
+  explains: [val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
   severity: critical
   symptoms: catching_up=false but latest block is minutes old
   match:
@@ -91,6 +96,7 @@
 
 - id: node-no-peers
   title: Node has no peers
+  explains: [node-stalled, node-catching-up, node-blocksync-slow, node-peer-churn, node-p2p-port-exposure, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
   severity: critical
   match:
     all: ["node.peers == 0"]
@@ -130,6 +136,7 @@
 
 - id: node-wrong-network
   title: Peers reject us — different network / genesis
+  explains: [node-no-peers, node-low-peers, node-stalled, node-catching-up, node-p2p-port-exposure, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
   severity: critical
   match:
     any: ["logs.chain_mismatch > 0"]
@@ -174,6 +181,7 @@
 
 - id: node-blocksync-slow
   title: Catching up too slowly to ever reach the tip
+  explains: [node-catching-up, val-not-signing, val-jail-imminent]
   severity: high
   match:
     all: ["node.catching_up == true", "node.block_age_s > 86400"]

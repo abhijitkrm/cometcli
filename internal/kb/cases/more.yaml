@@ -43,6 +43,7 @@
 
 - id: node-killed-sigkill
   title: Node exited with 137 (SIGKILL — OOM killer or forced stop)
+  explains: [node-process-down, node-rpc-down, evm-rpc-down, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
   severity: high
   match:
     all: ["proc.running == false", "proc.exit_code == 137"]
@@ -57,6 +58,7 @@
 
 - id: node-exit-config-error
   title: Node exits at startup with a config / flag error
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
   severity: critical
   match:
     all: ["proc.running == false", "logs.config_parse > 0"]
@@ -102,6 +104,7 @@
 
 - id: val-local-privval-errors
   title: Local priv_validator errors (file key)
+  explains: [val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
   severity: high
   match:
     all: ["config.remote_signer == false", "logs.privval > 0"]

@@ -1,5 +1,6 @@
 - id: cfg-parse-error
   title: Config file fails to parse / unknown field
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, node-exit-config-error]
   severity: critical
   match:
     any: ["config.parse_error == true", "app.parse_error == true", "logs.config_parse > 0"]
@@ -25,6 +26,7 @@
 
 - id: cfg-db-backend-mismatch
   title: config.toml db_backend differs from app.toml app-db-backend
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
   severity: high
   match:
     all: ["config.db_backend_mismatch == true"]
@@ -39,6 +41,7 @@
 
 - id: cfg-mempool-mismatch
   title: CometBFT app mempool selected but the app mempool is disabled
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
   severity: high
   match:
     all: ["config.mempool_mismatch == true"]

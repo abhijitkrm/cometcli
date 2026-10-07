@@ -107,7 +107,7 @@ func Render(r *Report, hits []kb.Hit, prefix string) string {
 		if strings.HasPrefix(k, "logs.") && v == float64(0) && k != "logs.lines" {
 			continue
 		}
-		if strings.HasSuffix(k, "cons_addr_hex") || v == "" { // matching-only / empty
+		if strings.HasSuffix(k, "cons_addr_hex") || k == "val.cons_addr" || v == "" { // matching-only / empty
 			continue
 		}
 		g, name, _ := strings.Cut(k, ".")
@@ -134,28 +134,34 @@ func Render(r *Report, hits []kb.Hit, prefix string) string {
 		}
 	}
 	var incidents []kb.Hit
-	var advisories []string
+	var advisories, symptoms []string
 	for _, h := range hits {
-		if h.Case.Kind == "advisory" {
+		switch {
+		case h.Case.Kind == "advisory":
 			advisories = append(advisories, h.Case.ID)
-		} else {
+		case h.SymptomOf != "":
+			symptoms = append(symptoms, h.Case.ID+" ← "+h.SymptomOf)
+		default:
 			incidents = append(incidents, h)
 		}
 	}
-	if len(incidents) == 0 {
+	if len(incidents) == 0 && len(symptoms) == 0 {
 		b.WriteString("matched cases: none — no known failure pattern. If something is still wrong, investigate from the signals, then record what you learn with kb.add.")
 		if len(advisories) > 0 {
 			fmt.Fprintf(&b, "\nadvisories (hardening, not incidents): %s", strings.Join(advisories, ", "))
 		}
 		return b.String()
 	}
-	b.WriteString("matched cases (most severe first):\n")
+	b.WriteString("matched cases (root causes, most severe first):\n")
 	for i, h := range incidents {
 		if i == 6 {
 			fmt.Fprintf(&b, "  … %d more\n", len(incidents)-i)
 			break
 		}
 		fmt.Fprintf(&b, "  %d. %s [%s] %s — %s\n", i+1, h.Case.ID, h.Case.Severity, h.Case.Title, strings.Join(h.Matched, ", "))
+	}
+	if len(symptoms) > 0 {
+		fmt.Fprintf(&b, "symptoms of the above (clear once the root is fixed): %s\n", strings.Join(symptoms, ", "))
 	}
 	if len(advisories) > 0 {
 		fmt.Fprintf(&b, "advisories (hardening, not incidents): %s\n", strings.Join(advisories, ", "))

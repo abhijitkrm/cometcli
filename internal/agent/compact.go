@@ -40,6 +40,10 @@ func (a *Agent) contextWindow() int {
 		return 128_000
 	case "groq":
 		return 128_000
+	case "openrouter":
+		// the free router picks a model per request; the smallest free
+		// contexts are ~32k, so stay safely under that unless configured
+		return 32_000
 	}
 	return 32_000 // local models: conservative
 }

@@ -331,6 +331,14 @@ func Investigate(c *toolkit.Context, f *Facts) *Forensics {
 			}
 		}
 	}
+	// every node logs every validator's jailing: prefer our own lines
+	var own []string
+	for _, l := range fo.JailLines {
+		if logscan.OwnJailLine(l, f.ConsAddr) {
+			own = append(own, l)
+		}
+	}
+	fo.JailLines = own
 	if procCmd != "" {
 		if res, err := host.Exec(ctx, h, procCmd, 4096); err == nil && res.Code == 0 {
 			fo.Process = strings.TrimSpace(res.Output)
