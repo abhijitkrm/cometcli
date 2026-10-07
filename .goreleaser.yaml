@@ -56,6 +56,9 @@ signs:
       - ${artifact}.pem
       - ${artifact}
     artifacts: checksum
+    # upload both: a keyless signature can't be verified without its certificate
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
     output: true
 
 release:
@@ -63,13 +66,15 @@ release:
   header: |
     ## cometcli v{{ .Version }}
 
-    An agentic SRE terminal for Cosmos-EVM validators — deterministic CLI,
-    live TUI, optional AI agent, fleet ops, runbooks, and alerting.
+    An agentic SRE terminal for Cosmos SDK and Cosmos-EVM validators — talk to
+    your machine and nodes the way you use Claude Code; incidents worked through
+    to the fix, every change and transaction approved by you.
 
-    Install:
-      curl -fsSL https://raw.githubusercontent.com/abhijitkrm/cometcli/main/scripts/install.sh | bash
+    ```bash
+    curl -fsSL https://raw.githubusercontent.com/abhijitkrm/cometcli/main/scripts/install.sh | bash
+    ```
 
-    Verify: docs/INSTALL.md (checksums + cosign keyless signature).
+    Verify: [docs/INSTALL.md](https://github.com/abhijitkrm/cometcli/blob/main/docs/INSTALL.md#verifying-release-signatures) (checksums + cosign keyless signature).
 
 changelog:
   use: git

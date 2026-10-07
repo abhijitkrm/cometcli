@@ -28,7 +28,9 @@ SBOMs, `checksums.txt`, and cosign keyless-signs the checksum.
 - [ ] Release notes read well — the grouped auto-changelog covers commits;
       hand-edit the body for highlights on notable releases
 - [ ] Release page shows 4 archives + `checksums.txt` + `checksums.txt.sig`
-      + 4 `*.sbom.json`
+      + `checksums.txt.pem` + 4 `*.sbom.json`
+- [ ] The changelog lists the commits since the previous tag (the release
+      workflow checks out full history for this)
 - [ ] `cosign verify-blob` passes (see docs/INSTALL.md)
 - [ ] `curl | bash` install of the new tag works on linux + macOS
 - [ ] `cometcli version` reports the tag
@@ -44,6 +46,13 @@ remove that block if you skip this step, or releases will fail.
 
 **Branch protection**: `main` requires `build-test` + `lint` green and
 rejects force-pushes/deletions (configured via GitHub API).
+
+## Re-signing a release
+
+If a release is missing `checksums.txt.pem` or its signature must be
+replaced, run the **Sign release** workflow (Actions → Sign release → tag).
+It signs the published `checksums.txt` keylessly, verifies the result and
+uploads `checksums.txt.sig` + `checksums.txt.pem`.
 
 ## If a release goes bad
 

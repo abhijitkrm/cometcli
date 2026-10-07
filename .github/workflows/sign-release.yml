@@ -1,0 +1,36 @@
+name: Sign release
+
+# Re-sign an existing release's checksums.txt (keyless, GitHub OIDC) and
+# upload the signature and its certificate — for releases published
+# without the certificate (v0.3.0) or whose signature needs replacing.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "release tag, e.g. v0.3.0"
+        required: true
+
+permissions:
+  contents: write
+  id-token: write   # cosign keyless
+
+jobs:
+  sign:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: sigstore/cosign-installer@v3
+      - name: sign checksums.txt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p checksums.txt
+          cosign sign-blob --yes \
+            --output-signature checksums.txt.sig \
+            --output-certificate checksums.txt.pem \
+            checksums.txt
+          cosign verify-blob --signature checksums.txt.sig --certificate checksums.txt.pem \
+            --certificate-identity-regexp "github.com/${GITHUB_REPOSITORY}" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            checksums.txt
+          gh release upload "$TAG" -R "$GITHUB_REPOSITORY" checksums.txt.sig checksums.txt.pem --clobber
