@@ -192,3 +192,41 @@
     - "[change] faster disk (NVMe), more peers"
   test:
     signals: {node.catching_up: true, node.block_age_s: 400000}
+
+- id: node-network-detached
+  title: Node container has no network attached
+  explains: [node-rpc-down, node-rpc-path-broken, node-no-peers, node-low-peers, node-stalled, node-catching-up, evm-rpc-down, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent]
+  severity: critical
+  symptoms: process running, but no peers and its published ports are gone
+  match:
+    all: ["proc.networks == 0", "proc.running == true"]
+  confirm:
+    - "docker inspect -f '{{json .NetworkSettings.Networks}}' <container> → {}"
+    - "which network should it be on? (compose file / the other nodes' docker inspect)"
+  causes:
+    - docker network disconnect (manual or tooling), network removed/recreated under a running container
+  fix:
+    - "[change] docker network connect [--ip <its address>] <network> <container> — keep the IP if peers dial it by address"
+    - "[change] or recreate it with docker compose up -d <service>"
+  verify:
+    - "node.reachable true, node.peers >= 2, wait.until synced"
+  test:
+    signals: {proc.networks: 0, proc.running: true, node.reachable: false}
+
+- id: node-rpc-path-broken
+  title: Node healthy inside its container but unreachable from the host
+  explains: [node-rpc-down, evm-rpc-down]
+  severity: high
+  symptoms: host RPC calls fail while the node answers on localhost inside the container
+  match:
+    all: ["node.unreachable_from_host == true"]
+  confirm:
+    - "docker port <container>; rpc laddr in config.toml (must bind 0.0.0.0 inside a container); host firewall"
+  causes:
+    - port mapping lost or changed, laddr bound to 127.0.0.1 inside the container, host firewall, network detached
+  fix:
+    - "[change] fix the port mapping / laddr (tcp://0.0.0.0:26657) and recreate or restart the container"
+  verify:
+    - "node.reachable true from the host"
+  test:
+    signals: {node.unreachable_from_host: true, node.reachable: false}

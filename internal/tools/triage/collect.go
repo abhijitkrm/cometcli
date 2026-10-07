@@ -22,6 +22,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/abhijitkrm/cometcli/internal/client/host"
+	"github.com/abhijitkrm/cometcli/internal/config"
 	"github.com/abhijitkrm/cometcli/internal/kb"
 	"github.com/abhijitkrm/cometcli/internal/keys"
 	"github.com/abhijitkrm/cometcli/internal/logscan"
@@ -394,6 +395,12 @@ func collectProcess(c *toolkit.Context, r *Report, set func(string, any)) error 
 			set("proc.uptime_s", float64(int64(time.Since(t).Seconds())))
 		}
 		dockerMemory(c, h, svc.Unit, set)
+		if n, ok := runOK(c, h, "docker inspect -f '{{len .NetworkSettings.Networks}}' "+common.ShellQ(svc.Unit)); ok {
+			set("proc.networks", num(n))
+		}
+		if kv["status"] == "running" {
+			insideRPC(c, h, svc.Unit, set)
+		}
 	case "systemd", "":
 		unit := svc.Unit
 		if unit == "" {
@@ -460,6 +467,50 @@ func dockerMemory(c *toolkit.Context, h host.Host, unit string, set func(string,
 	}
 }
 
+func runOK(c *toolkit.Context, h host.Host, cmd string) (string, bool) {
+	out, code, err := h.Run(c, cmd)
+	return strings.TrimSpace(out), err == nil && code == 0
+}
+
+// insideRPC asks the node's own RPC from inside its container: when the
+// host can't reach it, this tells a dead node from a broken network path
+// (detached network, lost port mapping, wrong bind address, firewall).
+func insideRPC(c *toolkit.Context, h host.Host, unit string, set func(string, any)) {
+	out, ok := runOK(c, h, "docker exec "+common.ShellQ(unit)+
+		" sh -c 'curl -s -m 3 localhost:26657/status; echo; curl -s -m 3 localhost:26657/net_info'")
+	if !ok {
+		return
+	}
+	lines := strings.SplitN(out, "\n", 2)
+	var st struct {
+		Result struct {
+			SyncInfo struct {
+				Height     string    `json:"latest_block_height"`
+				Time       time.Time `json:"latest_block_time"`
+				CatchingUp bool      `json:"catching_up"`
+			} `json:"sync_info"`
+		} `json:"result"`
+	}
+	if json.Unmarshal([]byte(lines[0]), &st) != nil || st.Result.SyncInfo.Height == "" {
+		set("node.inside_reachable", false)
+		return
+	}
+	set("node.inside_reachable", true)
+	set("node.inside_height", num(st.Result.SyncInfo.Height))
+	set("node.inside_catching_up", st.Result.SyncInfo.CatchingUp)
+	set("node.inside_block_age_s", time.Since(st.Result.SyncInfo.Time).Round(time.Second).Seconds())
+	if len(lines) == 2 {
+		var ni struct {
+			Result struct {
+				NPeers string `json:"n_peers"`
+			} `json:"result"`
+		}
+		if json.Unmarshal([]byte(lines[1]), &ni) == nil && ni.Result.NPeers != "" {
+			set("node.inside_peers", num(ni.Result.NPeers))
+		}
+	}
+}
+
 func collectLogs(c *toolkit.Context, r *Report, set func(string, any)) error {
 	if c.Profile == nil {
 		return fmt.Errorf("no profile")
@@ -470,16 +521,24 @@ func collectLogs(c *toolkit.Context, r *Report, set func(string, any)) error {
 	}
 	since := r.Since
 	svc := c.Profile.Service
+	// errors from before the current process started are history: read
+	// from 5 minutes before the start (why the last run died), no older
+	if st := processStart(c, h, svc, c.Profile.Binary); !st.IsZero() {
+		if d := time.Since(st) + 5*time.Minute; d < since {
+			since = d.Round(time.Second)
+		}
+	}
+	set("logs.window_min", round1(since.Minutes()))
 	var cmd string
 	switch svc.Type {
 	case "docker":
-		cmd = fmt.Sprintf("docker logs --since %s %s 2>&1 | tail -n 20000", since.Round(time.Second).String(), common.ShellQ(svc.Unit))
+		cmd = fmt.Sprintf("docker logs --since %s %s 2>&1 | tail -n 20000", since.String(), common.ShellQ(svc.Unit))
 	case "systemd", "":
 		unit := svc.Unit
 		if unit == "" {
 			unit = c.Profile.Binary
 		}
-		cmd = fmt.Sprintf("journalctl -u %s --since %s --no-pager -o cat 2>&1 | tail -n 20000", common.ShellQ(unit), common.ShellQ(fmt.Sprintf("%d min ago", int(since.Minutes()))))
+		cmd = fmt.Sprintf("journalctl -u %s --since %s --no-pager -o cat 2>&1 | tail -n 20000", common.ShellQ(unit), common.ShellQ(fmt.Sprintf("%d sec ago", int(since.Seconds()))))
 	default:
 		return fmt.Errorf("no log source for service type %q", svc.Type)
 	}
@@ -501,6 +560,30 @@ func collectLogs(c *toolkit.Context, r *Report, set func(string, any)) error {
 	set("_samples", sc.Samples)
 	set("_jail_lines", sc.JailLines)
 	return nil
+}
+
+// processStart is when the node's current process started (zero if
+// unknown).
+func processStart(c *toolkit.Context, h host.Host, svc config.Service, binary string) time.Time {
+	switch svc.Type {
+	case "docker":
+		if out, ok := runOK(c, h, "docker inspect -f '{{.State.StartedAt}}' "+common.ShellQ(svc.Unit)); ok {
+			if t, err := time.Parse(time.RFC3339Nano, out); err == nil && t.Year() > 1 {
+				return t
+			}
+		}
+	case "systemd", "":
+		unit := svc.Unit
+		if unit == "" {
+			unit = binary
+		}
+		if out, ok := runOK(c, h, "systemctl show -p ActiveEnterTimestamp --value "+common.ShellQ(unit)+" 2>/dev/null"); ok && out != "" {
+			if t, err := time.Parse("Mon 2006-01-02 15:04:05 MST", out); err == nil {
+				return t
+			}
+		}
+	}
+	return time.Time{}
 }
 
 // readNodeFile reads <home>/<rel> from the host, falling back to the
@@ -666,6 +749,18 @@ func derive(r *Report) {
 		}
 	}
 	f := func(k string) (float64, bool) { v, ok := s[k].(float64); return v, ok }
+	// the host can't reach the RPC but the node answers inside its
+	// container: the path is broken, not the node — use the inside view
+	if s["node.reachable"] == false && s["node.inside_reachable"] == true {
+		s["node.unreachable_from_host"] = true
+		for _, k := range []string{"height", "catching_up", "block_age_s", "peers"} {
+			if v, ok := s["node.inside_"+k]; ok {
+				if _, has := s["node."+k]; !has {
+					s["node."+k] = v
+				}
+			}
+		}
+	}
 	if age, ok := f("node.block_age_s"); ok {
 		s["node.stalled"] = s["node.catching_up"] == false && age > 60
 	}

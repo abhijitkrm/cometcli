@@ -77,7 +77,11 @@ func hitIDs(hits []kb.Hit) []string {
 // providers cap tokens per minute).
 func Render(r *Report, hits []kb.Hit, prefix string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "triage (%s, logs last %s)\nsources:", r.Chain, r.Since)
+	win := r.Since.String()
+	if m, ok := r.Signals["logs.window_min"].(float64); ok && m < r.Since.Minutes() {
+		win = fmt.Sprintf("%s — since 5m before the current process start", (time.Duration(m*60) * time.Second).Round(time.Second))
+	}
+	fmt.Fprintf(&b, "triage (%s, logs last %s)\nsources:", r.Chain, win)
 	var names []string
 	for n := range r.Sources {
 		names = append(names, n)
@@ -108,6 +112,9 @@ func Render(r *Report, hits []kb.Hit, prefix string) string {
 			continue
 		}
 		if strings.HasSuffix(k, "cons_addr_hex") || k == "val.cons_addr" || v == "" { // matching-only / empty
+			continue
+		}
+		if strings.HasPrefix(k, "node.inside_") && r.Signals["node.reachable"] == true { // only news when the host can't reach it
 			continue
 		}
 		g, name, _ := strings.Cut(k, ".")

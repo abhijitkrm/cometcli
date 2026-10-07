@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -94,6 +95,10 @@ func doHTTPWith(ctx context.Context, hc *http.Client, url string, body []byte, h
 				return nil, err
 			}
 			reason = "connection error"
+		case resp.StatusCode == 429 && quotaExhausted(resp):
+			// a daily/credit quota won't reset in seconds: fail now
+			debugf("POST %s attempt %d: HTTP 429 quota exhausted — not retrying", redactURL(url), attempt+1)
+			return resp, nil
 		case retryable(resp.StatusCode) && attempt < rp.Max:
 			debugf("POST %s attempt %d: HTTP %d (%s)", redactURL(url), attempt+1, resp.StatusCode, time.Since(start).Round(time.Millisecond))
 			wait = retryAfter(resp.Header)
@@ -147,6 +152,17 @@ func backoff(rp retryPolicy, attempt int) time.Duration {
 	}
 	// full jitter in [d/2, d)
 	return d/2 + time.Duration(rand.Int64N(int64(d/2)+1))
+}
+
+var quotaRe = regexp.MustCompile(`(?i)per[- ]day|daily|quota exceeded|insufficient (quota|credits)|add \d+ credits|billing`)
+
+// quotaExhausted peeks a 429 body for a daily/credit quota (as opposed to
+// a per-minute rate limit), restoring the body for the caller.
+func quotaExhausted(resp *http.Response) bool {
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	resp.Body.Close()
+	resp.Body = io.NopCloser(bytes.NewReader(raw))
+	return quotaRe.Match(raw)
 }
 
 // retryAfter reads retry-after-ms, then Retry-After (seconds or HTTP date).

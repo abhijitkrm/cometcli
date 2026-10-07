@@ -133,7 +133,7 @@ stop if tombstoned → fix the root cause → wait for sync → wait out the jai
 
 ### Signing transactions
 
-Two signers; when both can sign, you're asked at signing time (after approving the tx):
+Two signers; when both can sign, you pick one first, then approve the tx (the approval shows which signer will sign):
 
 - **cometcli's keyring** — `signer.key` (import with `cometcli keys add --recover`).
 - **the node container's own keyring** — the key never leaves the node: cometcli builds

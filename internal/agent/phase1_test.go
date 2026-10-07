@@ -560,3 +560,25 @@ func TestRetryIsAnnouncedAndTimeoutsAreNot(t *testing.T) {
 		t.Fatalf("timed-out request retried: %d attempts", n.Load())
 	}
 }
+
+func TestRetrySkipsDailyQuota(t *testing.T) {
+	noSleep(t)
+	var n atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n.Add(1)
+		w.WriteHeader(429)
+		_, _ = w.Write([]byte(`{"error":{"message":"Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day"}}`))
+	}))
+	defer srv.Close()
+	resp, err := doHTTP(context.Background(), srv.Client(), srv.URL, []byte(`{}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if n.Load() != 1 {
+		t.Fatalf("daily quota retried: %d attempts", n.Load())
+	}
+	if err := apiError("openrouter", resp); err == nil || !strings.Contains(err.Error(), "free-models-per-day") {
+		t.Fatalf("body lost: %v", err)
+	}
+}
