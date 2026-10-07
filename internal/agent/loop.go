@@ -139,7 +139,7 @@ func New(c *toolkit.Context, reg *toolkit.Registry) (*Agent, error) {
 		Model:     def(ac.Model, ""),
 		Reg:       reg,
 		Ctx:       c,
-		MaxIter:   def0(ac.MaxTurns, 50),
+		MaxIter:   def0(ac.MaxTurns, 200),
 		Policy:    pol,
 		Redact:    RedactorFor(c.Profile),
 		Stream:    !ac.NoStream,
@@ -431,7 +431,10 @@ func (a *Agent) run(ctx context.Context, input string) (string, error) {
 			a.deliverSteer() // what the operator typed meanwhile reaches the next step
 		}
 	}
-	return "", fmt.Errorf("agent exceeded %d iterations", a.MaxIter)
+	// out of steps: pause, don't fail — the history is valid (every call
+	// answered), so "continue" picks up exactly here
+	a.emit(Event{Kind: EvNotice, Text: fmt.Sprintf("paused after %d steps — say \"continue\" to keep going (raise the limit with agent.max_turns)", a.MaxIter)})
+	return strings.Join(texts, "\n"), nil
 }
 
 // rawProvider tags raw output with the provider that produced it, so it

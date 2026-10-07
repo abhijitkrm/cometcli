@@ -203,3 +203,12 @@ func TestHashesAreNotKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestTxQueryArgumentIsAHash(t *testing.T) {
+	h := "B240273F16D1F385FB9C4FC5CEB0820ECE4CC7C2C03B159FD22359CA7DAA014C"
+	for _, in := range []string{"evmd query tx " + h + " --node x", "evmd q tx " + h, "cometcli tx get " + h} {
+		if got := Text(in); !strings.Contains(got, h) {
+			t.Errorf("%q → %q", in, got)
+		}
+	}
+}

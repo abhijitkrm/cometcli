@@ -200,7 +200,7 @@ type AgentConf struct {
 	Effort string `yaml:"effort,omitempty"`
 	// MaxTokens caps output tokens per model round (0 = provider default).
 	MaxTokens int `yaml:"max_tokens,omitempty"`
-	// MaxTurns bounds model rounds per prompt (0 = 50).
+	// MaxTurns bounds model rounds per prompt (0 = 200).
 	MaxTurns int `yaml:"max_turns,omitempty"`
 	// ContextWindow overrides the model's context size in tokens.
 	ContextWindow int `yaml:"context_window,omitempty"`

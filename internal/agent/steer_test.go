@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -43,5 +44,33 @@ func TestSteerTypedDuringFinalAnswerIsKept(t *testing.T) {
 	// no tool step happened: the front end gets it back to send next
 	if left := a.TakeSteer(); len(left) != 1 || left[0] != "also check peers" {
 		t.Fatalf("left = %v", left)
+	}
+}
+
+func TestStepLimitPausesInsteadOfFailing(t *testing.T) {
+	loop := stubTool{name: "node.status", tier: toolkit.TierObserve, run: func(*toolkit.Context, toolkit.Args) (*toolkit.Result, error) {
+		return &toolkit.Result{Text: "still syncing"}, nil
+	}}
+	var resps []*Response
+	for i := 0; i < 10; i++ {
+		resps = append(resps, &Response{Calls: []Call{{ID: fmt.Sprint("c", i), Name: "node__status", Args: json.RawMessage(`{}`)}}})
+	}
+	a := newTestAgent(t, &mockProvider{responses: resps}, loop)
+	a.MaxIter = 3
+	var notices []string
+	a.OnEvent = func(e Event) {
+		if e.Kind == EvNotice {
+			notices = append(notices, e.Text)
+		}
+	}
+	if _, err := a.Run(context.Background(), "wait for sync"); err != nil {
+		t.Fatalf("step limit should pause, got error: %v", err)
+	}
+	if len(notices) == 0 || !strings.Contains(notices[len(notices)-1], `say "continue"`) {
+		t.Fatalf("notices: %v", notices)
+	}
+	h := a.History()
+	if h[len(h)-1].Role != "tool" {
+		t.Fatal("history must end with answered calls so 'continue' works")
 	}
 }

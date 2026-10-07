@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"regexp"
 	"strings"
 	"time"
 
@@ -115,6 +116,9 @@ func (Bash) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
 	for _, n := range v.Notes {
 		fmt.Fprintf(&b, "\n[note: %s]", n)
 	}
+	if pollRe.MatchString(cmd) {
+		b.WriteString("\n[tip: to wait for something, use wait.until (synced, height, tx-committed, proposal-status, signal=…) — it polls without spending your steps]")
+	}
 	text := strings.TrimLeft(b.String(), "\n")
 	if text == "" {
 		text = "(no output)"
@@ -123,6 +127,9 @@ func (Bash) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
 		"exit_code": res.Code, "cwd": c.Session.Cwd(newCwd), "timed_out": res.TimedOut, "truncated": res.Truncated,
 	}}, nil
 }
+
+// pollRe spots hand-rolled polling: a sleep before or after the real work.
+var pollRe = regexp.MustCompile(`(^|[;&|]\s*)sleep\s+[0-9.]+\s*(&&|;)|(&&|;)\s*sleep\s+[0-9.]+\s*$`)
 
 // defaultCwd is where a fresh session starts: the process directory for a
 // local host, the login directory over SSH ("" = don't cd).
