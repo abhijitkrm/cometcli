@@ -633,11 +633,7 @@ func (a *Agent) toolCtx(ctx context.Context, t toolkit.Tool, args toolkit.Args) 
 	case toolkit.IsLongRunning(t):
 		sub, cancel = toolkit.WithCancel(parent)
 	default:
-		d := 90 * time.Second
-		if to, ok := t.(toolkit.Timeouter); ok {
-			d = to.Timeout(args)
-		}
-		sub, cancel = toolkit.WithDeadline(parent, d)
+		sub, cancel = toolkit.WithDeadline(parent, toolkit.CallTimeout(t, args))
 	}
 	sub.AutoApproveBelow = a.Policy.AutoApproveBelow()
 	sub.ToolName = t.Name()

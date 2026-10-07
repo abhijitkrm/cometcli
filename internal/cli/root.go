@@ -12,7 +12,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -183,11 +182,7 @@ func RunTool(cmd *cobra.Command, t toolkit.Tool, args toolkit.Args) error {
 	}
 	defer c.Close()
 	if !toolkit.IsLongRunning(t) {
-		d := 90 * time.Second
-		if to, ok := t.(toolkit.Timeouter); ok { // wait.until, triage… set their own
-			d = to.Timeout(args)
-		}
-		sub, cancel := toolkit.WithDeadline(c, d)
+		sub, cancel := toolkit.WithDeadline(c, toolkit.CallTimeout(t, args))
 		defer cancel()
 		defer sub.Close()
 		c = sub

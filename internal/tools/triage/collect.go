@@ -401,6 +401,17 @@ func collectProcess(c *toolkit.Context, r *Report, set func(string, any)) error 
 		}
 		if kv["status"] == "running" {
 			insideRPC(c, h, svc.Unit, set)
+			// /proc in a container shows the docker host's load (the only
+			// view of it on Docker Desktop, where the host is a VM)
+			if out, ok := runOK(c, h, "docker exec "+common.ShellQ(svc.Unit)+" sh -c 'cat /proc/loadavg; nproc'"); ok {
+				if ls := strings.Split(out, "\n"); len(ls) == 2 {
+					load, err1 := strconv.ParseFloat(strings.Fields(ls[0])[0], 64)
+					n, err2 := strconv.ParseFloat(strings.TrimSpace(ls[1]), 64)
+					if err1 == nil && err2 == nil && n > 0 {
+						set("proc.docker_load_per_cpu", round1(load/n))
+					}
+				}
+			}
 		}
 	case "systemd", "":
 		unit := svc.Unit
@@ -738,6 +749,11 @@ func derive(r *Report) {
 					s["node."+k] = v
 				}
 			}
+		}
+	}
+	if _, ok := s["host.load_per_cpu"]; !ok {
+		if v, ok := s["proc.docker_load_per_cpu"]; ok {
+			s["host.load_per_cpu"] = v
 		}
 	}
 	if age, ok := f("node.block_age_s"); ok {

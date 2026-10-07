@@ -320,3 +320,17 @@ func IsOperatorOnly(t Tool) bool {
 	o, ok := t.(OperatorOnly)
 	return ok && o.OperatorOnly()
 }
+
+// CallTimeout is how long one call of t may take: its own Timeout() when
+// it has one; on-chain tools get 10 minutes, since the clock also runs
+// while the operator reads the approval prompt and the signer may be a
+// slow container; everything else 90 seconds.
+func CallTimeout(t Tool, args Args) time.Duration {
+	if to, ok := t.(Timeouter); ok {
+		return to.Timeout(args)
+	}
+	if t.Tier() == TierOnChain {
+		return 10 * time.Minute
+	}
+	return 90 * time.Second
+}
