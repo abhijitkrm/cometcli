@@ -41,7 +41,7 @@ var Categories = []Category{
 	{"config_parse", "config error", regexp.MustCompile(`(?i)error reading config|parsing config|failed to (load|parse|unmarshal|decode).*(config|toml)|toml: |unknown (field|flag)|invalid (config|minimum gas)`), false},
 	{"chain_mismatch", "chain / genesis mismatch", regexp.MustCompile(`(?i)different network|genesis.*(mismatch|doesn't match|hash)|wrong genesis|incompatible chain.?id|invalid chain.?id`), false},
 	{"startup_error", "startup error (process exits)", regexp.MustCompile(`^Error: `), true},
-	{"jail", "jail / slashing", regexp.MustCompile(`(?i)\bjail|liveness fault|tombston|slashing`), true},
+	{"jail", "jail / slashing", regexp.MustCompile(`(?i)\bjail(ed|ing)?\b|liveness fault|tombston|slashing (and|validator)|\bslashed\b`), true},
 	{"evm_rpc", "EVM JSON-RPC errors", regexp.MustCompile(`(?i)json-?rpc.*(error|fail)|failed to start.*(json-?rpc|evm)|evm.*indexer.*(error|fail)`), false},
 	{"p2p_auth", "p2p handshake / auth", regexp.MustCompile(`(?i)auth failure|handshake.*fail|filtered|incompatible|peer.*rejected`), false},
 }

@@ -401,6 +401,7 @@ func collectProcess(c *toolkit.Context, r *Report, set func(string, any)) error 
 		}
 		if kv["status"] == "running" {
 			insideRPC(c, h, svc.Unit, set)
+			dataDiskInside(c, h, svc.Unit, c.Profile.Home, c.Profile.Signer.ContainerHome, set)
 			// /proc in a container shows the docker host's load (the only
 			// view of it on Docker Desktop, where the host is a VM)
 			if out, ok := runOK(c, h, "docker exec "+common.ShellQ(svc.Unit)+" sh -c 'cat /proc/loadavg; nproc'"); ok {
@@ -482,6 +483,37 @@ func dockerMemory(c *toolkit.Context, h host.Host, unit string, set func(string,
 func runOK(c *toolkit.Context, h host.Host, cmd string) (string, bool) {
 	out, code, err := h.Run(c, cmd)
 	return strings.TrimSpace(out), err == nil && code == 0
+}
+
+// dataDiskInside measures the volume under the node's data directory as
+// the container sees it — the disk that fills up, which can be a separate
+// volume from anything the host path shows. The container path is
+// signer.container_home, else wherever the profile's home is mounted.
+func dataDiskInside(c *toolkit.Context, h host.Host, unit, home, containerHome string, set func(string, any)) {
+	dir := containerHome
+	if dir == "" && home != "" {
+		out, ok := runOK(c, h, "docker inspect -f '{{range .Mounts}}{{.Source}}|{{.Destination}}{{\"\\n\"}}{{end}}' "+common.ShellQ(unit))
+		if ok {
+			for _, l := range strings.Split(out, "\n") {
+				if src, dst, ok := strings.Cut(l, "|"); ok && strings.TrimSuffix(src, "/") == strings.TrimSuffix(home, "/") {
+					dir = dst
+				}
+			}
+		}
+	}
+	if dir == "" {
+		return
+	}
+	out, ok := runOK(c, h, "docker exec "+common.ShellQ(unit)+" df -Pk "+common.ShellQ(dir+"/data"))
+	if !ok {
+		return
+	}
+	if fs := strings.Fields(lastLine(out)); len(fs) >= 5 {
+		set("proc.data_disk_used_pct", pct(fs[4]))
+		if kb, err := strconv.ParseFloat(fs[3], 64); err == nil {
+			set("proc.data_disk_free_gb", round1(kb/1024/1024))
+		}
+	}
 }
 
 // insideRPC asks the node's own RPC from inside its container: when the
@@ -741,7 +773,16 @@ func derive(r *Report) {
 	f := func(k string) (float64, bool) { v, ok := s[k].(float64); return v, ok }
 	// the host can't reach the RPC but the node answers inside its
 	// container: the path is broken, not the node — use the inside view
-	if s["node.reachable"] == false && s["node.inside_reachable"] == true {
+	// the node's data volume as the container sees it is the disk that matters
+	if v, ok := s["proc.data_disk_used_pct"]; ok {
+		s["host.disk_used_pct"] = v
+		if fv, ok := s["proc.data_disk_free_gb"]; ok {
+			s["host.disk_free_gb"] = fv
+		}
+	}
+	// (a restart between the two probes is not a broken path)
+	uptime, _ := f("proc.uptime_s")
+	if s["node.reachable"] == false && s["node.inside_reachable"] == true && (uptime == 0 || uptime > 30) {
 		s["node.unreachable_from_host"] = true
 		for _, k := range []string{"height", "catching_up", "block_age_s", "peers"} {
 			if v, ok := s["node.inside_"+k]; ok {

@@ -55,3 +55,11 @@ func TestRegressionIsNotAPrivvalFault(t *testing.T) {
 		t.Fatalf("%v", r.Counts)
 	}
 }
+
+func TestJailPatternIgnoresStoreKeys(t *testing.T) {
+	r := Scan(`6:55AM INF Upgrading IAVL storage for faster queries store_key="KVStoreKey{0x400286ccf0, slashing}" version=1
+6:55AM INF validator jailed module=x/staking validator=cosmosvalcons1abc`)
+	if r.Counts["jail"] != 1 {
+		t.Fatalf("jail = %d", r.Counts["jail"])
+	}
+}
