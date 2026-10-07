@@ -14,7 +14,6 @@ import (
 
 var update = flag.Bool("update", false, "rewrite golden files")
 
-
 // golden compares a rendered screen (ANSI stripped, trailing spaces
 // trimmed) with testdata/<name>.golden.
 func golden(t *testing.T, name, got string) {
