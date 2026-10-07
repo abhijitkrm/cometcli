@@ -14,7 +14,7 @@ Defaults and knobs:
 
 ```bash
 # pick a version (default: latest release)
-COMETCLI_VERSION=v0.1.0 bash install.sh
+COMETCLI_VERSION=v0.3.0 bash install.sh
 
 # custom binary directory (created if missing)
 COMETCLI_BIN_DIR=$HOME/bin bash install.sh
@@ -47,10 +47,10 @@ Grab the tarball for your platform from
 [Releases](https://github.com/abhijitkrm/cometcli/releases), verify, install:
 
 ```bash
-curl -fLO https://github.com/abhijitkrm/cometcli/releases/download/v0.1.0/cometcli_0.1.0_darwin_arm64.tar.gz
-curl -fLO https://github.com/abhijitkrm/cometcli/releases/download/v0.1.0/checksums.txt
+curl -fLO https://github.com/abhijitkrm/cometcli/releases/download/v0.3.0/cometcli_0.3.0_darwin_arm64.tar.gz
+curl -fLO https://github.com/abhijitkrm/cometcli/releases/download/v0.3.0/checksums.txt
 shasum -a 256 -c checksums.txt --ignore-missing   # or: sha256sum -c on Linux
-tar xzf cometcli_0.1.0_darwin_arm64.tar.gz cometcli
+tar xzf cometcli_0.3.0_darwin_arm64.tar.gz cometcli
 install cometcli /usr/local/bin/
 ```
 
@@ -61,12 +61,20 @@ Releases are signed with cosign (keyless, GitHub OIDC). With
 installed:
 
 ```bash
-curl -fLO https://github.com/abhijitkrm/cometcli/releases/download/v0.1.0/checksums.txt.sig
-cosign verify-blob --signature checksums.txt.sig \
+V=v0.3.0
+curl -fLO https://github.com/abhijitkrm/cometcli/releases/download/$V/checksums.txt
+curl -fLO https://github.com/abhijitkrm/cometcli/releases/download/$V/checksums.txt.sig
+curl -fLO https://github.com/abhijitkrm/cometcli/releases/download/$V/checksums.txt.pem
+cosign verify-blob --signature checksums.txt.sig --certificate checksums.txt.pem \
   --certificate-identity-regexp 'github.com/abhijitkrm/cometcli' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   checksums.txt
 ```
+
+`Verified OK` means `checksums.txt` was signed by this repository's GitHub
+Actions; then `shasum -a 256 -c checksums.txt --ignore-missing` ties your
+archive to it. The certificate (`.pem`) ships from v0.3.0 on — releases before
+that have only the signature.
 
 Every release also ships a per-architecture SBOM (`*.sbom.json`, generated
 with syft).
