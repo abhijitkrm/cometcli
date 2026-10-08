@@ -40,17 +40,21 @@
     signals: {config.db_backend_mismatch: true, config.db_backend: goleveldb, app.app_db_backend: pebbledb}
 
 - id: cfg-mempool-mismatch
-  title: CometBFT app mempool selected but the app mempool is disabled
+  title: config.toml mempool type isn't "app" on a Cosmos-EVM node
+  chains: [cosmos-evm]
   explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
   severity: high
   match:
     all: ["config.mempool_mismatch == true"]
+  symptoms: "the node refuses to start with 'configs mismatch: EVM mempool enabled, but comet-bft has invalid config.toml:mempool.type (want app, got flood)'"
   confirm:
     - "node.config: config.toml [mempool] type vs app.toml [mempool] max-txs"
+  causes:
+    - "recent Cosmos-EVM runs the app-side EVM mempool, which requires config.toml [mempool] type = \"app\" — fresh `evmd init` / `testnet init-files` configs and configs kept across upgrades often still say \"flood\""
   fix:
-    - "[change] set app.toml mempool.max-txs >= 0 (e.g. 5000), or use the flood mempool in config.toml; restart"
+    - "[change] set config.toml [mempool] type = \"app\"; restart"
   test:
-    signals: {config.mempool_mismatch: true, config.mempool_type: app, app.mempool_max_txs: -1}
+    signals: {config.mempool_mismatch: true, config.mempool_type: flood, logs.config_parse: 3}
 
 - id: cfg-validator-api-exposed
   title: Validator exposes API/gRPC (attack surface, memory load)

@@ -195,13 +195,35 @@ func (n *Net) patchConfigs(i int, denom string) error {
 		}
 		return os.WriteFile(p, []byte(fn(string(raw))), 0o644)
 	}
-	if err := edit("config.toml", func(s string) string { return addrBookRe.ReplaceAllString(s, "addr_book_strict = false") }); err != nil {
+	if err := edit("config.toml", func(s string) string {
+		s = addrBookRe.ReplaceAllString(s, "addr_book_strict = false")
+		// the EVM app-side mempool (app.toml max-txs >= 0) needs CometBFT's
+		// "app" mempool, or evmd refuses to start ("configs mismatch")
+		return setInSection(s, "mempool", "type", `"app"`)
+	}); err != nil {
 		return err
 	}
 	return edit("app.toml", func(s string) string {
 		s = grpcAddrRe.ReplaceAllString(s, `address = "0.0.0.0:9090"`)
 		return minGasRe.ReplaceAllString(s, fmt.Sprintf(`minimum-gas-prices = "1000000000%s"`, denom))
 	})
+}
+
+// setInSection sets key = value inside a TOML [section].
+func setInSection(s, section, key, value string) string {
+	lines := strings.Split(s, "\n")
+	in := false
+	for i, l := range lines {
+		t := strings.TrimSpace(l)
+		if strings.HasPrefix(t, "[") {
+			in = t == "["+section+"]"
+			continue
+		}
+		if in && strings.HasPrefix(t, key+" ") || in && strings.HasPrefix(t, key+"=") {
+			lines[i] = key + " = " + value
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (n *Net) composeFile(uid string) string {
@@ -214,6 +236,8 @@ func (n *Net) composeFile(uid string) string {
     container_name: %s
     user: "%s"
     restart: unless-stopped
+    working_dir: /data/node   # evmd writes ./data at start-up; the image's default dir isn't writable
+    environment: [HOME=/data/node]
     entrypoint: ["evmd"]
     command: ["start", "--home", "/data/node", "--chain-id", "%s", "--json-rpc.api", "eth,net,web3,txpool"]
     volumes: ["%s:/data/node"]

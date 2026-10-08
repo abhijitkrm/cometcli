@@ -38,7 +38,7 @@ var Categories = []Category{
 	{"mempool_full", "mempool full", regexp.MustCompile(`(?i)mempool is full`), false},
 	{"statesync_fail", "state sync failure", regexp.MustCompile(`(?i)state ?sync.*(fail|error|abort)|failed to (apply|restore|verify) snapshot|no available snapshots|no suitable snapshots`), false},
 	{"port_in_use", "port in use", regexp.MustCompile(`(?i)address already in use`), false},
-	{"config_parse", "config error", regexp.MustCompile(`(?i)error reading config|parsing config|failed to (load|parse|unmarshal|decode).*(config|toml)|toml: |unknown (field|flag)|invalid (config|minimum gas)`), false},
+	{"config_parse", "config error", regexp.MustCompile(`(?i)error reading config|parsing config|configs mismatch|invalid config\.toml|failed to (load|parse|unmarshal|decode).*(config|toml)|toml: |unknown (field|flag)|invalid (config|minimum gas)`), false},
 	{"chain_mismatch", "chain / genesis mismatch", regexp.MustCompile(`(?i)different network|genesis.*(mismatch|doesn't match|hash)|wrong genesis|incompatible chain.?id|invalid chain.?id`), false},
 	{"startup_error", "startup error (process exits)", regexp.MustCompile(`^Error: `), true},
 	{"jail", "jail / slashing", regexp.MustCompile(`(?i)\bjail(ed|ing)?\b|liveness fault|tombston|slashing (and|validator)|\bslashed\b`), true},

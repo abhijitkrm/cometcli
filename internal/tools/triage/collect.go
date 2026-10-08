@@ -856,12 +856,13 @@ func derive(r *Report) {
 			s["config.db_backend_mismatch"] = a != b
 		}
 	}
-	if t, ok := s["config.mempool_type"].(string); ok {
-		if n, ok := f("app.mempool_max_txs"); ok {
-			// CometBFT's app mempool hands txs to the app's mempool, which
-			// max-txs < 0 disables: the node would accept no txs.
-			s["config.mempool_mismatch"] = t == "app" && n < 0
-		}
+	if t, ok := s["config.mempool_type"].(string); ok && r.Chain == "cosmos-evm" && (t == "flood" || t == "nop") {
+		// Cosmos-EVM with the app-side EVM mempool (always on in recent
+		// evmd) refuses to start unless CometBFT's mempool type is "app".
+		// Older versions run fine on flood, so only flag it when the node
+		// is actually failing.
+		cfgErrs, _ := f("logs.config_parse")
+		s["config.mempool_mismatch"] = cfgErrs > 0 || s["proc.running"] == false
 	}
 	if id, ok := f("evm.chain_id"); ok {
 		if want, ok := f("app.evm_chain_id"); ok && want > 0 {
