@@ -3,7 +3,7 @@
 │ Transaction                                                                  │
 │                                                                              │
 │ broadcast transaction                                                        │
-│ {"chain_id": "primium-1", "messages": ["/cosmos.gov.v1.MsgVote {proposalId:3 │
+│ {"chain_id": "mychain-1", "messages": ["/cosmos.gov.v1.MsgVote {proposalId:3 │
 │ option:VOTE_OPTION_YES}"], "fee": "140000000000000adex"}                     │
 │ action: gov-vote                                                             │
 │                                                                              │

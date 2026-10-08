@@ -25,7 +25,7 @@ INF validator jailed module=x/staking validator=cosmosvalcons1someoneelse000
 
 func TestJailCheckExplainsAndBlocks(t *testing.T) {
 	n, c, valoper, chain := setupChain(t)
-	c.Profile.Service = config.Service{Type: "docker", Unit: "primium-validator0"}
+	c.Profile.Service = config.Service{Type: "docker", Unit: "validator0"}
 	c.Profile.Home = t.TempDir()
 	c.SetHost(&host.Local{})
 	fakenode.InstallFakeDocker(t, "test", "")
@@ -142,7 +142,7 @@ func TestUnjailBlockedOnWrongConsensusKey(t *testing.T) {
 func TestGatherFallsBackWhenNodeCantAnswer(t *testing.T) {
 	n, c, valoper, _ := setupChain(t)
 	jail(n, time.Now().Add(time.Minute))
-	loading := fakenode.Start(t, "primium-1") // up, but knows nothing yet
+	loading := fakenode.Start(t, "mychain-1") // up, but knows nothing yet
 	p := *c.Profile
 	p.Endpoints.GRPC, p.Endpoints.FallbackGRPC = loading.Addr, n.Addr
 	c2 := &toolkit.Context{Context: context.Background(), Profile: &p}

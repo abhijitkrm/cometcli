@@ -27,8 +27,8 @@ func TestModelSwitchesToNodeItself(t *testing.T) {
 	}}
 	a := newTestAgent(t, prov, validators)
 	cfg := &config.Config{Profiles: map[string]*config.Profile{
-		"val01": {ChainID: "primium-1", Role: "validator"},
-		"val02": {ChainID: "primium-1", Role: "validator"},
+		"val01": {ChainID: "mychain-1", Role: "validator"},
+		"val02": {ChainID: "mychain-1", Role: "validator"},
 	}}
 	a.Ctx.Profile, a.Ctx.Cfg = nil, cfg // general mode
 	if a.Node() {

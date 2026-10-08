@@ -46,7 +46,7 @@ func writeHome(t *testing.T, configToml, appToml, pvs string) string {
 
 // setup builds a jailed, catching-up validator on the fake chain.
 func setup(t *testing.T, binary, configToml, appToml string) (*toolkit.Context, *fakenode.Comet) {
-	n := fakenode.Start(t, "primium-1")
+	n := fakenode.Start(t, "mychain-1")
 	chain := fakenode.StartComet(t)
 	p := n.Profile(t, "eth_secp256k1")
 	fakenode.WithComet(p, chain)

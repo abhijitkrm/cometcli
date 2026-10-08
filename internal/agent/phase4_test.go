@@ -108,14 +108,14 @@ func TestCustomCommandExpandsAndGrantsTurnRules(t *testing.T) {
 	a, dir := newShellAgent(t, prov)
 	withExt(a, dir, nil)
 	a.ext.Settings.Trusted = true
-	os.WriteFile(filepath.Join(dir, "network-config.env"), []byte("CHAIN_ID=primium-1\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "network-config.env"), []byte("CHAIN_ID=mychain-1\n"), 0o644)
 	a.ext.Commands["vote"] = &settings.Command{Name: "vote", Scope: "project", AllowedTools: []string{"bash(./upgrade/vote-upgrade.sh:*)"},
 		Body: "Vote $1 on proposal $2.\nHost: !`uname -s`\nRefused: !`touch x`\nConfig: @network-config.env"}
 	res, err := RunCommand(a, a.Ctx, a.Reg, "/vote yes 7")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Vote yes on proposal 7.", "Host: " + uname(t), "not run: only read-only", "CHAIN_ID=primium-1"} {
+	for _, want := range []string{"Vote yes on proposal 7.", "Host: " + uname(t), "not run: only read-only", "CHAIN_ID=mychain-1"} {
 		if !strings.Contains(res.Prompt, want) {
 			t.Errorf("prompt missing %q:\n%s", want, res.Prompt)
 		}

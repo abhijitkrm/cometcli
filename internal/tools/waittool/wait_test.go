@@ -23,7 +23,7 @@ func TestMain(m *testing.M) {
 
 func setup(t *testing.T) (*fakenode.Node, *fakenode.Comet, *toolkit.Context, *[]string) {
 	t.Helper()
-	n := fakenode.Start(t, "primium-1")
+	n := fakenode.Start(t, "mychain-1")
 	chain := fakenode.StartComet(t)
 	p := n.Profile(t, "eth_secp256k1")
 	fakenode.WithComet(p, chain)

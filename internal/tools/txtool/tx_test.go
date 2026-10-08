@@ -34,7 +34,7 @@ func TestParseCoin(t *testing.T) {
 
 func TestSendBuildsMsgSend(t *testing.T) {
 	tx.ConfirmTimeout, tx.ConfirmPoll = 300*time.Millisecond, 20*time.Millisecond
-	n := fakenode.Start(t, "primium-1")
+	n := fakenode.Start(t, "mychain-1")
 	c := &toolkit.Context{Context: context.Background(), Profile: n.Profile(t, "eth_secp256k1"),
 		Approver: func(*toolkit.Context, string, toolkit.Tier, map[string]any) (bool, error) { return true, nil }}
 	defer c.Close()

@@ -63,8 +63,8 @@ Standing instructions loaded into every session's system prompt:
 A line `@path/to/file.md` imports another file (key material is never imported).
 
 ```markdown
-# primium node-setup
-- Validators run in docker; containers are primium-validator0..3.
+# node-setup
+- Validators run in docker; containers are validator0..3.
 - Never restart validator0 without asking — it's the genesis proposer.
 - Upgrades follow upgrade/README.md.
 @docs/ports.md
@@ -86,7 +86,7 @@ allowed-tools: bash(./upgrade/vote-upgrade.sh:*), read
 ---
 Vote $2 on proposal $1.
 
-Current proposals: !`docker exec primium-validator0 evmd q gov proposals -o json | jq -r '.proposals[] | "\(.id) \(.status)"'`
+Current proposals: !`docker exec validator0 evmd q gov proposals -o json | jq -r '.proposals[] | "\(.id) \(.status)"'`
 Network config: @run-genesis/network-config.env
 
 Read upgrade/vote-upgrade.sh first, confirm the proposal is in its voting period,

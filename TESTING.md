@@ -9,8 +9,8 @@ Every step is read-only unless it says otherwise.
 ## 0. Prerequisites
 
 - Go 1.25+
-- A running local network (this guide uses the `primium-evm` docker-compose
-  setup: containers `primium-validator0` … `primium-validator3`)
+- A running local network (this guide uses an evmd docker-compose
+  setup: containers `validator0` … `validator3`)
 - Optional, for the agent: a free LLM key (see [§3](#3-pick-a-free-llm))
 
 Check the nodes are up and producing blocks:
@@ -46,26 +46,26 @@ cometcli init        # detects docker containers, port bindings, and mounted hom
 ### Option B: one command per node
 
 Each container maps its ports to different host ports. These match the
-`primium-evm` compose file; check yours with `docker port primium-validator0`.
+evmd compose file; check yours with `docker port validator0`.
 
 | profile | container | comet | gRPC | REST | EVM | home (host mount) |
 |---|---|---|---|---|---|---|
-| primium-val0 | primium-validator0 | 26657 | 9090 | 1317 | 8545 | `~/.primium_1` |
-| primium-val1 | primium-validator1 | 26667 | 9100 | 1327 | 8555 | `~/.primium_2` |
-| primium-val2 | primium-validator2 | 26677 | 9110 | 1337 | 8565 | `~/.primium_3` |
-| primium-val3 | primium-validator3 | 26687 | 9120 | 1347 | 8575 | `~/.primium_4` |
+| val0 | validator0 | 26657 | 9090 | 1317 | 8545 | `~/.node_1` |
+| val1 | validator1 | 26667 | 9100 | 1327 | 8555 | `~/.node_2` |
+| val2 | validator2 | 26677 | 9110 | 1337 | 8565 | `~/.node_3` |
+| val3 | validator3 | 26687 | 9120 | 1347 | 8575 | `~/.node_4` |
 
 ```bash
 for i in 0 1 2 3; do
   o=$((i*10))
-  cometcli profile add primium-val$i \
-    --chain-id primium-1 --evm-chain-id 123457 --bech32-prefix cosmos --fee-denom adex \
-    --role validator --binary evmd --home "$HOME/.primium_$((i+1))" \
+  cometcli profile add val$i \
+    --chain-id mychain-1 --evm-chain-id 123457 --bech32-prefix cosmos --fee-denom adex \
+    --role validator --binary evmd --home "$HOME/.node_$((i+1))" \
     --comet tcp://127.0.0.1:$((26657+o)) --grpc 127.0.0.1:$((9090+o)) \
     --lcd http://127.0.0.1:$((1317+o)) --evm http://127.0.0.1:$((8545+o)) \
-    --transport local --service docker --unit primium-validator$i
+    --transport local --service docker --unit validator$i
 done
-cometcli profile use primium-val0
+cometcli profile use val0
 ```
 
 To see signing and jail info without an ops key, add each validator's
@@ -73,7 +73,7 @@ operator address. You can list them with
 `curl -s localhost:1317/cosmos/staking/v1beta1/validators`.
 
 ```bash
-cometcli profile set primium-val0 --valoper cosmosvaloper1...
+cometcli profile set val0 --valoper cosmosvaloper1...
 ```
 
 ### Smoke-test the tool layer
@@ -87,7 +87,7 @@ cometcli profile set primium-val0 --valoper cosmosvaloper1...
 | `cometcli fleet status` | one row per profile, same height |
 | `cometcli doctor` | checklist (see note below) |
 | `cometcli sec exposure` | port audit from `docker port` |
-| `cometcli --profile primium-val2 node peers` | any profile, without switching |
+| `cometcli --profile val2 node peers` | any profile, without switching |
 
 > **Expected findings on a dev network.** `doctor` and `sec exposure`
 > report **6 critical exposures** per validator, because the compose file
@@ -119,7 +119,7 @@ Free-tier limits change; check the provider's console for current numbers.
 ```bash
 export GROQ_API_KEY=gsk_...
 for i in 0 1 2 3; do
-  cometcli profile set primium-val$i --agent-provider groq --agent-model openai/gpt-oss-120b
+  cometcli profile set val$i --agent-provider groq --agent-model openai/gpt-oss-120b
 done
 ```
 
@@ -128,7 +128,7 @@ done
 ```bash
 brew install ollama && ollama serve &      # or the macOS app
 ollama pull qwen3:8b                       # ~5 GB; tool-capable. qwen3:32b if you have 32 GB+ RAM
-cometcli profile set primium-val0 --agent-provider ollama --agent-model qwen3:8b
+cometcli profile set val0 --agent-provider ollama --agent-model qwen3:8b
 ```
 
 The default base URL is `http://localhost:11434`. Small models make more
@@ -138,7 +138,7 @@ tool-calling mistakes, so expect rougher answers than Groq.
 
 ```bash
 export COMETCLI_LLM_API_KEY=sk-or-...      # from https://openrouter.ai/keys
-cometcli profile set primium-val0 --agent-provider openai-compat \
+cometcli profile set val0 --agent-provider openai-compat \
   --agent-base-url https://openrouter.ai/api \
   --agent-model meta-llama/llama-3.3-70b-instruct:free
 ```
@@ -161,7 +161,7 @@ stored in `config.yaml`.
 
 ```bash
 cometcli ask --mode readonly "is my validator healthy? cite height and missed blocks"
-cometcli ask --mode readonly --profile primium-val2 "compare peers and signing across the fleet"
+cometcli ask --mode readonly --profile val2 "compare peers and signing across the fleet"
 cometcli ask --mode readonly "why might the EVM height drift from the comet height?"
 ```
 
@@ -251,7 +251,7 @@ keyring. `keys` commands use the active profile's keyring backend, so set it
 first:
 
 ```bash
-cometcli profile set primium-val0 --signer ops --signer-backend test
+cometcli profile set val0 --signer ops --signer-backend test
 cometcli keys add --name ops                          # new key; fund it from a dev account
 # or: cometcli keys add --name ops --recover          # import a funded dev mnemonic
 ```

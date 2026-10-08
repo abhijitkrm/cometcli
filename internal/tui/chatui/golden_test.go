@@ -61,7 +61,7 @@ func TestGoldenScreens(t *testing.T) {
 	golden(t, "approval_bash", m.View())
 
 	m.approval = &pendingApproval{prompt: `broadcast transaction
-{"chain_id": "primium-1", "messages": ["/cosmos.gov.v1.MsgVote {proposalId:3 option:VOTE_OPTION_YES}"], "fee": "140000000000000adex"}`,
+{"chain_id": "mychain-1", "messages": ["/cosmos.gov.v1.MsgVote {proposalId:3 option:VOTE_OPTION_YES}"], "fee": "140000000000000adex"}`,
 		tier: toolkit.TierOnChain, detail: map[string]any{"action": "gov-vote", toolkit.RuleHint: "val.vote"}}
 	golden(t, "approval_tx", m.View())
 	m.approval = nil
@@ -80,7 +80,7 @@ func TestGoldenTranscript(t *testing.T) {
 	m := goldenModel(t)
 	m.printed = nil
 	m.onEvent(agent.Event{Kind: agent.EvToolStart, Tool: "bash", Args: map[string]any{"command": "docker ps --format '{{.Names}}'"}})
-	m.onEvent(agent.Event{Kind: agent.EvToolResult, Tool: "bash", Output: "primium-validator0\nprimium-validator1"})
+	m.onEvent(agent.Event{Kind: agent.EvToolResult, Tool: "bash", Output: "validator0\nvalidator1"})
 	m.onEvent(agent.Event{Kind: agent.EvToolStart, Tool: "edit", Args: map[string]any{"file_path": "config/app.toml"}})
 	m.onEvent(agent.Event{Kind: agent.EvToolResult, Tool: "edit", Output: "--- config/app.toml\n  [api]\n- swagger = true\n+ swagger = false"})
 	m.onEvent(agent.Event{Kind: agent.EvToolStart, Tool: "↳ grep", Args: map[string]any{"pattern": "panic", "path": "/var/log"}})

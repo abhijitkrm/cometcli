@@ -94,7 +94,7 @@ func TestSignVerify(t *testing.T) {
 }
 
 // eth_secp256k1 must sign keccak256(msg) — the chain rejects sha256 digests
-// (verified live: signature-verification failures on primium-1).
+// (verified live: signature-verification failures on mychain-1).
 func TestSignEthSecp256k1_UsesKeccak(t *testing.T) {
 	priv, err := Derive(testMnemonic, AlgoEthSecp256k1, 60, 0, 0)
 	if err != nil {

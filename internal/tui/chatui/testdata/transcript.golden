@@ -1,7 +1,7 @@
 
 ⏺ Bash(docker ps --format '{{.Names}}')
-  ⎿  primium-validator0
-     primium-validator1
+  ⎿  validator0
+     validator1
 
 ⏺ Update(config/app.toml)
   ⎿  --- config/app.toml
