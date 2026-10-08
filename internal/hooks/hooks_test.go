@@ -37,7 +37,7 @@ func TestExitCodes(t *testing.T) {
 	}
 	out = runner(t, PreToolUse, "Bash", `exit 2`).Run(ctx, Input{Event: PreToolUse, ToolName: "bash"})
 	if !out.Block {
-		t.Fatal("matcher should be case-insensitive (Claude Code's Bash)")
+		t.Fatal("matcher should be case-insensitive (Bash)")
 	}
 }
 

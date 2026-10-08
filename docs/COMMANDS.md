@@ -362,7 +362,7 @@ cometcli runbook run coordinated-upgrade
 
 ```bash
 cometcli                               # bare command = chat TUI (when a profile exists)
-cometcli ui                            # chat-first TUI (Claude Code style): streamed answers,
+cometcli ui                            # chat-first TUI: streamed answers,
                                        # /run tools, approval modals with diffs, txs broadcast
                                        # from the chat. Overview/fleet/logs/send panes on tabs
 cometcli serve --open                  # same agent in a local web chat (127.0.0.1 only,

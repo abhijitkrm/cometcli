@@ -1,5 +1,5 @@
 // Package hooks runs operator-defined commands at points in the agent
-// loop, with Claude Code's contract: the event arrives as JSON on stdin;
+// loop, with the common agent-hook contract: the event arrives as JSON on stdin;
 // exit 0 passes (stdout may carry JSON decisions or extra context); exit
 // 2 blocks, with stderr as the reason; any other exit is a non-blocking
 // error shown to the operator.

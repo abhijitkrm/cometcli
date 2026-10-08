@@ -1,7 +1,7 @@
 <div align="center">
   <img src="cometcli.jpg" alt="cometcli" width="1200" />
   <h1>cometcli</h1>
-  <p><b>An agentic SRE terminal for Cosmos validators — Claude Code for your nodes</b></p>
+  <p><b>An agentic SRE terminal for Cosmos validators</b></p>
 </div>
 
 <div align="center">
@@ -24,7 +24,7 @@
 
 <br/>
 
-cometcli is a terminal you talk to, the way you use Claude Code, built for running
+cometcli is an AI terminal you talk to in plain language, built for running
 [Cosmos SDK](https://github.com/cosmos/cosmos-sdk) and
 [Cosmos-EVM](https://github.com/cosmos/evm) validators. Ask *"is anyone jailed?"* or
 *"why is my validator missing blocks?"*. It inspects the node, chain and host, works
@@ -39,8 +39,7 @@ out the cause, proposes the fix, and carries it out once you approve.
 - **Operate** — transactions, governance proposals and votes, upgrades, state sync,
   service control, security audits
 - **Watch** — live dashboard and alerts to Slack, Discord or Telegram
-- **Extend** — settings, memory, custom commands, hooks, MCP servers and subagents,
-  as in Claude Code
+- **Extend** — settings, memory, custom commands, hooks, MCP servers and subagents
 
 <p align="center">
   <img src="docs/images/cometcli-startup.png" alt="cometcli starting in the terminal: a comet streaking over the COMETCLI wordmark, the welcome box and the prompt" width="820" />
@@ -113,7 +112,7 @@ cometcli profile add myval \
 
 ## The terminal
 
-An inline chat like Claude Code's: answers land in your normal scrollback, and only
+An inline chat: answers land in your normal scrollback, and only
 the bottom of the screen redraws.
 
 ```
@@ -287,7 +286,7 @@ agent.
 
 - **Tiers** — `observe → diagnose → local-change → on-chain`. Reads run; changes ask;
   transactions always ask.
-- **Permission rules** — allow / ask / deny in Claude Code syntax
+- **Permission rules** — allow / ask / deny patterns
   (`bash(docker logs:*)`, `read(./config/**)`, `node.*`); deny beats ask beats allow.
   Every shell command is classified first, scripts and `docker exec` included.
 - **Consensus keys are radioactive** — `priv_validator_key.json` is never read into

@@ -18,7 +18,7 @@ import (
 )
 
 // chatPane is the conversational front-end: a transcript of user prompts,
-// assistant text, tool calls, and approvals — Claude Code style. The agent
+// assistant text, tool calls, and approvals. The agent
 // may be nil (no provider configured); slash commands and /run still work.
 type chatPane struct {
 	agent  *agent.Agent

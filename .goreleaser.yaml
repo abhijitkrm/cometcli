@@ -67,8 +67,8 @@ release:
     ## cometcli v{{ .Version }}
 
     An agentic SRE terminal for Cosmos SDK and Cosmos-EVM validators — talk to
-    your machine and nodes the way you use Claude Code; incidents worked through
-    to the fix, every change and transaction approved by you.
+    your machine and nodes in plain language; incidents worked through to the
+    fix, every change and transaction approved by you.
 
     ```bash
     curl -fsSL https://raw.githubusercontent.com/abhijitkrm/cometcli/main/scripts/install.sh | bash

@@ -30,8 +30,8 @@ const (
 // Modes lists the approval postures in shift+tab cycling order.
 var Modes = []Mode{ModeOps, ModeAcceptEdits, ModeReadOnly, ModeBypass}
 
-// ParseMode accepts ops | readonly | accept-edits | bypass, plus Claude
-// Code's names (default, plan, acceptEdits, bypassPermissions).
+// ParseMode accepts ops | readonly | accept-edits | bypass, plus the
+// common aliases default, plan, acceptEdits and bypassPermissions.
 func ParseMode(s string) (Mode, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "", "ops", "rw", "default":

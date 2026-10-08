@@ -1,7 +1,7 @@
 // Package settings discovers and merges cometcli's file-based
 // extensibility: settings.json at user, project and local scope, COMET.md
 // memory files, custom slash commands, subagent definitions and MCP
-// server configs. Formats follow Claude Code's, so its configs carry over.
+// server configs, in the settings format common to AI coding agents.
 //
 // Project-scope hooks and MCP servers execute commands, so they only take
 // effect once the project directory is trusted (`cometcli trust`).
@@ -28,7 +28,7 @@ const (
 	ScopeLocal   Scope = "local"   // <root>/.cometcli/settings.local.json
 )
 
-// Permissions mirrors Claude Code's permissions block.
+// Permissions is the allow/ask/deny permissions block.
 type Permissions struct {
 	Allow       []string `json:"allow,omitempty"`
 	Ask         []string `json:"ask,omitempty"`
@@ -143,7 +143,7 @@ func Load(cwd string) (*Settings, error) {
 		s.Sources = append(s.Sources, sc.path)
 		s.apply(f, sc.scope)
 	}
-	// a project's .mcp.json (Claude Code's file) adds project servers
+	// a project's .mcp.json (the standard project MCP file) adds project servers
 	if s.Root != "" {
 		var mj struct {
 			MCPServers map[string]MCPServer `json:"mcpServers"`

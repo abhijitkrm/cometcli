@@ -8,7 +8,7 @@ import (
 )
 
 // The startup art: a comet streaking over "COMETCLI" in block letters,
-// the way Claude Code greets you with its name. Drawn only when the
+// as a startup greeting. Drawn only when the
 // terminal is wide enough; colors degrade with the terminal's profile.
 
 // glyphs is the ANSI Shadow figlet font, for the letters we need.
@@ -79,7 +79,7 @@ func along(stops []rgb, t float64) lipgloss.Color {
 var (
 	// tail: deep violet far behind, through blue and cyan, to white-hot
 	tailStops = []rgb{hex("#3B2A6B"), hex("#6A4FC9"), hex("#4F8EF7"), hex("#7FE3F5"), hex("#F2FBFF")}
-	// wordmark: comet gold through Claude-ish orange to violet
+	// wordmark: comet gold through coral to violet
 	wordStops = []rgb{hex("#FFD27A"), hex("#F09A5B"), hex("#D97757"), hex("#C2609E"), hex("#8E6BE8")}
 	headSt    = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFF7E0")).Bold(true)
 	sparkSt   = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFD27A"))

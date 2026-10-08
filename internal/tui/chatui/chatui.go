@@ -1,5 +1,5 @@
 // Package chatui is cometcli's interactive terminal: an inline,
-// scrollback-friendly chat in the style of Claude Code. Finished messages
+// scrollback-friendly chat. Finished messages
 // are printed into the terminal's normal scrollback; only a small live
 // region (streaming text, spinner, input, approval dialog, status line)
 // is redrawn.
@@ -690,7 +690,7 @@ func (m *model) onEvent(e agent.Event) tea.Cmd {
 }
 
 // flushThinking closes a finished stretch of thinking into a collapsed
-// line, the way Claude Code shows it; ctrl+o prints the text.
+// line; ctrl+o prints the text.
 func (m *model) flushThinking() tea.Cmd {
 	t := strings.TrimSpace(m.think)
 	m.think = ""
@@ -995,7 +995,7 @@ func (m *model) View() string {
 		if s := strings.TrimSpace(m.live.String()); s != "" {
 			b.WriteString("\n" + lastLines("⏺ "+strings.TrimLeft(m.markdown(s), "\n "), 16) + "\n")
 		}
-		// running tool calls: blinking bullet, like Claude Code
+		// running tool calls: blinking bullet
 		blink := "⏺"
 		if time.Now().UnixMilli()/500%2 == 1 {
 			blink = " "
@@ -1273,7 +1273,7 @@ func (m *model) markdown(s string) string {
 		zero := uint(0)
 		cfg.Document.Margin = &zero
 		cfg.Document.BlockPrefix, cfg.Document.BlockSuffix = "", ""
-		// Claude Code look: "- " bullets, headings as bold text
+		// "- " bullets, headings as bold text
 		cfg.Item.BlockPrefix = "- "
 		// inline code: just a color, no padding or background
 		codeColor := "#B1B9F9"
@@ -1311,7 +1311,7 @@ func userLine(s string) string {
 	return "\n" + strings.Join(lines, "\n")
 }
 
-// result indents text under the previous line with Claude Code's ⎿.
+// result indents text under the previous line with ⎿.
 func result(s string) string {
 	if strings.TrimSpace(s) == "" {
 		return ""
@@ -1431,7 +1431,7 @@ func todoLines(ts []agent.Todo) string {
 	return strings.Join(out, "\n")
 }
 
-// verbs for the spinner, one picked per turn (Claude Code style)
+// verbs for the spinner, one picked per turn
 var verbs = []string{"Thinking", "Pondering", "Investigating", "Digging", "Checking", "Inspecting", "Crunching",
 	"Mulling", "Percolating", "Synthesizing", "Ruminating", "Deliberating", "Tinkering", "Sleuthing", "Untangling"}
 
