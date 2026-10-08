@@ -76,7 +76,7 @@ status, cometcli doctor, cometcli tx unjail) and a tool the agent calls.`,
 	for _, c := range toolGroupCommands(reg) {
 		root.AddCommand(c)
 	}
-	root.AddCommand(profileCmd(), auditCmd(), versionCmd(), initCmd(), sessionsCmd(), oneCmd(reg), configCmd(), trustCmd())
+	root.AddCommand(profileCmd(), auditCmd(), versionCmd(), initCmd(), sessionsCmd(), oneCmd(reg), configCmd(), trustCmd(), watchCmd(reg))
 	root.AddCommand(extra...)
 	return root
 }
