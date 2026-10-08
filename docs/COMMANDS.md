@@ -99,7 +99,8 @@ down is reported, never fatal. Signals are flat names (`val.jailed`,
 `host.disk_used_pct`, `logs.apphash`, `node.key_mismatch`…).
 
 Each **case** says which signals point to it, how to confirm it, causes, fix steps tagged
-`[read]` / `[change]` / `[tx]`, how to verify, and what never to do. In node mode,
+`[read]` / `[change]` / `[tx]`, how to verify, and what never to do. In any session
+(name the node — `/incident val01 is down` — and cometcli switches to it),
 **`/incident [what you see]`** runs the method: triage → confirm the top case → fix the
 root cause first (approvals as usual) → wait with `wait.until` → verify → re-triage →
 report. When the agent finds a cause no case covered, it offers to record one with
@@ -434,8 +435,8 @@ saved after each turn to `~/.cometcli/sessions/` (0600, already redacted).
 | `/memory`, `/remember [--user\|--node] <text>` | memory files loaded; add a line to COMET.md |
 | `/mcp`, `/agents` | connected MCP servers; subagents for the task tool |
 | `/<custom>` | commands from `.cometcli/commands/*.md` — see [EXTENDING.md](EXTENDING.md) |
-| `/incident [what you see]` | node mode: triage → known case → fix root cause → wait → verify → report |
-| `/recover-jail [notes]` | node mode: run the full jail-recovery procedure |
+| `/incident [what you see]` | triage → known case → fix root cause → wait → verify → record → report; name the node to switch to it |
+| `/recover-jail [notes]` | the full jail-recovery procedure (name the node, or the agent picks it) |
 | `/one [profile\|off]` | switch the session to node mode for a profile, or back to general (conversation kept) |
 
 ### General tools and permissions

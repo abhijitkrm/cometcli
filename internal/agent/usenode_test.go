@@ -66,3 +66,36 @@ func TestModelSwitchesToNodeItself(t *testing.T) {
 		t.Fatal("unknown profile accepted")
 	}
 }
+
+func TestNodeOnlyCommandsInGeneralMode(t *testing.T) {
+	a := newTestAgent(t, &mockProvider{})
+	a.Ctx.Profile = nil
+	a.Ctx.Cfg = &config.Config{Profiles: map[string]*config.Profile{
+		"val01": {ChainID: "mychain-1", Role: "validator"},
+		"val02": {ChainID: "mychain-1", Role: "validator"},
+	}}
+	// names a node: switch to it
+	res, err := RunCommand(a, a.Ctx, a.Reg, "/incident val01 is down")
+	if err != nil || !a.Node() || a.Ctx.Profile.Name != "val01" || !strings.Contains(res.Text, "working on val01") {
+		t.Fatalf("named node: %+v %v node=%v", res, err, a.Node())
+	}
+	if !strings.Contains(res.Prompt, "node.triage") || !strings.Contains(res.Prompt, "val01 is down") {
+		t.Fatalf("procedure prompt: %q", res.Prompt)
+	}
+	// no node named: the model picks with use_node
+	a.SwitchScope(nil)
+	res, err = RunCommand(a, a.Ctx, a.Reg, "/incident blocks stopped")
+	if err != nil || a.Node() || !strings.Contains(res.Prompt, "call use_node") {
+		t.Fatalf("unnamed node: %+v %v", res, err)
+	}
+	// both named: ambiguous, the model decides
+	res, _ = RunCommand(a, a.Ctx, a.Reg, "/incident val01 and val02 disagree")
+	if a.Node() || !strings.Contains(res.Prompt, "call use_node") {
+		t.Fatal("ambiguous names switched anyway")
+	}
+	// no profiles at all: explain how to add one
+	a.Ctx.Cfg = &config.Config{}
+	if _, err := RunCommand(a, a.Ctx, a.Reg, "/incident val01 is down"); err == nil || !strings.Contains(err.Error(), "cometcli init") {
+		t.Fatalf("no profiles: %v", err)
+	}
+}

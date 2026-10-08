@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/abhijitkrm/cometcli/internal/config"
 	"github.com/abhijitkrm/cometcli/internal/runbook"
@@ -232,7 +233,7 @@ func RunCommand(a *Agent, c *toolkit.Context, reg *toolkit.Registry, line string
 			return CmdResult{}, err
 		}
 		if len(f) == 1 {
-			txt := "general mode — shell and files on this machine; /one <profile> for node work"
+			txt := "general mode — shell and files on this machine; ask about a node by name and the agent switches to it (/one <profile> pins one)"
 			if a.Node() {
 				txt = "node mode: " + a.Ctx.Profile.Name + " — /one off for general mode"
 			}
@@ -468,12 +469,51 @@ func RunCommand(a *Agent, c *toolkit.Context, reg *toolkit.Registry, line string
 		if err := needAgent(); err != nil {
 			return CmdResult{}, err
 		}
+		prompt, text := cmd.Expand(args, nil, nil), "/"+name
 		if builtinNeedsNode[name] && !a.Node() {
-			return CmdResult{}, fmt.Errorf("/%s needs node mode — /one <profile> first", name)
+			p, err := a.nodeFor(args)
+			switch {
+			case err != nil:
+				return CmdResult{}, err
+			case p != nil:
+				// the operator named the node: work on it
+				a.SwitchScope(p)
+				text += " — working on " + p.Name
+			default:
+				// let the model pick the profile itself
+				prompt = "This is about one of the operator's nodes: call use_node with the right profile first.\n\n" + prompt
+			}
 		}
-		return CmdResult{Text: "/" + name, Prompt: cmd.Expand(args, nil, nil)}, nil
+		return CmdResult{Text: text, Prompt: prompt}, nil
 	}
 	return CmdResult{}, ErrUnknownCommand
+}
+
+// nodeFor finds the profile a node-only command is about: one named in
+// its arguments, or nil when none is (the model then picks with use_node).
+// It errors only when there are no profiles at all.
+func (a *Agent) nodeFor(args string) (*config.Profile, error) {
+	if a.Ctx == nil || a.Ctx.Cfg == nil || len(a.Ctx.Cfg.Profiles) == 0 {
+		return nil, fmt.Errorf("no node profiles yet — add one with `cometcli init` or `cometcli profile add`")
+	}
+	words := map[string]bool{}
+	for _, w := range strings.FieldsFunc(strings.ToLower(args), func(r rune) bool {
+		return !(r == '-' || r == '_' || r == '.' || unicode.IsLetter(r) || unicode.IsDigit(r))
+	}) {
+		words[strings.Trim(w, ".")] = true
+	}
+	var names []string
+	for n := range a.Ctx.Cfg.Profiles {
+		if words[strings.ToLower(n)] {
+			names = append(names, n)
+		}
+	}
+	if len(names) != 1 { // none, or ambiguous: the model decides
+		return nil, nil
+	}
+	p := a.Ctx.Cfg.Profiles[names[0]]
+	p.Name = names[0]
+	return p, nil
 }
 
 // memoryTarget picks the file /remember writes: --user, --node, or the
