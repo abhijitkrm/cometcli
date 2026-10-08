@@ -195,7 +195,12 @@ func describe(e audit.Event) string {
 	str := func(k string) string { s, _ := d[k].(string); return clip(s, 120) }
 	switch e.Kind {
 	case audit.KindPrompt:
-		return "operator: " + str("text")
+		text, _ := d["text"].(string)
+		// a built-in procedure (/incident) is logged expanded: show what was asked
+		if _, asked, ok := strings.Cut(text, "What the operator sees: "); ok {
+			return "operator: /incident " + clip(asked, 120)
+		}
+		return "operator: " + clip(text, 120)
 	case audit.KindTool:
 		line := "tool " + str("name")
 		if err := str("error"); err != "" {

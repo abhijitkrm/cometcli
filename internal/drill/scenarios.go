@@ -23,7 +23,6 @@ type Env struct {
 	Node    int
 	Profile *config.Profile
 	backup  map[string][]byte
-	note    string
 }
 
 // Signals collects the named signal families for the scenario's node.

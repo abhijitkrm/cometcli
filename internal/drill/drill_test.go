@@ -1,6 +1,7 @@
 package drill
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -60,7 +61,7 @@ func TestApprovalsOnlyForDrillProfiles(t *testing.T) {
 	if ok, _ := drillApprover(&toolkit.Context{Profile: drill}, "unjail", toolkit.TierOnChain, nil); !ok {
 		t.Fatal("drill profile not approved")
 	}
-	res := RunScenario(nil, &Env{Profile: &config.Profile{Name: "val01"}}, Scenarios[0], nil, func(string) {})
+	res := RunScenario(context.Background(), &Env{Profile: &config.Profile{Name: "val01"}}, Scenarios[0], nil, func(string) {})
 	if !strings.Contains(res.Err, "not a drill profile") {
 		t.Fatalf("ran a scenario on a real profile: %+v", res)
 	}

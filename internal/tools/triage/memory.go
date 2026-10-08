@@ -2,6 +2,7 @@ package triage
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -285,10 +286,13 @@ func (RecordIncident) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, 
 		Data: map[string]any{"id": inc.ID, "path": path}}, nil
 }
 
+var listNumRe = regexp.MustCompile(`^\d+[.)]\s+`)
+
 func lines(s string) []string {
 	var out []string
 	for _, l := range strings.Split(s, "\n") {
 		l = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(l), "-*• "))
+		l = strings.TrimSpace(listNumRe.ReplaceAllString(l, "")) // "1. x" — the record numbers nothing itself
 		if l != "" {
 			out = append(out, l)
 		}

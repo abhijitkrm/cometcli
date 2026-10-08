@@ -313,12 +313,96 @@ cometcli evm txpool                    # pending/queued EVM tx counts
 ## Fleet (all profiles at once)
 
 ```bash
+cometcli fleet triage                              # every node triaged at once, then compared
+cometcli fleet triage --chain mychain-1            # one chain only
 cometcli fleet status                              # health matrix: height, peers, signing, disk
 cometcli fleet exec --tool node.status             # run a read-only tool everywhere
 cometcli fleet exec --tool node.logs --args '{"lines":20}'
 cometcli fleet exec --tool val.signing --profiles val01,val02
 cometcli fleet shell "uptime"                      # shell on every host (one approval)
 ```
+
+`fleet triage` gives one row per node (height, peers, signing, jailed, top case), then
+what only a comparison shows:
+
+- a node behind the others on its chain
+- a chain-wide halt: every node stalled, so the problem is the chain, not one node
+- version mismatches between nodes
+- two nodes running the same consensus key (double-sign risk)
+- validators sharing a host
+- a validator whose sentries are down
+
+Tell cometcli which sentries a validator peers through so it can check them:
+`cometcli profile add val01 --sentries sentry1,sentry2`. In a session, questions about
+several nodes ("how is my network?") start with `fleet.triage`, in general mode too.
+
+## Watching on your behalf
+
+```bash
+cometcli watch                                     # every node, every 5m, diagnose mode
+cometcli watch --mode fix --interval 2m            # may act — approvals go to Telegram
+cometcli watch --once --mode notify                # one sweep, report only (cron-friendly)
+```
+
+Each sweep is a fleet triage. A problem that newly appears (a critical or high case on
+a node, or a chain halt, double-sign risk or cut-off validator) becomes an incident:
+
+| mode | what happens |
+|---|---|
+| `notify` | the finding is reported |
+| `diagnose` (default) | the agent works the incident read-only and reports its findings |
+| `fix` | the agent may act; **each approval is sent to Telegram with Approve / Deny buttons** |
+
+The watcher reports findings, agent reports and recoveries. It doesn't work the same
+problem again within the cooldown (default 1h), and remembers what it saw across
+restarts.
+
+```yaml
+# ~/.cometcli/config.yaml
+watch:
+  interval: 5m
+  mode: diagnose            # notify | diagnose | fix
+  profiles: [val01, val02]  # default: all
+  cooldown: 1h
+  approval_timeout: 15m     # an unanswered approval is a "no"
+  allow_tx: false           # transactions are refused in watch mode unless true
+  telegram_users: [123456]  # only these Telegram users' presses count
+  alerts:
+    slack_webhook: https://hooks.slack.com/…     # reports only
+    discord_webhook: https://discord.com/api/webhooks/…
+    telegram_chat_id: "-100123456"               # reports and approvals
+```
+
+Save the Telegram bot token with `cometcli config set-key TELEGRAM_BOT_TOKEN`, or put it
+in `watch.alerts.telegram_token`. Only presses from that chat, and from
+`telegram_users` if set, count. Slack and Discord get reports but can't answer
+approvals.
+
+## Incident drills
+
+Check how well cometcli handles real faults, on a throwaway network:
+
+```bash
+cometcli drill testnet up --image <evmd image>     # 4 local validators in docker, fast slashing
+cometcli drill list                                # the scenarios
+cometcli drill run                                 # all of them (--scenario oom,partition to pick)
+cometcli drill testnet down                        # remove containers, data and drill profiles
+```
+
+Each scenario breaks a drill node for real:
+
+- stopped until it's jailed for downtime
+- `config.toml` broken (crash loop)
+- `halt-height` set
+- container memory limit too low (OOM)
+- network detached
+
+For each one, the drill checks whether triage named the right root cause, then lets the
+agent work it with `/incident`, verifies the fix on the node itself, and puts the node
+back to health. The scoreboard shows triage x/y and fixed x/y, with steps, tokens and
+time per scenario. Results are saved in `~/.cometcli/drills/`, so model or prompt
+changes can be compared run to run. Approvals are granted automatically, **but only on
+drill profiles** (`metadata.drill: "true"`); anything else is refused.
 
 ## Monitoring
 

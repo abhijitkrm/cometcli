@@ -188,6 +188,15 @@ problem comes back.
 Add your own cases in `~/.cometcli/kb/` — format in
 [docs/EXTENDING.md](docs/EXTENDING.md#knowledge-base-cases).
 
+Across nodes, `cometcli fleet triage` compares them all at once. It points out a node
+behind the others, a chain-wide halt, version mismatches, two nodes running one
+consensus key, and validators cut off from their sentries. `cometcli watch` does this on
+an interval for you. It works new incidents read-only and reports them to Slack,
+Discord or Telegram, or with `--mode fix` sends each approval to Telegram with
+Approve/Deny buttons. To check how well all of this works, `cometcli drill` breaks a
+throwaway local network on purpose and scores whether the agent finds and fixes each
+fault.
+
 Jail recovery is careful about fees: `val.unjail` refuses while the jail period runs,
 the node isn't synced, the signer's saved state is ahead of the chain, the node signs
 with a different consensus key than the one registered, self-delegation is below the
@@ -244,7 +253,9 @@ Tools are grouped by domain. Required args also bind positionally —
 | `snap` | `list`, `prune`, `statesync` |
 | `runbook` | `list`, `show`, `run` — builtins + your own YAML |
 | `net` | `add-peer`, `rm-peer` |
-| `fleet` | `status`, `exec` (a read-only tool on every profile), `shell` (one command on every host, one approval) |
+| `fleet` | `triage` (every node, compared), `status`, `exec` (a read-only tool on every profile), `shell` (one command on every host, one approval) |
+| `watch` | the autonomous watcher: triage on an interval, work new incidents, remote approvals |
+| `drill` | `testnet up\|down`, `list`, `run` — scored incident drills on a throwaway network |
 
 Global flags: `--profile`, `--json`, `-y/--yes` (auto-approve observe/diagnose
 prompts — never on-chain).

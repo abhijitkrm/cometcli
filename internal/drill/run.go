@@ -56,8 +56,8 @@ func topCase(ctx context.Context, e *Env) string {
 
 // RunScenario injects the fault, has the agent work it, scores the
 // outcome and recovers the node. log reports progress.
-func RunScenario(ctx context.Context, e *Env, s Scenario, newAgent AgentFactory, log func(string)) Result {
-	res := Result{Scenario: s.Name}
+func RunScenario(ctx context.Context, e *Env, s Scenario, newAgent AgentFactory, log func(string)) (res Result) {
+	res.Scenario = s.Name // named result: the deferred timing and recovery error must reach the caller
 	if !IsDrill(e.Profile) {
 		res.Err = "refusing: " + e.Profile.Name + " is not a drill profile"
 		return res

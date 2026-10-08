@@ -498,7 +498,7 @@ func (a *Agent) nodeFor(args string) (*config.Profile, error) {
 	}
 	words := map[string]bool{}
 	for _, w := range strings.FieldsFunc(strings.ToLower(args), func(r rune) bool {
-		return !(r == '-' || r == '_' || r == '.' || unicode.IsLetter(r) || unicode.IsDigit(r))
+		return r != '-' && r != '_' && r != '.' && !unicode.IsLetter(r) && !unicode.IsDigit(r)
 	}) {
 		words[strings.Trim(w, ".")] = true
 	}
