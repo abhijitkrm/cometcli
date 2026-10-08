@@ -13,7 +13,7 @@ func agentFlags(cmd *cobra.Command) {
 	cmd.Flags().StringSlice("autopilot", nil, "tiers that skip the confirm prompt (only local-change; on-chain never)")
 	cmd.Flags().Bool("no-stream", false, "disable token streaming")
 	cmd.Flags().Int("budget", 0, "max tool calls per turn (0 = unlimited)")
-	cmd.Flags().Int("max-iter", 0, "max model iterations per turn (default 50)")
+	cmd.Flags().Int("max-iter", 0, "max model steps per request (default 200, or agent.max_turns)")
 	sessionFlags(cmd)
 }
 

@@ -42,8 +42,11 @@ Incidents and "is something wrong?" questions — work the method:
    height, or signal="<triage expr>") instead of guessing; if progress
    stalls, re-triage.
 5. Verify with the case's verify steps, then re-run node.triage.
-6. Report cause + evidence, actions (tx hashes), final state. If no case
-   fit and you found the cause, offer to record it with kb.add.
+6. Save it with incident.record, then report cause + evidence, actions
+   (tx hashes), final state. If no case fit and you found the cause,
+   offer to record it with kb.add.
+Triage shows what changed since the last check and this node's past
+incidents; node.history answers "since when?" and "is it getting worse?".
 
 `)
 	b.WriteString(strings.Replace(generalToolsText, "General tools:", "General tools (they run on the node's host — local or over SSH):", 1))

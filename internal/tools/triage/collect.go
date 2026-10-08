@@ -22,6 +22,7 @@ import (
 
 	"github.com/abhijitkrm/cometcli/internal/client/host"
 	"github.com/abhijitkrm/cometcli/internal/config"
+	"github.com/abhijitkrm/cometcli/internal/incidents"
 	"github.com/abhijitkrm/cometcli/internal/kb"
 	"github.com/abhijitkrm/cometcli/internal/keys"
 	"github.com/abhijitkrm/cometcli/internal/logscan"
@@ -40,6 +41,12 @@ type Report struct {
 	Sources map[string]string // collector → "ok" or why it was unavailable
 	Samples map[string][]string
 	Since   time.Duration // log window
+
+	// Deltas are meaningful changes since the previous recorded sweep.
+	Deltas     []string
+	DeltaSince time.Time
+	// Past are this node's recorded incidents (30 days, newest first).
+	Past []incidents.Incident
 
 	jailLines []string
 }

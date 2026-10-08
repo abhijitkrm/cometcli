@@ -116,6 +116,31 @@ format in [EXTENDING.md](EXTENDING.md#knowledge-base-cases).
 cometcli wait until --condition signal --value "host.disk_used_pct < 85 && proc.running == true"
 ```
 
+### History and incident records
+
+Every `node.triage` run is saved to the node's signal history
+(`~/.cometcli/history/<profile>/`, kept 30 days), and triage starts by saying what
+changed since the previous run (`node.peers 8→1, val.jailed false→true`). For trends:
+
+```bash
+cometcli node history                              # key health signals, last 24h
+cometcli node history --signals val.,node.peers --since 7d
+cometcli mon record --interval 5m                  # sample regularly, not only when someone triages
+```
+
+Each answer gives first → last, min/max, a trend line and when the value changed.
+
+When an incident is finished, the agent saves it with `incident.record`: title, root
+cause, matching case, evidence, actions and outcome. The timeline (prompts, tool calls,
+approvals) and transaction hashes are filled in from the audit log. Records live in
+`~/.cometcli/incidents/<profile>/` as JSON plus a Markdown postmortem. Triage
+mentions a node's past incidents and flags a case that keeps coming back.
+
+```bash
+cometcli incident list                             # last 30 days (--since 90d)
+cometcli incident show --id 20261007-0533-val-jailed-downtime
+```
+
 ### Incident tools
 
 Tools built for running an incident to resolution — usable directly or by the agent:

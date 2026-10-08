@@ -217,3 +217,38 @@ func TestKBTools(t *testing.T) {
 		t.Fatal("path-traversal id accepted")
 	}
 }
+
+func TestTriageRemembersChangesIncidentsAndHistory(t *testing.T) {
+	c, chain := setup(t, "evmd", "db_backend = \"goleveldb\"\n", "minimum-gas-prices = \"1adex\"\n")
+	if _, err := (Triage{}).Run(c, toolkit.Args{}); err != nil {
+		t.Fatal(err)
+	}
+	chain.Set(func(c *fakenode.Comet) { c.Peers = 0 }) // something breaks between sweeps
+	res, err := (Triage{}).Run(c, toolkit.Args{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Text, "changed since the last check") || !strings.Contains(res.Text, "node.peers 3→0") {
+		t.Fatalf("no deltas:\n%s", res.Text)
+	}
+	// the agent records the incident when it's done
+	rec, err := (RecordIncident{}).Run(c, toolkit.Args{"title": "Peers lost after firewall change", "case": "node-no-peers",
+		"root_cause": "ufw blocked 26656", "actions": "- reopened 26656\n- restarted", "outcome": "resolved"})
+	if err != nil || !strings.Contains(rec.Text, "recorded incident") {
+		t.Fatalf("%v %v", rec, err)
+	}
+	res, _ = (Triage{}).Run(c, toolkit.Args{})
+	if !strings.Contains(res.Text, "past incidents on this node (30d): 1") || !strings.Contains(res.Text, "recurring: node-no-peers ×1") {
+		t.Fatalf("past incident not surfaced:\n%s", res.Text)
+	}
+	list, _ := (ListIncidents{}).Run(c, toolkit.Args{})
+	id := list.Data["incidents"].([]string)[0]
+	show, _ := (ShowIncident{}).Run(c, toolkit.Args{"id": id})
+	if !strings.Contains(show.Text, "ufw blocked 26656") || !strings.Contains(show.Text, "- reopened 26656") {
+		t.Fatalf("show:\n%s", show.Text)
+	}
+	h, err := (History{}).Run(c, toolkit.Args{"signals": "node.peers,val.", "since": "1h"})
+	if err != nil || !strings.Contains(h.Text, "node.peers: 3 → 0") || !strings.Contains(h.Text, "val.jailed") || !strings.Contains(h.Text, "3 samples") {
+		t.Fatalf("history:\n%s %v", h.Text, err)
+	}
+}

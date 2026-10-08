@@ -179,6 +179,12 @@ Each case lists how to confirm it, its causes, fix steps tagged `[read]` /
 **`/incident [what you see]`** works the top case to resolution: confirm → fix the
 root cause → wait (`wait.until`, without spending model calls) → verify → report.
 When the agent finds a cause no case covered, it offers to record it with `kb.add`.
+
+cometcli remembers. Every triage is saved to the node's history, so it can tell you what
+changed since the last check and answer "since when?" (`node history --since 7d`).
+Every finished incident is saved as a postmortem with its root cause, actions,
+transaction hashes and a timeline from the audit log. Triage points out when the same
+problem comes back.
 Add your own cases in `~/.cometcli/kb/` — format in
 [docs/EXTENDING.md](docs/EXTENDING.md#knowledge-base-cases).
 
@@ -222,17 +228,18 @@ Tools are grouped by domain. Required args also bind positionally —
 
 | Domain | Highlights |
 |---|---|
-| `node` | `triage`, `status`, `peers`, `health`, `consensus`, `logs`, `config --action lint`, `service status\|restart`, `version-check` |
+| `node` | `triage`, `history`, `status`, `peers`, `health`, `consensus`, `logs`, `config --action lint`, `service status\|restart`, `version-check` |
 | `val` | `status`, `signing`, `jail-check`, `consensus`, `rewards`, `votes` · on-chain: `unjail`, `withdraw`, `vote`, `edit`, `create` |
 | `chain` | `validators` (`--status jailed`), `params`, `gov`, `upgrade-plan`, `pool`, `balance` |
 | `gov` | `propose` (text / upgrade / messages), `deposit` |
+| `incident` | `list`, `show`, `record` — postmortems of past incidents |
 | `kb` | `search`, `show`, `add` — the knowledge base of failure cases |
 | `wait` | `until` — synced, height, unjailable, signing, in-consensus, tx-committed, proposal-status, or any triage signal |
 | `evm` | `chainid`, `parity` (comet↔JSON-RPC drift), `gasprice`, `txpool` |
 | `tx` | `send`, `delegate`, `undelegate`, `redelegate`, `get` — every tx tool takes `--gas-price`, `--gas-limit`, `--fee-denom`, `--seq` |
 | `keys` | `add` (`--recover`/`--privkey-hex`), `list`, `show`, `rm`, `convert` (bech32↔0x) |
 | `sec` | `exposure` (listening ports), `perms` (key-file permissions), `doublesign` (priv_validator_state check) |
-| `mon` | `snapshot`, `watch` (live TUI), `alerts` (rules → stdout/Slack/Discord/Telegram) |
+| `mon` | `snapshot`, `watch` (live TUI), `record` (signal history), `alerts` (rules → stdout/Slack/Discord/Telegram) |
 | `upgrade` | `check`, `prepare` (download, verify, stage for cosmovisor), `watch` |
 | `snap` | `list`, `prune`, `statesync` |
 | `runbook` | `list`, `show`, `run` — builtins + your own YAML |
@@ -309,6 +316,8 @@ credentials       # API keys saved by `config set-key` (0600)
 settings.json     # permission rules, hooks, MCP servers (also per project: .cometcli/)
 COMET.md          # memory the agent always reads (also per project)
 kb/               # your own knowledge-base cases
+history/          # triage signal history per profile (30 days)
+incidents/        # incident records and postmortems per profile
 keys/             # ops keyring (file backend)
 sessions/         # saved conversations (cometcli -c / -r)
 runbooks/         # your custom YAML playbooks
