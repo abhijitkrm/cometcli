@@ -172,7 +172,7 @@ func TestHistoryModeCycleAndQuit(t *testing.T) {
 func TestEventRendering(t *testing.T) {
 	m, _ := newTestModel(t)
 	m.onEvent(agent.Event{Kind: agent.EvToolStart, Tool: "bash", Args: map[string]any{"command": "docker ps"}})
-	m.onEvent(agent.Event{Kind: agent.EvToolResult, Tool: "bash", Output: "primium-validator0\nprimium-validator1"})
+	m.onEvent(agent.Event{Kind: agent.EvToolResult, Tool: "bash", Output: "validator0\nvalidator1"})
 	m.onEvent(agent.Event{Kind: agent.EvToolResult, Tool: "edit", Output: "--- f\n- a = 1\n+ a = 2"})
 	m.onEvent(agent.Event{Kind: agent.EvToolStart, Tool: "mcp__grafana__query", Args: map[string]any{}})
 	m.running = true
@@ -182,7 +182,7 @@ func TestEventRendering(t *testing.T) {
 	m.running = false
 	m.onEvent(agent.Event{Kind: agent.EvTodos, Todos: []agent.Todo{{Content: "stop", Status: "completed"}, {Content: "swap", Status: "in_progress"}}})
 	out := strings.Join(m.printed, "\n")
-	for _, want := range []string{"Bash", "(docker ps)", "⎿", "primium-validator1", "+ a = 2", "swap"} {
+	for _, want := range []string{"Bash", "(docker ps)", "⎿", "validator1", "+ a = 2", "swap"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}

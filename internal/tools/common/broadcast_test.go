@@ -18,7 +18,7 @@ import (
 func setup(t *testing.T, algo string) (*fakenode.Node, *toolkit.Context, *[]string) {
 	t.Helper()
 	tx.ConfirmTimeout, tx.ConfirmPoll = 300*time.Millisecond, 20*time.Millisecond
-	n := fakenode.Start(t, "primium-1")
+	n := fakenode.Start(t, "mychain-1")
 	p := n.Profile(t, algo)
 	var asked []string
 	c := &toolkit.Context{Context: context.Background(), Profile: p, AutoApproveBelow: toolkit.TierOnChain,

@@ -124,7 +124,7 @@ the bottom of the screen redraws.
 ⏺ chain.validators(status=jailed)
   ⎿  no validator is jailed
 
-⏺ No — none of primium-1's validators is jailed.
+⏺ No — none of mychain-1's validators is jailed.
 ```
 
 | Key / prefix | Does |

@@ -5,7 +5,7 @@ package common
 // Validates container signing against a real evmd. Run with a throwaway
 // container (no node process) holding test keys:
 //
-//	docker run -d --rm --name cometcli-signtest --entrypoint sleep primium-evm:v0.7.2 900
+//	docker run -d --rm --name cometcli-signtest --entrypoint sleep evmd:latest 900
 //	docker exec cometcli-signtest evmd keys add t --keyring-backend test --home /tmp/h
 //	printf 'testpass123\ntestpass123\n' | docker exec -i cometcli-signtest evmd keys add tf --keyring-backend file --home /tmp/h
 //	go test -tags realdocker -run RealEvmd ./internal/tools/common/
@@ -30,7 +30,7 @@ func TestRealEvmdContainerSigning(t *testing.T) {
 	for _, tc := range []struct{ key, keyring string }{{"t", "test"}, {"tf", "file"}} {
 		t.Run(tc.keyring, func(t *testing.T) {
 			tx.ConfirmTimeout, tx.ConfirmPoll = time.Second, 20*time.Millisecond
-			n := fakenode.Start(t, "primium-1")
+			n := fakenode.Start(t, "mychain-1")
 			p := n.Profile(t, "eth_secp256k1")
 			p.Binary = "evmd"
 			p.Signer = config.Signer{Container: "cometcli-signtest", ContainerKey: tc.key, ContainerKeyring: tc.keyring, ContainerHome: "/tmp/h"}

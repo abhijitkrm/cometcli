@@ -121,11 +121,11 @@ func (s *scripted) Chat(_ context.Context, r *agent.Request) (*agent.Response, e
 }
 
 func TestJailRecoveryEndToEnd(t *testing.T) {
-	n := fakenode.Start(t, "primium-1")
+	n := fakenode.Start(t, "mychain-1")
 	chain := fakenode.StartComet(t)
 	p := n.Profile(t, "eth_secp256k1")
 	fakenode.WithComet(p, chain)
-	p.Service = config.Service{Type: "docker", Unit: "primium-validator0"}
+	p.Service = config.Service{Type: "docker", Unit: "validator0"}
 	p.Home = t.TempDir()
 	fakenode.InstallFakeDocker(t, "test", "")
 	fakenode.SetNodeLogs(t, jailLogs, "status=running restarts=2 oom_killed=false")

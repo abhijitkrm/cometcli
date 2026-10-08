@@ -27,10 +27,10 @@ func TestMain(m *testing.M) {
 func containerSetup(t *testing.T, keyring string) (*fakenode.Node, *toolkit.Context, *[]string) {
 	t.Helper()
 	tx.ConfirmTimeout, tx.ConfirmPoll = 300*time.Millisecond, 20*time.Millisecond
-	n := fakenode.Start(t, "primium-1")
+	n := fakenode.Start(t, "mychain-1")
 	p := n.Profile(t, "eth_secp256k1")
 	p.Signer = config.Signer{Backend: "file", ContainerKey: "val"}
-	p.Service = config.Service{Type: "docker", Unit: "primium-validator0"}
+	p.Service = config.Service{Type: "docker", Unit: "validator0"}
 	fakenode.InstallFakeDocker(t, keyring, "correct horse")
 	var asked []string
 	c := &toolkit.Context{Context: context.Background(), Profile: p,
@@ -57,7 +57,7 @@ func TestContainerSigningTestKeyring(t *testing.T) {
 	if sims != 0 || bs[0].Fee.GasLimit != tx.DefaultGas || !strings.Contains((*asked)[0], "not simulated") {
 		t.Fatalf("sims=%d gas=%d", sims, bs[0].Fee.GasLimit)
 	}
-	if !strings.Contains((*asked)[0], "container primium-validator0 (key val, test keyring)") {
+	if !strings.Contains((*asked)[0], "container validator0 (key val, test keyring)") {
 		t.Fatalf("approval doesn't name the container signer: %s", (*asked)[0])
 	}
 	if !strings.Contains((*asked)[0], fakenode.TestAddress()) || res.Data["code"] != uint32(0) {
@@ -116,7 +116,7 @@ func TestSignerChoiceWhenBothAvailable(t *testing.T) {
 	if _, err := BroadcastMsgs(c, send("cosmos1dest"), "", nil, tx.Options{}); err != nil {
 		t.Fatal(err)
 	}
-	if len(offered) != 2 || !strings.Contains(offered[0], "cometcli keyring") || !strings.Contains(offered[1], "node container primium-validator0") {
+	if len(offered) != 2 || !strings.Contains(offered[0], "cometcli keyring") || !strings.Contains(offered[1], "node container validator0") {
 		t.Fatalf("options = %v", offered)
 	}
 	if _, _, sims := n.Snapshot(); sims != 0 {

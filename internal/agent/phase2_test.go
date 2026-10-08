@@ -185,13 +185,13 @@ func TestGeneralModeAndScopeSwitch(t *testing.T) {
 	nodeTool := stubTool{name: "node.status", tier: toolkit.TierObserve, run: func(*toolkit.Context, toolkit.Args) (*toolkit.Result, error) { return &toolkit.Result{}, nil }}
 	a, _ := newShellAgent(t, prov, nodeTool)
 	prof := a.Ctx.Profile
-	prof.Role, prof.ChainID = "validator", "primium-1"
+	prof.Role, prof.ChainID = "validator", "mychain-1"
 	a.Ctx.Cfg = &config.Config{Profiles: map[string]*config.Profile{"testp": prof}}
 	a.SwitchScope(nil) // start in general mode
 	a.carry = ""
 	a.Run(context.Background(), "one")
 	r := prov.reqs[0]
-	if !strings.Contains(r.System, "working in the operator's terminal") || !strings.Contains(r.System, "testp (validator, primium-1)") {
+	if !strings.Contains(r.System, "working in the operator's terminal") || !strings.Contains(r.System, "testp (validator, mychain-1)") {
 		t.Fatalf("general prompt = %q", r.System)
 	}
 	for _, td := range r.Tools {

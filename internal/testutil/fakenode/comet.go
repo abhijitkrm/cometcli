@@ -139,7 +139,7 @@ func (c *Comet) result(method string, p map[string]any) (any, error) {
 			power = c.Power
 		}
 		return &coretypes.ResultStatus{
-			NodeInfo:      p2p.DefaultNodeInfo{Network: "primium-1", Version: "0.39.3", Moniker: "validator-01"},
+			NodeInfo:      p2p.DefaultNodeInfo{Network: "mychain-1", Version: "0.39.3", Moniker: "validator-01"},
 			SyncInfo:      coretypes.SyncInfo{LatestBlockHeight: c.Height, LatestBlockTime: c.timeAt(c.Height), CatchingUp: c.CatchingUp},
 			ValidatorInfo: coretypes.ValidatorInfo{Address: addr, PubKey: cmted25519.PubKey(ConsPub()), VotingPower: power},
 		}, nil
@@ -164,7 +164,7 @@ func (c *Comet) result(method string, p map[string]any) (any, error) {
 			}
 			sigs = append(sigs, cs)
 		}
-		hdr := &types.Header{ChainID: "primium-1", Height: h, Time: c.timeAt(h)}
+		hdr := &types.Header{ChainID: "mychain-1", Height: h, Time: c.timeAt(h)}
 		return coretypes.NewResultCommit(hdr, &types.Commit{Height: h, Signatures: sigs}, true), nil
 	case "validators":
 		vals := []*types.Validator{types.NewValidator(cmted25519.GenPrivKeyFromSecret([]byte("other")).PubKey(), 100)}

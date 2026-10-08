@@ -32,7 +32,7 @@ func setup(t *testing.T) (*fakenode.Node, *toolkit.Context, string) {
 func setupChain(t *testing.T) (*fakenode.Node, *toolkit.Context, string, *fakenode.Comet) {
 	t.Helper()
 	tx.ConfirmTimeout, tx.ConfirmPoll = 300*time.Millisecond, 20*time.Millisecond
-	n := fakenode.Start(t, "primium-1")
+	n := fakenode.Start(t, "mychain-1")
 	chain := fakenode.StartComet(t)
 	p := n.Profile(t, "eth_secp256k1")
 	fakenode.WithComet(p, chain)
@@ -47,7 +47,7 @@ func setupChain(t *testing.T) (*fakenode.Node, *toolkit.Context, string, *fakeno
 	n.Set(func(n *fakenode.Node) {
 		n.Validator = &stakingv1beta1.Validator{OperatorAddress: valoper, ConsensusPubkey: fakenode.ConsPubAny(),
 			Status: stakingv1beta1.BondStatus_BOND_STATUS_BONDED, MinSelfDelegation: "1",
-			Description: &stakingv1beta1.Description{Moniker: "validator-01", Website: "https://primium.example", Details: "genesis validator"}}
+			Description: &stakingv1beta1.Description{Moniker: "validator-01", Website: "https://validator.example", Details: "genesis validator"}}
 		n.SigningInfo = &slashingv1beta1.ValidatorSigningInfo{}
 	})
 	return n, c, valoper, chain
@@ -102,7 +102,7 @@ func TestEditCommissionKeepsDescription(t *testing.T) {
 	if m.ValidatorAddress != valoper || m.CommissionRate != "100000000000000000" {
 		t.Fatalf("edit = %+v", m)
 	}
-	if m.Description.GetMoniker() != "validator-01" || m.Description.GetWebsite() != "https://primium.example" {
+	if m.Description.GetMoniker() != "validator-01" || m.Description.GetWebsite() != "https://validator.example" {
 		t.Fatalf("description wiped: %+v", m.Description)
 	}
 	if _, err := (editTool{}).Run(c, toolkit.Args{"moniker": "validator-one"}); err != nil {

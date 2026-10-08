@@ -154,7 +154,7 @@ Two signers; when both can sign, you pick one first, then approve the tx (the ap
 signer:
   key: ops                      # cometcli keyring (optional)
   mode: ""                      # "" = ask when both work | local | container
-  container: primium-validator0 # default: service.unit for docker services
+  container: validator0 # default: service.unit for docker services
   container_key: val0           # key name in the container's keyring
   container_keyring: ""         # test | file — detected when empty
   container_home: /data/node0/evmd
