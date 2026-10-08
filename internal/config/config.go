@@ -127,6 +127,9 @@ type Profile struct {
 	Agent        AgentConf         `yaml:"agent"`
 	Alerts       Alerts            `yaml:"alerts"`
 	Metadata     map[string]string `yaml:"metadata,omitempty"`
+	// Sentries names the profiles of the sentry nodes this validator
+	// peers through (fleet triage checks it isn't cut off).
+	Sentries []string `yaml:"sentries,omitempty"`
 }
 
 // IsValidator reports whether this profile is a consensus-signing validator.

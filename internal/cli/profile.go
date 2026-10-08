@@ -130,6 +130,9 @@ func profileAddCmd() *cobra.Command {
 				if fl.Changed("ssh-host") {
 					np.Transport.Host = p.Transport.Host
 				}
+				if fl.Changed("sentries") {
+					np.Sentries = p.Sentries
+				}
 				if fl.Changed("ssh-user") {
 					np.Transport.User = p.Transport.User
 				}
@@ -205,6 +208,7 @@ func profileAddCmd() *cobra.Command {
 	f.StringVar(&p.Transport.KeyFile, "ssh-key", "", "ssh private key path")
 	f.StringVar(&p.Service.Type, "service", "", "systemd | docker | launchd | none")
 	f.StringVar(&p.Service.Unit, "unit", "", "service unit/container name")
+	f.StringSliceVar(&p.Sentries, "sentries", nil, "profiles of the sentry nodes this validator peers through (comma-separated)")
 	f.StringVar(&signerKey, "signer", "", "ops key name in keyring")
 	f.StringVar(&p.Signer.Backend, "signer-backend", "", "os | file | test")
 	f.StringVar(&feeDenom, "fee-denom", "", "fee denom (e.g. atest)")

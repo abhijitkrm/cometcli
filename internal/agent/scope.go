@@ -47,7 +47,7 @@ ENVIRONMENT: %s/%s, host %s, working directory %s, date %s
 		if ap, err := c.Cfg.ActiveProfile(""); err == nil && ap != nil {
 			active = " Active profile: " + ap.Name + "."
 		}
-		fmt.Fprintf(&b, "NODE PROFILES: %s.%s For any question about a node, validator or chain (jailing, sync, peers, upgrades, governance, txs), call use_node with the right profile yourself and continue — never ask the operator to switch. Any profile on a chain answers chain-wide questions; pick the active one when nothing points elsewhere.\n", strings.Join(names, "; "), active)
+		fmt.Fprintf(&b, "NODE PROFILES: %s.%s For any question about a node, validator or chain (jailing, sync, peers, upgrades, governance, txs), call use_node with the right profile yourself and continue — never ask the operator to switch. Any profile on a chain answers chain-wide questions; pick the active one when nothing points elsewhere. For questions about several nodes or the whole network (\"how is my fleet?\"), start with fleet.triage.\n", strings.Join(names, "; "), active)
 	}
 	return b.String()
 }

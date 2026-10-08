@@ -20,6 +20,7 @@ func Register(r *toolkit.Registry) {
 	r.Register(Show{})
 	r.Register(Add{})
 	r.Register(History{})
+	r.Register(FleetTriage{})
 	r.Register(Record{})
 	r.Register(RecordIncident{})
 	r.Register(ListIncidents{})
