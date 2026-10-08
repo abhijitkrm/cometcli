@@ -19,7 +19,7 @@ import (
 )
 
 // mcpScopePath returns the file a scope's servers live in: user settings,
-// the project's .mcp.json (shared with Claude Code), or local settings.
+// the project's .mcp.json (the standard project MCP file), or local settings.
 func mcpScopePath(scope string) (string, error) {
 	switch scope {
 	case "user", "":

@@ -35,7 +35,7 @@ func (d Decision) String() string {
 	return "default"
 }
 
-// Rule is one permission pattern, in Claude Code's syntax:
+// Rule is one permission pattern:
 //
 //	bash                       any shell command
 //	bash(git status)           exactly this command
@@ -46,7 +46,7 @@ func (d Decision) String() string {
 //	val.unjail, node.*         registry tools by name or prefix
 //
 // Tool names match case-insensitively, so Bash(...) and WebFetch(...)
-// from Claude Code configs work too.
+// from other agents' configs work too.
 type Rule struct {
 	Raw  string
 	Tool string // lower-cased; may end in ".*"
@@ -55,7 +55,7 @@ type Rule struct {
 
 var ruleRe = regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_.*-]*)\s*(?:\((.*)\))?\s*$`)
 
-// toolAliases maps Claude Code tool names onto ours.
+// toolAliases maps common capitalized tool names (Bash, Read…) onto ours.
 var toolAliases = map[string]string{"webfetch": "web_fetch", "todowrite": "todo_write", "multiedit": "edit"}
 
 // ParseRule parses one rule string.
@@ -130,7 +130,7 @@ func expandPattern(p, root string) string {
 	case strings.HasPrefix(p, "~/"):
 		home, _ := os.UserHomeDir()
 		return filepath.Join(home, p[2:])
-	case strings.HasPrefix(p, "//"): // Claude Code's absolute-path form
+	case strings.HasPrefix(p, "//"): // absolute-path form
 		return p[1:]
 	case filepath.IsAbs(p):
 		return p

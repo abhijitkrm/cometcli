@@ -15,7 +15,7 @@ import (
 )
 
 // UICmd is the chat-first terminal app: an agent conversation on the front
-// pane (Claude Code style) with overview/fleet/logs/send dashboards behind
+// pane with overview/fleet/logs/send dashboards behind
 // it — all over the same registry and approval gate as the CLI.
 func UICmd(reg *toolkit.Registry) *cobra.Command {
 	var interval int

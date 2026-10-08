@@ -77,7 +77,7 @@ func RunCommand(a *Agent, c *toolkit.Context, reg *toolkit.Registry, line string
 		if err := needAgent(); err != nil {
 			return CmdResult{}, err
 		}
-		// the current setup, like Claude Code's /status; in node mode also
+		// the current setup; in node mode also
 		// a live snapshot of the node (as a background job: never block)
 		a.loadMemory()
 		var b strings.Builder

@@ -1,7 +1,7 @@
 # Extending cometcli
 
 Settings, memory, custom commands, hooks, MCP servers and subagents all live in plain
-files. The formats follow Claude Code's, so configs written for it mostly carry over.
+files, in the settings format common to AI coding agents, so existing configs mostly carry over.
 
 A **project** is the nearest directory above where you start cometcli that holds a
 `.cometcli/` folder, a `COMET.md` or a `.git`.
@@ -124,7 +124,7 @@ Commands run at points in the loop. Events: `PreToolUse`, `PostToolUse`,
 ```
 
 `matcher` is a case-insensitive regex over tool names (`bash`, `edit`, `node.status`,
-`mcp__grafana__.*`; Claude Code's `Bash` works); empty or `*` matches all. Hooks run
+`mcp__grafana__.*`; capitalized names like `Bash` work too); empty or `*` matches all. Hooks run
 from the project root with `COMETCLI_PROJECT_DIR` (and `CLAUDE_PROJECT_DIR`) set, and
 get the event as JSON on stdin:
 
@@ -160,7 +160,7 @@ cometcli mcp remove grafana
 ```
 
 Scopes: `user` (default, `~/.cometcli/settings.json`), `project` (`.mcp.json` — the
-same file Claude Code reads), `local` (`.cometcli/settings.local.json`). `${VAR}` and
+the standard project MCP file), `local` (`.cometcli/settings.local.json`). `${VAR}` and
 `${VAR:-default}` expand in commands, args, env, URLs and headers.
 
 Servers start with each session; their tools are named `mcp__<server>__<tool>` and,
