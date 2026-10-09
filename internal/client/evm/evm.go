@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -25,6 +26,15 @@ type Client struct {
 // New creates a client for an http(s):// endpoint.
 func New(url string) *Client {
 	return &Client{url: url, hc: &http.Client{Timeout: 15 * time.Second}}
+}
+
+// NewVia creates a client that connects through dial (e.g. an SSH tunnel).
+func NewVia(url string, dial func(ctx context.Context, network, addr string) (net.Conn, error)) *Client {
+	c := New(url)
+	if dial != nil {
+		c.hc.Transport = &http.Transport{DialContext: dial}
+	}
+	return c
 }
 
 type rpcReq struct {

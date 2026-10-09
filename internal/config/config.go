@@ -171,11 +171,15 @@ type Endpoints struct {
 
 // Transport selects how host-plane operations reach the machine.
 type Transport struct {
-	Type    string `yaml:"type"` // local | ssh
+	Type string `yaml:"type"` // local | ssh
+	// Host is an address or a ~/.ssh/config alias; HostName, User, Port,
+	// IdentityFile and ProxyJump come from there unless set here.
 	Host    string `yaml:"host,omitempty"`
 	User    string `yaml:"user,omitempty"`
 	Port    int    `yaml:"port,omitempty"`
 	KeyFile string `yaml:"key_file,omitempty"`
+	// Jump is a bastion to go through (ssh -J: user@host:port, comma-separated).
+	Jump string `yaml:"jump,omitempty"`
 }
 
 // Service describes how the node process is supervised.

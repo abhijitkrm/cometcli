@@ -602,6 +602,9 @@ func (m *model) shellCmd(cmdline string) *exec.Cmd {
 		if t.KeyFile != "" {
 			args = append(args, "-i", t.KeyFile)
 		}
+		if t.Jump != "" {
+			args = append(args, "-J", t.Jump)
+		}
 		target := t.Host
 		if t.User != "" {
 			target = t.User + "@" + t.Host

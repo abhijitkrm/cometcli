@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -44,6 +45,11 @@ type Conn struct {
 
 // Dial connects. Endpoint may be "host:port" or "host:port;tls".
 func Dial(ctx context.Context, endpoint string) (*Conn, error) {
+	return DialVia(ctx, endpoint, nil)
+}
+
+// DialVia connects through dial (e.g. an SSH tunnel); nil dials directly.
+func DialVia(ctx context.Context, endpoint string, dial func(ctx context.Context, network, addr string) (net.Conn, error)) (*Conn, error) {
 	useTLS := false
 	if strings.HasSuffix(endpoint, ";tls") {
 		useTLS = true
@@ -57,11 +63,17 @@ func Dial(ctx context.Context, endpoint string) (*Conn, error) {
 	}
 	dctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	cc, err := grpc.DialContext(dctx, endpoint, //nolint:staticcheck // blocking dial enforces our timeout
+	opts := []grpc.DialOption{
 		grpc.WithTransportCredentials(creds),
 		grpc.WithBlock(), //nolint:staticcheck // fail fast when the endpoint is dead
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(32<<20)),
-	)
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(32 << 20)),
+	}
+	if dial != nil {
+		opts = append(opts, grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
+			return dial(ctx, "tcp", addr)
+		}))
+	}
+	cc, err := grpc.DialContext(dctx, endpoint, opts...) //nolint:staticcheck // blocking dial enforces our timeout
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", endpoint, err)
 	}

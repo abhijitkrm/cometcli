@@ -55,11 +55,36 @@ was created with the wrong `--algo`.
 
 ## SSH transport
 
-- Profile needs `transport ssh`, `ssh-host`, `ssh-user`, `ssh-key` (defaults
-  to `~/.ssh/id_ed25519`/`id_rsa`), `ssh-port`.
-- Only publickey auth; `known_hosts` pinning is not enforced yet.
-- **"account is locked"** on alpine-style images: `passwd -u <user>`.
-- Every remote command is audited — check `cometcli audit`.
+Start with `cometcli ssh test <profile>`. It shows the resolved target and checks:
+- the connection
+- the host key
+- docker or systemd access
+- logs
+- the node home
+- each endpoint
+
+What the common errors mean:
+
+- **"isn't a known host"**: the host key isn't in `~/.ssh/known_hosts` yet. Trust it
+  once with `cometcli ssh test`, `cometcli init` or plain `ssh`. The terminal UI and
+  `watch` never trust a new key on their own.
+- **"host key … CHANGED"**: the server's key differs from `known_hosts`. cometcli
+  refuses to connect. If the machine was rebuilt, verify the new fingerprint out of
+  band, then run `ssh-keygen -R <host>`.
+- **"rejected the key(s) offered"**: wrong user or key.
+  - The user depends on the image: `ec2-user` on Amazon Linux, `ubuntu` on Ubuntu.
+  - Set the user and key in `~/.ssh/config` or with `--ssh-user`/`--ssh-key`.
+  - With `IdentitiesOnly yes`, only the configured keys are offered.
+- **"passphrase-protected — load it into ssh-agent"**: run `ssh-add <key>`.
+- **"… on <host> (through ssh): connect failed"**: nothing listens on that port on the
+  node.
+  - Check `laddr` in config.toml for RPC, and `[grpc]`/`[json-rpc]` in app.toml.
+  - For docker, use the published host port.
+- **Permission denied on the docker socket**: run `sudo usermod -aG docker <user>`,
+  then reconnect.
+- **"account is locked"** on alpine-style images: run `passwd -u <user>`.
+
+Every remote command is audited. Check them with `cometcli audit`.
 
 ## EVM endpoints
 

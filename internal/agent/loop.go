@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/abhijitkrm/cometcli/internal/audit"
+	"github.com/abhijitkrm/cometcli/internal/client/host"
 	"github.com/abhijitkrm/cometcli/internal/config"
 	"github.com/abhijitkrm/cometcli/internal/hooks"
 	"github.com/abhijitkrm/cometcli/internal/redact"
@@ -172,6 +173,9 @@ func RedactorFor(p *config.Profile) *redact.Redactor {
 	}
 	hosts := append([]string{}, p.Agent.RedactHosts...)
 	if p.Agent.RedactEndpoints {
+		if p.Transport.Type == "ssh" && p.Transport.Host != "" {
+			hosts = append(hosts, host.Resolve(p.Transport).HostName)
+		}
 		hosts = append(hosts, p.Transport.Host,
 			redact.HostOf(p.Endpoints.Comet), redact.HostOf(p.Endpoints.GRPC),
 			redact.HostOf(p.Endpoints.LCD), redact.HostOf(p.Endpoints.EVM))
