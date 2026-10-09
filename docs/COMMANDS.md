@@ -228,6 +228,40 @@ cometcli keys convert cosmos1abc...                    # bech32 ↔ 0x hex
 cometcli keys rm ops
 ```
 
+## Networks (spec, roles, checks)
+
+A network spec, `~/.cometcli/networks/<chain-id>.yaml`, describes one network:
+- chain and EVM ids, denoms
+- genesis gov, staking, slashing, feemarket, EVM, mint and distribution parameters
+- consensus timing and node services
+- DB backend, image, and how images are named
+
+Every node of the chain is checked against it according to its role.
+
+```bash
+cometcli network import run-genesis/network-config.env run-validator/network-config.env \
+    run-archive/network-config.env --image-naming 'primium-{tag}'    # from node-setup's env files
+cometcli network show primium-1
+cometcli network check --network primium-1          # spec sanity, chain drift, every node of the chain
+cometcli network check --network primium-1 --prod   # plus public-network hardening
+cometcli network check --network primium-1 --nodes val1,archive1
+```
+
+`network check` reports at three levels:
+- **Spec:** mistakes such as an expedited voting period that isn't shorter than the voting
+  period. With `--prod` it also flags test-only values: voting period, unbonding,
+  LAN-tuned timeouts, `ws_origins *`, the default min deposit.
+- **Chain:** the live gov, staking and slashing parameters compared with the spec.
+- **Nodes:** each node's `config.toml`, `app.toml` and container command, checked
+  against its role (the profile's `role`):
+
+| Role | Checked |
+|---|---|
+| all | `db_backend` = `app-db-backend` (empty = same) · mempool: `type = "app"` with `max-txs ≥ 0` on cosmos/evm v0.7+, never `"app"` on v0.6 · `minimum-gas-prices` · `evm-chain-id` · enabled services · `--json-rpc.ws-origins` passed as a flag (ws-origins from app.toml is broken in cosmos-evm) |
+| validator | consensus timeouts match the spec · `external_address` set · with `--prod`: no CORS, no unsafe-cors, no insecure unlock, swagger off, no `debug`/`personal` |
+| archive | `pruning = nothing` (app.toml or `--pruning nothing`) · `tx_index = kv` · with `--prod`: CORS/unlock hardening |
+| rpc | `tx_index = kv` · with `--prod`: CORS/unlock hardening |
+
 ## Remote nodes over SSH
 
 Run cometcli on your laptop and manage a node on another machine. Every host
