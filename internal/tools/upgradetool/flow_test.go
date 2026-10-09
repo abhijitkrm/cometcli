@@ -1,6 +1,8 @@
 package upgradetool
 
 import (
+	"github.com/abhijitkrm/cometcli/internal/config"
+	"github.com/abhijitkrm/cometcli/internal/toolkit"
 	"sort"
 	"testing"
 )
@@ -41,5 +43,21 @@ func TestUpgradeNeededLine(t *testing.T) {
 	m := upgradeNeededRe.FindStringSubmatch(`ERR UPGRADE "v0.6.0-to-v0.6.1" NEEDED at height: 18150000: module=x/upgrade`)
 	if m == nil || m[1] != "v0.6.0-to-v0.6.1" || m[2] != "18150000" {
 		t.Fatalf("%v", m)
+	}
+}
+
+func TestImageNames(t *testing.T) {
+	c := &toolkit.Context{Profile: &config.Profile{Metadata: map[string]string{"image": "primium-{tag}"}}}
+	cases := []struct{ tmpl, running, want string }{
+		{"", "primium-evm:v0.6.1", "primium-v0.7.2"},                 // the profile's naming scheme
+		{"primium:{version}", "primium-evm:v0.6.1", "primium:0.7.2"}, // explicit wins
+	}
+	for _, x := range cases {
+		if got := ImageFor(c, x.tmpl, x.running, "v0.7.2"); got != x.want {
+			t.Errorf("ImageFor(%q) = %q, want %q", x.tmpl, got, x.want)
+		}
+	}
+	if got := ImageFor(&toolkit.Context{Profile: &config.Profile{}}, "", "primium-evm:v0.6.1", "v0.7.2"); got != "primium-evm:v0.7.2" {
+		t.Errorf("default = %q", got)
 	}
 }

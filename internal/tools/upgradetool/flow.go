@@ -278,9 +278,9 @@ func (buildTool) Desc() string {
 func (buildTool) Schema() map[string]any {
 	return toolkit.ObjSchema(map[string]any{
 		"tag":        toolkit.Str("release tag to build, e.g. v0.6.1"),
-		"image":      toolkit.Str("image to produce (default: the running image's name with the new tag)"),
+		"image":      toolkit.Str("image to produce; {tag} is the release tag, {version} the tag without v — e.g. primium-{tag} → primium-v0.7.2 (default: the profile's metadata.image, else the running image's name with the new tag)"),
 		"dockerfile": toolkit.Str("Dockerfile on the node (default: Dockerfile.primium beside the compose project, or one level up)"),
-		"handler":    toolkit.Str("add a no-op upgrade handler with this plan name if the release lacks it, e.g. v0.6.0-to-v0.6.1"),
+		"handler":    toolkit.Str("forks only: add a no-op upgrade handler with this plan name (official releases ship their own — leave empty)"),
 		"repo":       toolkit.Str("github owner/repo (default: the running image's source)"),
 	}, "tag")
 }
@@ -300,8 +300,7 @@ func (buildTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error
 	if !tagRe.MatchString(tag) || (handler != "" && !tagRe.MatchString(handler)) || repo == "" {
 		return nil, fmt.Errorf("tag, handler and repo must be plain names (letters, digits, . _ -)")
 	}
-	name, _, _ := strings.Cut(r.Image, ":")
-	image := a.String("image", name+":"+tag)
+	image := ImageFor(c, a.String("image", ""), r.Image, tag)
 	if image == r.Image {
 		return nil, fmt.Errorf("%s is the image running now — build a different tag", image)
 	}
@@ -533,4 +532,18 @@ func (switchTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, erro
 	return &toolkit.Result{Text: fmt.Sprintf("%s now runs %s (compose file %s; backup kept as .pre-%s)\nnext: wait.until synced, then in-consensus",
 		c.Profile.Service.Unit, image, r.ComposeFile, strings.ReplaceAll(path.Base(image), ":", "-")),
 		Data: map[string]any{"image": image, "plan": m[1], "height": m[2]}}, nil
+}
+
+// ImageFor names the image built from a release tag: an explicit template,
+// else the profile's metadata.image, else the running image's name with
+// the new tag. {tag} is the tag (v0.7.2), {version} the tag without v.
+func ImageFor(c *toolkit.Context, template, runningImage, tag string) string {
+	if template == "" && c.Profile != nil {
+		template = c.Profile.Metadata["image"]
+	}
+	if template == "" {
+		name, _, _ := strings.Cut(runningImage, ":")
+		return name + ":" + tag
+	}
+	return strings.NewReplacer("{tag}", tag, "{version}", strings.TrimPrefix(tag, "v")).Replace(template)
 }

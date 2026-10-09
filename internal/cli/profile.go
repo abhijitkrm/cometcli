@@ -78,7 +78,7 @@ func profileCmd() *cobra.Command {
 
 func profileAddCmd() *cobra.Command {
 	var p config.Profile
-	var signerKey, feeDenom, valoper string
+	var signerKey, feeDenom, valoper, imageName string
 	cmd := &cobra.Command{
 		Use:     "add <name>",
 		Aliases: []string{"edit", "set"},
@@ -160,6 +160,12 @@ func profileAddCmd() *cobra.Command {
 				if fl.Changed("container-home") {
 					np.Signer.ContainerHome = p.Signer.ContainerHome
 				}
+				if fl.Changed("image-name") {
+					if np.Metadata == nil {
+						np.Metadata = map[string]string{}
+					}
+					np.Metadata["image"] = imageName
+				}
 				if fl.Changed("container-keyring") {
 					np.Signer.ContainerKeyring = p.Signer.ContainerKeyring
 				}
@@ -202,6 +208,12 @@ func profileAddCmd() *cobra.Command {
 				}
 				p.Metadata["valoper"] = valoper
 			}
+			if imageName != "" {
+				if p.Metadata == nil {
+					p.Metadata = map[string]string{}
+				}
+				p.Metadata["image"] = imageName
+			}
 			return cfg.UpsertProfile(&p)
 		},
 	}
@@ -229,6 +241,7 @@ func profileAddCmd() *cobra.Command {
 	f.StringVar(&p.Signer.Backend, "signer-backend", "", "os | file")
 	f.StringVar(&p.Signer.Mode, "signer-mode", "", "local (cometcli keyring) | container (the node's own keyring); empty asks when both work")
 	f.StringVar(&p.Signer.ContainerHome, "container-home", "", "node home inside the container, for signing there (e.g. /data/node0/evmd)")
+	f.StringVar(&imageName, "image-name", "", "how images built from releases are named; {tag} = release tag, e.g. primium-{tag} → primium-v0.7.2")
 	f.StringVar(&p.Signer.ContainerKeyring, "container-keyring", "", "keyring backend inside the container: test | file (detected when empty)")
 	f.StringVar(&feeDenom, "fee-denom", "", "fee denom (e.g. atest)")
 	f.StringVar(&valoper, "valoper", "", "validator operator address (read-only signing/jail views without a signer)")
