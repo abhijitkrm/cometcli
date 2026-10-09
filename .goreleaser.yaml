@@ -87,15 +87,14 @@ changelog:
       - "Co-Authored-By"
       - "^chore"
       - "add image"
+  abbrev: 7
+  # goreleaser matches these against "<sha> <message>": anchor on the title
   groups:
-    - title: "Bug fixes"
-      regexp: "(?i)(fix|repair|correct|broke|broken)"
+    - title: "Fixes"
+      regexp: '^(?:[0-9a-f]{7,40}\s+)?(?i)(fix|fixes|fixed|repair)\b'
       order: 0
     - title: "Documentation"
-      regexp: "^(docs|readme|install-doc)[^:]*:"
+      regexp: '^(?:[0-9a-f]{7,40}\s+)?(?i)(docs?|readme)\b'
       order: 1
-    - title: "Features"
-      regexp: "^[^:]+:"
-      order: 2
-    - title: "Other"
+    - title: "Changes"
       order: 999
