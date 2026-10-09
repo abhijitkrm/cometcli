@@ -38,6 +38,8 @@ var Categories = []Category{
 	{"mempool_full", "mempool full", regexp.MustCompile(`(?i)mempool is full`), false},
 	{"statesync_fail", "state sync failure", regexp.MustCompile(`(?i)state ?sync.*(fail|error|abort)|failed to (apply|restore|verify) snapshot|no available snapshots|no suitable snapshots`), false},
 	{"port_in_use", "port in use", regexp.MustCompile(`(?i)address already in use`), false},
+	{"permission_denied", "permission denied on the node home", regexp.MustCompile(`(?i)(mkdir|open|create|write|chmod)[^\n]{0,80}permission denied|could not create directory[^\n]{0,80}permission denied`), false},
+	{"db_init_eof", "database won't open (wrong backend for the data)", regexp.MustCompile(`(?i)failed to (initialize|open|load) (the )?(application )?database[^\n]{0,40}\bEOF\b`), false},
 	{"config_parse", "config error", regexp.MustCompile(`(?i)error reading config|parsing config|configs mismatch|invalid config\.toml|failed to (load|parse|unmarshal|decode).*(config|toml)|toml: |unknown (field|flag)|invalid (config|minimum gas)`), false},
 	{"chain_mismatch", "chain / genesis mismatch", regexp.MustCompile(`(?i)different network|genesis.*(mismatch|doesn't match|hash)|wrong genesis|incompatible chain.?id|invalid chain.?id`), false},
 	{"startup_error", "startup error (process exits)", regexp.MustCompile(`^Error: `), true},

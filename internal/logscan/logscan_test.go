@@ -67,3 +67,16 @@ func TestJailPatternIgnoresStoreKeys(t *testing.T) {
 		t.Fatalf("jail = %d", r.Counts["jail"])
 	}
 }
+
+func TestHomePermissionAndDatabaseCategories(t *testing.T) {
+	r := Scan(`panic: could not create directory "data": mkdir data: permission denied
+Error: failed to initialize database: EOF
+5:37AM INF opened file permission denied= module=x
+`)
+	if r.Counts["permission_denied"] != 1 || r.Counts["db_init_eof"] != 1 {
+		t.Fatalf("counts = %v", r.Counts)
+	}
+	if r := Scan("Got permission denied while trying to connect to the Docker daemon socket"); r.Counts["permission_denied"] != 0 {
+		t.Errorf("a docker socket error isn't the node home: %v", r.Counts)
+	}
+}

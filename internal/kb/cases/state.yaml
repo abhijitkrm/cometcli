@@ -83,3 +83,26 @@
     - "[change] RPC/sentry nodes: set state-sync snapshot-interval (e.g. 1000) and keep-recent to help peers"
   test:
     signals: {app.snapshot_interval: 0, profile.role: rpc}
+
+- id: node-db-backend-data-mismatch
+  title: The configured DB backend doesn't match the data on disk
+  explains: [node-process-down, node-crash-loop, node-rpc-down, evm-rpc-down, node-restarted-recently, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, cfg-db-backend-mismatch]
+  severity: critical
+  symptoms: "exits at start with \"failed to initialize database: EOF\" even though config.toml and app.toml agree"
+  match:
+    all: ["logs.db_init_eof > 0"]
+  confirm:
+    - "node.config — db_backend (config.toml) and app-db-backend (app.toml)"
+    - "bash: ls <home>/data/application.db | head — *.ldb files are goleveldb; OPTIONS-* files are rocksdb"
+  causes:
+    - the data was written with one backend (rocksdb or goleveldb) and the config now names the other
+    - an image built with a different default backend started on existing data
+  fix:
+    - "[change] set db_backend in config.toml and app-db-backend in app.toml to the backend the data was written with; restart"
+    - "[change] if the data must change backend: the operator wipes data/ and re-syncs (state sync or snapshot)"
+  verify:
+    - "proc.running true; wait.until synced"
+  warnings:
+    - never delete data/ as a quick fix on a validator without restoring priv_validator_state.json — double-sign risk
+  test:
+    signals: {logs.db_init_eof: 1, proc.running: false}
