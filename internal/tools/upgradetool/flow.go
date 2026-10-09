@@ -160,12 +160,13 @@ func (releasesTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, er
 	}
 	data := map[string]any{"current": cur, "repo": repo, "releases": newer, "handlers": handlers, "current_handlers": curHandlers}
 	if len(newer) > 1 && c.Chooser != nil {
-		i, err := c.Chooser(c, fmt.Sprintf("%d releases are newer than %s — which one is the target?", len(newer), orNone(cur)), newer)
-		if err != nil {
-			return nil, err
+		if i, err := c.Chooser(c, fmt.Sprintf("%d releases are newer than %s — which one is the target?", len(newer), orNone(cur)), newer); err == nil {
+			data["chosen"] = newer[i]
+			fmt.Fprintf(&b, "target: %s\n", newer[i])
+		} else {
+			// no one to ask: list them and leave the choice to the operator
+			b.WriteString("several candidates: confirm the target with the operator before building\n")
 		}
-		data["chosen"] = newer[i]
-		fmt.Fprintf(&b, "target: %s\n", newer[i])
 	} else if len(newer) == 1 {
 		data["chosen"] = newer[0]
 	} else {
