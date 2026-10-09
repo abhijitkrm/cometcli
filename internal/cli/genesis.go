@@ -97,7 +97,7 @@ peer, and every node started. Mnemonics are shown only here, or written to
 				return fmt.Errorf("cancelled")
 			}
 			if keyring == "file" {
-				pw, err := TTYSecret(nil, "Keyring password for the validators' operator keys")
+				pw, err := keyringPassword()
 				if err != nil {
 					return err
 				}
@@ -303,4 +303,29 @@ func readAccounts(path string) ([]networktool.Account, error) {
 		out = append(out, networktool.Account{Address: f[0], Amount: strings.TrimRight(f[1], "abcdefghijklmnopqrstuvwxyz")})
 	}
 	return out, nil
+}
+
+// keyringPassword is the file keyring's password for the new operator
+// keys: COMETCLI_CONTAINER_KEYRING_PASSWORD (what the container signer
+// reads later too), else asked twice on the terminal — a typo here locks
+// the keys.
+func keyringPassword() (string, error) {
+	pw := os.Getenv("COMETCLI_CONTAINER_KEYRING_PASSWORD")
+	if pw == "" {
+		var err error
+		if pw, err = TTYSecret(nil, "Keyring password for the validators' operator keys (8+ characters)"); err != nil {
+			return "", fmt.Errorf("%w — or set COMETCLI_CONTAINER_KEYRING_PASSWORD", err)
+		}
+		again, err := TTYSecret(nil, "Again")
+		if err != nil {
+			return "", err
+		}
+		if again != pw {
+			return "", fmt.Errorf("the passwords don't match")
+		}
+	}
+	if len(pw) < 8 {
+		return "", fmt.Errorf("the file keyring needs a password of at least 8 characters")
+	}
+	return pw, nil
 }
