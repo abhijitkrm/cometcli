@@ -50,7 +50,6 @@ func emptyList(got any) bool {
 
 func isFalse(got any) bool { return got == false }
 
-
 var durRe = regexp.MustCompile(`^(\d+)(ms|s)$`)
 
 // durMS checks a "400ms"/"1s" duration against milliseconds.
