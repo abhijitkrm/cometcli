@@ -53,6 +53,15 @@
     - kernel OOM killer; a stop that exceeded the stop timeout (container stop -t / TimeoutStopSec)
   fix:
     - "[change] OOM: follow host-oom-killed; stop timeout: raise it so the node flushes state on shutdown"
+  # an OOM kill is matched by host-oom-killed / container-memory-limit,
+  # which explain this case — left here, it was a forced or timed-out stop
+  playbook:
+    - {do: node.logs, args: {lines: 40}, note: "the last lines before it was killed"}
+    - {do: node.service, args: {action: start}, note: "start the node"}
+    - {do: wait.until, args: {condition: synced, timeout: 1800}, note: "wait until it has caught up"}
+    - {do: wait.until, args: {condition: unjailable, timeout: 1800}, when: "val.jailed == true", note: "wait out the jail period"}
+    - {do: val.unjail, when: "val.jailed == true", note: "unjail (signed by the operator key — asks you)"}
+    - {do: wait.until, args: {condition: in-consensus, timeout: 600}, when: "val.jailed == true", note: "check it signs again"}
   test:
     signals: {proc.running: false, proc.exit_code: 137}
 

@@ -79,7 +79,7 @@ func (a *Agent) runIncident(ctx context.Context, what string) (string, error) {
 		why := fmt.Sprintf("/incident %s — known case %s (%s), playbook step %d: %s", what, c.ID, c.Title, i+1, st.Note)
 		r, err := a.runTool(ctx, tool, playArgs(st.Args, a.Ctx.Profile), why)
 		if err != nil {
-			if strings.Contains(err.Error(), "denied") || ctx.Err() != nil {
+			if strings.Contains(err.Error(), "denied") || strings.Contains(err.Error(), "not approved") || ctx.Err() != nil {
 				// the operator said no: stop here, don't let a model push on
 				text := fmt.Sprintf("Stopped at step %d (%s): %v\n\nDone so far:\n%s", i+1, label, err, bullets(done))
 				return a.localIncidentDone(what, c, text), nil
