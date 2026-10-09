@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="865" viewBox="0 0 1920 865" role="img" aria-labelledby="t d">
+<title id="t">cometcli</title>
+<desc id="d">An agentic SRE terminal for Cosmos validators. Shooting stars cross a twilight sky.</desc>
+<style>
+@font-face{font-family:"SG";font-weight:600;src:url(data:font/woff2;base64,d09GMgABAAAAAAVwAA8AAAAAClAAAAUVAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGjYbgWAcgQwGYD9TVEFUHABkEQgKhyiGEQscAAE2AiQDNAQgBYQyByAbmgjIxOf/3az7XpJKAlRlUhPBFsaUQzGphBWHXadrKiMiyIrp10isfj/VIQ8sCYyLcJk4k1zC+18I+oogAVC1QpFQQBJZAilbV1lhbR9jKrbzHtlDK+qznEAAiCKFMQEEitA0xoIbeQ8UTBcBhySUK0BjPIdHOVpBxyd1K6DymgN+qCa1AP4lBo9twS/gzQAWdDjFHeBBoQs3KoAN4JCAnW/5T6wq/4Pk5D+mostA9+QizkMlEQSQzABctskpB7grGehbghDL0B3pb8SuJkm+bKLpxjJZ6fBckBXLtCJ4hoxymsD3fOp1OczI9M5avFCxDrnooKhEgmZJK5Z+BVuWqSTHDBoJNUGm41jaS9eAA2hY+0HQwhZkE1pJWXnEH5+1GiFe+p6Z1G4HboeIAPPRuc9gGHsFKRdB7kwP/4FurvWFjFOWGakXvdDhDJBnDAAGZ4xZwcLIU5GK/VaEBTa44MMsArL8JfXeI38tPyo/Ij8o3y/fJ99VGpN2MQJNsoyUO5QY8qnlIFUZ4odUbrZC9QRa0lSeoXjfTUBTUxXlZfmJbGW6KkPBZmSYwzHCheKCcjEKNhjhZ5SLccKFYrwiHIHvCkZXh7eS0DZhcQuCm1eR0KtVOc9+SEJb+fBhgCeheFxYjO5Q9wRfe6888677AHM4FiPYEdGSFQ+8cZAPRyLqp8FoVFg8VbbysUjEvxFQPL5+bsHK+45H1glPxPhwROAEVmAECA8eg6oG4dVLZxSUZ6wuPL6eKpmhwUhk1WKckBABuftTZfgkYXgiEAECeBoUBJhys5nACNR/GeHz0qLL1totM+KM3bJ26n5k++ry/s7hAQx0DvcrcddJXcMHbs4XC/LF/ILD/3jygfySl87u/r2wsPifisr2ivTlWU2Nw/qy5mZt6eZatvLkF+HdbwVTM9GknJb6RueNKuPovNQ3PWVtGVh1rT978KSvuma4tHyihW8pHx8uqxn4Y96f9+bASmsrapWaucHBBb3ivIH52UH1tGewb15XI+XpJ3q6jV9sav5Et7p2X+/Z5tGejq6RHqg3S5uh/mO+K23/3rbOkTqSSk73NWqq6vW9U9JQ3Wc1DZquioWhus9qGnu7KtCq1AT6R+cMqYbR+UCfRiP1jc4bUg2jc1K/2jZkMKp5tcE4NGQwqnm1wQiu+YaWipAp9Kj06C2mW9KLCy0mXFC/ZH9p6f4lJc+Vlj4H9R/SH+Cab2ipCJlCj0qPzppm04sLLabNzXqtxWR5NFZTQiUEiV2ZLDwTSeIr6qw9Sndd8+9+JCY3ACde/zXblNL/fxLD/DRp/vSh0vv1KTdb5DfPfcseZ20kjAoNQ1ff/mn5zbPd7PHu5qBkrsYmvAxUjxY6gRbCoZNwUDOroaY2tJADKFCpOoyrUEDQXYkNSMKMkE7aheS0KhkLApFhk6c1u3HmaSWox3ErhQo7rQz6cd1C1mzlkA+vNQG1GLWo0AmFQIYqrJYYuQPO4HFwAHOQ0IumyXUSLFiAC3MIQEIjkBjFG6e3L8CBJhgwCR2WYw5mqVJOYeGNsEGCBw1YDht8cGEUs/DCilWwYYHgtFn4IaIVjWjeT7jvrz5MQos+QtGywx04H16YsRBnKXHqWew+hlnM4WJ+IfaUHTQfu0SsgJNgxmQwvovcsMTkIzi/DKl04pK3dHV5cgdcxsHnYwaNsGDW402wizxlocsMPzwsILmAvw4izr0b4EDN0BGYbyo/hNYBHwAA) format("woff2")}
+@font-face{font-family:"SG";font-weight:400;src:url(data:font/woff2;base64,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) format("woff2")}
+@font-face{font-family:"PM";font-weight:400;src:url(data:font/woff2;base64,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) format("woff2")}
+.sg{font-family:"SG","Space Grotesk","Helvetica Neue",Arial,sans-serif}
+.pm{font-family:"PM","IBM Plex Mono",ui-monospace,Menlo,monospace}
+.meteor{opacity:0;animation:shoot 7s linear infinite}
+.m2{animation-delay:1.2s}.m3{animation-delay:2.6s}.m4{animation-delay:3.7s}.m5{animation-delay:4.9s}.m6{animation-delay:6.1s}
+@keyframes shoot{0%{transform:translate(0,0);opacity:0}3%{opacity:1}18%{transform:translate(-460px,193px);opacity:0}100%{transform:translate(-460px,193px);opacity:0}}
+.tw{animation:twinkle 3.2s ease-in-out infinite}.tw2{animation-delay:1.1s}.tw3{animation-delay:2.2s}
+@keyframes twinkle{0%,100%{opacity:1}50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){.meteor{animation:none;opacity:.85}.tw{animation:none}}
+</style>
+<defs>
+<linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#0B1230"/><stop offset=".34" stop-color="#17205A"/><stop offset=".6" stop-color="#352A6E"/><stop offset=".8" stop-color="#6E3C7C"/><stop offset=".94" stop-color="#C8687E"/><stop offset="1" stop-color="#F3A58B"/>
+</linearGradient>
+<linearGradient id="trail" x1="1" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#7a6cff" stop-opacity="0"/><stop offset=".55" stop-color="#e98bb0" stop-opacity=".6"/><stop offset=".9" stop-color="#F3958B" stop-opacity=".95"/><stop offset="1" stop-color="#fff4e6"/>
+</linearGradient>
+</defs>
+<rect width="1920" height="865" fill="url(#sky)"/>
+<g fill="#fff">
+<rect x="80" y="70" width="3" height="3" opacity="0.8"/>
+<rect x="210" y="160" width="2" height="2" opacity="0.6"/>
+<rect x="340" y="40" width="3" height="3" opacity="0.7"/>
+<rect x="470" y="210" width="2" height="2" opacity="0.5"/>
+<rect x="620" y="110" width="3" height="3" opacity="0.8"/>
+<rect x="760" y="60" width="2" height="2" opacity="0.6"/>
+<rect x="880" y="190" width="3" height="3" opacity="0.7"/>
+<rect x="1010" y="90" width="2" height="2" opacity="0.6"/>
+<rect x="1130" y="30" width="3" height="3" opacity="0.8"/>
+<rect x="1240" y="170" width="2" height="2" opacity="0.5"/>
+<rect x="1360" y="80" width="3" height="3" opacity="0.7"/>
+<rect x="1480" y="220" width="2" height="2" opacity="0.6"/>
+<rect x="1590" y="50" width="3" height="3" opacity="0.8"/>
+<rect x="1700" y="150" width="2" height="2" opacity="0.6"/>
+<rect x="1830" y="90" width="3" height="3" opacity="0.7"/>
+<rect x="1880" y="260" width="2" height="2" opacity="0.5"/>
+<rect x="1060" y="300" width="2" height="2" opacity="0.5"/>
+<rect x="1300" y="340" width="3" height="3" opacity="0.6"/>
+<rect x="1560" y="380" width="2" height="2" opacity="0.5"/>
+<rect x="1760" y="330" width="2" height="2" opacity="0.5"/>
+<rect x="1180" y="440" width="2" height="2" opacity="0.4"/>
+<rect x="1420" y="500" width="2" height="2" opacity="0.35"/>
+<rect x="1680" y="470" width="3" height="3" opacity="0.4"/>
+<rect x="960" y="520" width="2" height="2" opacity="0.35"/>
+<rect x="150" y="300" width="2" height="2" opacity="0.5"/>
+<rect x="60" y="460" width="2" height="2" opacity="0.4"/>
+<rect x="780" y="330" width="2" height="2" opacity="0.4"/>
+</g><g fill="#fff4e6">
+<g class="tw"><rect x="1218" y="118" width="4" height="12"/><rect x="1214" y="122" width="12" height="4"/></g>
+<g class="tw tw2"><rect x="1652" y="258" width="4" height="12"/><rect x="1648" y="262" width="12" height="4"/></g>
+<g class="tw tw3"><rect x="902" y="78" width="4" height="12"/><rect x="898" y="82" width="12" height="4"/></g>
+<g class="tw tw2"><rect x="1840" y="398" width="4" height="12"/><rect x="1836" y="402" width="12" height="4"/></g>
+<g class="tw"><rect x="700" y="720" width="3" height="9"/><rect x="697" y="723" width="9" height="3"/></g>
+</g><g stroke-linecap="round">
+<g class="meteor"><path d="M1500 60 l-300 126" stroke="url(#trail)" stroke-width="3" fill="none"/><circle cx="1200" cy="186" r="4" fill="#fff4e6"/></g>
+<g class="meteor m2"><path d="M1900 160 l-360 151" stroke="url(#trail)" stroke-width="3.5" fill="none"/><circle cx="1540" cy="311" r="5" fill="#fff4e6"/></g>
+<g class="meteor m3"><path d="M1180 20 l-240 101" stroke="url(#trail)" stroke-width="2.5" fill="none"/><circle cx="940" cy="121" r="3.5" fill="#fff4e6"/></g>
+<g class="meteor m4"><path d="M1760 20 l-280 118" stroke="url(#trail)" stroke-width="3" fill="none"/><circle cx="1480" cy="138" r="4" fill="#fff4e6"/></g>
+<g class="meteor m5"><path d="M1920 360 l-320 134" stroke="url(#trail)" stroke-width="3" fill="none"/><circle cx="1600" cy="494" r="4" fill="#fff4e6"/></g>
+<g class="meteor m6"><path d="M1400 230 l-260 109" stroke="url(#trail)" stroke-width="2.5" fill="none"/><circle cx="1140" cy="339" r="3.5" fill="#fff4e6"/></g>
+</g><g stroke-linecap="round" opacity=".5" fill="none">
+<path d="M1700 520 l-200 84" stroke="url(#trail)" stroke-width="2"/><path d="M1300 120 l-160 67" stroke="url(#trail)" stroke-width="2"/>
+</g>
+<text class="sg" x="98" y="385" font-size="196" font-weight="600" letter-spacing="-8" fill="#f4eefc">cometcli</text>
+<text class="sg" x="104" y="486" font-size="42" fill="#e6ddf6">An agentic SRE terminal</text>
+<text class="sg" x="104" y="539" font-size="42" fill="#e6ddf6">for Cosmos validators.</text>
+<text class="pm" x="104" y="614" font-size="26" fill="#cbbde8">github.com/abhijitkrm/cometcli</text>
+</svg>

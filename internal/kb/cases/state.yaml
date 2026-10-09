@@ -104,5 +104,10 @@
     - "proc.running true; wait.until synced"
   warnings:
     - never delete data/ as a quick fix on a validator without restoring priv_validator_state.json — double-sign risk
+  playbook:
+    - {do: node.set-config, args: {file: config.toml, key: db_backend, value: "{sig:data.db_backend}"}, note: "the backend the data was written with"}
+    - {do: node.set-config, args: {file: app.toml, key: app-db-backend, value: "{sig:data.db_backend}"}, note: "app.toml must agree"}
+    - {do: node.service, args: {action: restart}, note: "restart so it takes effect"}
+    - {do: wait.until, args: {condition: synced, timeout: 1800}, note: "wait until it has caught up"}
   test:
     signals: {logs.db_init_eof: 1, proc.running: false}

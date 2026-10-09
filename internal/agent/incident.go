@@ -3,14 +3,15 @@ package agent
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/abhijitkrm/cometcli/internal/audit"
-	"github.com/abhijitkrm/cometcli/internal/config"
 	"github.com/abhijitkrm/cometcli/internal/egress"
 	"github.com/abhijitkrm/cometcli/internal/kb"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
+	"github.com/abhijitkrm/cometcli/internal/tools/networktool"
 	"github.com/abhijitkrm/cometcli/internal/tools/triage"
 )
 
@@ -77,7 +78,11 @@ func (a *Agent) runIncident(ctx context.Context, what string) (string, error) {
 			return handoff(triageNote + "\n\n" + playbookNote(c, done, fmt.Sprintf("step %d: no tool %s", i+1, st.Do)))
 		}
 		why := fmt.Sprintf("/incident %s — known case %s (%s), playbook step %d: %s", what, c.ID, c.Title, i+1, st.Note)
-		r, err := a.runTool(ctx, tool, playArgs(st.Args, a.Ctx.Profile), why)
+		args, err := a.playArgs(st.Args, sig)
+		if err != nil {
+			return handoff(triageNote + "\n\n" + playbookNote(c, done, fmt.Sprintf("step %d (%s): %v", i+1, label, err)))
+		}
+		r, err := a.runTool(ctx, tool, args, why)
 		if err != nil {
 			if strings.Contains(err.Error(), "denied") || strings.Contains(err.Error(), "not approved") || ctx.Err() != nil {
 				// the operator said no: stop here, don't let a model push on
@@ -90,6 +95,9 @@ func (a *Agent) runIncident(ctx context.Context, what string) (string, error) {
 	}
 
 	_, matched := c.Matches(sig)
+	if c.PlaybookKind == "report" {
+		return a.reportIncident(ctx, what, c, matched, done), nil
+	}
 	outcome := "resolved — " + c.ID + " playbook completed"
 	recorded := ""
 	if rt, ok := a.Reg.Get("incident.record"); ok {
@@ -136,20 +144,61 @@ func bullets(items []string) string {
 	return "- " + strings.Join(items, "\n- ")
 }
 
-// playArgs fills {unit}, {home}, {binary} and {container_home} in string
-// arguments from the profile.
-func playArgs(args map[string]any, p *config.Profile) toolkit.Args {
+// playArgs fills a step's string arguments: {unit}, {home}, {binary} and
+// {container_home} from the profile, {sig:<name>} from the triage
+// signals, {peers} with the other running nodes of the chain.
+func (a *Agent) playArgs(args map[string]any, sig kb.Signals) (toolkit.Args, error) {
+	p := a.Ctx.Profile
 	r := strings.NewReplacer("{unit}", shellWord(p.Service.Unit), "{home}", shellWord(p.Home),
 		"{binary}", shellWord(p.Binary), "{container_home}", shellWord(p.Signer.ContainerHome))
 	out := toolkit.Args{}
 	for k, v := range args {
-		if s, ok := v.(string); ok {
-			v = r.Replace(s)
+		s, ok := v.(string)
+		if !ok {
+			out[k] = v
+			continue
 		}
-		out[k] = v
+		s = r.Replace(s)
+		for _, m := range sigRefRe.FindAllStringSubmatch(s, -1) {
+			val, ok := sig[m[1]]
+			if !ok || fmt.Sprint(val) == "" {
+				return nil, fmt.Errorf("signal %s isn't known for this node", m[1])
+			}
+			s = strings.ReplaceAll(s, m[0], fmt.Sprint(val))
+		}
+		if strings.Contains(s, "{peers}") {
+			peers := networktool.PeersOf(a.Ctx, p.ChainID, p.Name)
+			if len(peers) == 0 {
+				return nil, fmt.Errorf("no other running node of %s among the profiles to peer with", p.ChainID)
+			}
+			s = strings.ReplaceAll(s, "{peers}", strings.Join(peers, ","))
+		}
+		out[k] = s
 	}
-	return out
+	return out, nil
 }
+
+var sigRefRe = regexp.MustCompile(`\{sig:([a-z0-9_.]+)\}`)
+
+// reportIncident ends a report playbook: what cometcli found, and what
+// the operator decides — cometcli doesn't decide for them.
+func (a *Agent) reportIncident(ctx context.Context, what string, c *kb.Case, matched, done []string) string {
+	var todo []string
+	for _, f := range c.Fix {
+		todo = append(todo, strings.TrimSpace(fixTagRe.ReplaceAllString(f, "")))
+	}
+	if rt, ok := a.Reg.Get("incident.record"); ok {
+		_, _ = a.runTool(ctx, rt, toolkit.Args{
+			"title": c.Title, "case": c.ID, "root_cause": c.Title + " (matched " + strings.Join(matched, ", ") + ")",
+			"evidence": strings.Join(matched, "\n"), "actions": strings.Join(done, "\n"), "outcome": "reported — waiting on the operator's decision",
+		}, "/incident: record")
+	}
+	text := fmt.Sprintf("**%s** (known case `%s`)\n\nWhat cometcli found:\n%s\n\nYour decision — cometcli won't make it for you:\n%s",
+		c.Title, c.ID, bullets(done), bullets(todo))
+	return a.localIncidentDone(what, c, text)
+}
+
+var fixTagRe = regexp.MustCompile(`^\[(read|change|tx)\]\s*`)
 
 // shellWord keeps a profile value usable in a command: plain paths and
 // names pass through (so ~ still expands), anything else is quoted.

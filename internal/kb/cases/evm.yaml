@@ -39,6 +39,10 @@
     - EVM indexer behind or stuck, JSON-RPC served from another node behind a load balancer
   fix:
     - "[change] restart the node; if persistent, check [json-rpc] enable-indexer and indexer logs"
+  playbook:
+    - {do: node.service, args: {action: restart}, note: "restart so it takes effect"}
+    - {do: wait.until, args: {condition: synced, timeout: 1800}, note: "wait until it has caught up"}
+    - {do: wait.until, args: {condition: signal, value: "evm.syncing == false", timeout: 900}, note: "the EVM JSON-RPC catches up"}
   test:
     signals: {evm.drift: 120}
 

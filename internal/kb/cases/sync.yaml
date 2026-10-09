@@ -77,6 +77,8 @@
     - "[change] if far behind (days), consider snap.statesync instead of replaying"
   verify:
     - "node.catching_up false, node.block_age_s < 30"
+  playbook:
+    - {do: wait.until, args: {condition: synced, timeout: 3600}, note: "nothing is broken — it is catching up; this shows progress and ETA"}
   test:
     signals: {node.catching_up: true, node.block_age_s: 7200}
 
@@ -115,6 +117,10 @@
     - "[change] net.add-peer (2-5 healthy peers); node.service restart"
   verify:
     - "node.peers >= 3 and node.block_age_s < 30"
+  playbook:
+    - {do: net.add-peer, args: {peer: "{peers}"}, note: "peer with the chain's other nodes you run"}
+    - {do: node.service, args: {action: restart}, note: "restart so it takes effect"}
+    - {do: wait.until, args: {condition: synced, timeout: 1800}, note: "wait until it has caught up"}
   test:
     signals: {node.peers: 0}
 
@@ -125,6 +131,10 @@
     all: ["node.peers > 0", "node.peers < 3"]
   fix:
     - "[change] net.add-peer more persistent peers; check config.pex and max_inbound_peers"
+  playbook:
+    - {do: net.add-peer, args: {peer: "{peers}"}, note: "add the chain's other nodes you run as persistent peers"}
+    - {do: node.service, args: {action: restart}, note: "restart so it takes effect"}
+    - {do: wait.until, args: {condition: synced, timeout: 1800}, note: "wait until it has caught up"}
   test:
     signals: {node.peers: 1}
 
@@ -216,6 +226,9 @@
     - "[change] or recreate it with docker compose up -d <service>"
   verify:
     - "node.reachable true, node.peers >= 2, wait.until synced"
+  playbook:
+    - {do: node.recreate, note: "recreate the container from its compose file — reattaches its network"}
+    - {do: wait.until, args: {condition: synced, timeout: 1800}, note: "wait until it has caught up"}
   test:
     signals: {proc.networks: 0, proc.running: true, node.reachable: false}
 

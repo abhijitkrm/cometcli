@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -389,4 +390,23 @@ func FetchGenesis(c *toolkit.Context) ([]byte, error) {
 			return out, nil
 		}
 	}
+}
+
+// PeersOf is id@address of every other running node of the chain among
+// the profiles (for a playbook that adds peers to a lonely node).
+func PeersOf(c *toolkit.Context, chainID, except string) []string {
+	if c.Cfg == nil {
+		return nil
+	}
+	var out []string
+	for name, p := range c.Cfg.Profiles {
+		if name == except || p.ChainID != chainID {
+			continue
+		}
+		if peer, err := peerOf(c, name, ""); err == nil {
+			out = append(out, peer)
+		}
+	}
+	sort.Strings(out)
+	return out
 }

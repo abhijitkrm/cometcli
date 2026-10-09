@@ -17,6 +17,9 @@
     - "node.block_age_s < 30 after the network reaches 2/3; val.consensus"
   warnings:
     - never skip the upgrade by restarting the old binary with --unsafe-skip-upgrades unless the chain coordinators say so
+  playbook_kind: report
+  playbook:
+    - {do: upgrade.check, note: "the plan this node halted for"}
   test:
     signals: {logs.upgrade_needed: 3, logs.upgrade_name: v2.0.0, proc.restarts: 4}
 
@@ -32,6 +35,9 @@
     - "[read] upgrade.watch near the height"
   verify:
     - "upgrade.check shows staged and checksum-verified"
+  playbook_kind: report
+  playbook:
+    - {do: upgrade.check, note: "the plan and what this node runs"}
   test:
     signals: {upgrade.pending: true, upgrade.blocks_to_halt: 5000, upgrade.name: v2.0.0}
 

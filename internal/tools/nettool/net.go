@@ -3,11 +3,11 @@ package nettool
 
 import (
 	"fmt"
-	"os"
 	"regexp"
 	"strings"
 
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
+	"github.com/abhijitkrm/cometcli/internal/tools/common"
 )
 
 // Register adds net.* tools.
@@ -56,67 +56,86 @@ var (
 	peersLineRe = regexp.MustCompile(`(?m)^(\s*persistent_peers\s*=\s*")([^"]*)(".*)$`)
 )
 
-func editPeers(c *toolkit.Context, peer string, add bool) (*toolkit.Result, error) {
-	peer = strings.TrimSpace(peer)
-	if !peerRe.MatchString(peer) {
-		return nil, fmt.Errorf("peer %q: want <40-hex node id>@host:port", peer)
+func editPeers(c *toolkit.Context, peerArg string, add bool) (*toolkit.Result, error) {
+	var peers []string
+	for _, p := range strings.Split(peerArg, ",") {
+		if p = strings.TrimSpace(p); p == "" {
+			continue
+		}
+		if !peerRe.MatchString(p) {
+			return nil, fmt.Errorf("peer %q: want <40-hex node id>@host:port", p)
+		}
+		peers = append(peers, p)
+	}
+	if len(peers) == 0 {
+		return nil, fmt.Errorf("no peer given (node_id@host:port, comma-separated for several)")
 	}
 	h, err := c.Host()
 	if err != nil {
 		return nil, err
 	}
-	path := c.Profile.Home + "/config/config.toml"
-	raw, err := h.ReadFile(c, path)
+	raw, where, err := common.ReadNodeFile(c, h, "config/config.toml")
 	if err != nil {
 		return nil, err
 	}
 	cfg := string(raw)
 	loc := peersLineRe.FindStringSubmatchIndex(cfg)
 	if loc == nil {
-		return nil, fmt.Errorf("no persistent_peers = \"…\" line in %s", path)
+		return nil, fmt.Errorf("no persistent_peers = \"…\" line in %s", where)
 	}
 	var clean []string
+	have := map[string]bool{}
 	for _, p := range strings.Split(cfg[loc[4]:loc[5]], ",") {
 		if p = strings.TrimSpace(p); p != "" {
 			clean = append(clean, p)
-		}
-	}
-	present := false
-	for _, p := range clean {
-		if p == peer {
-			present = true
+			have[p] = true
 		}
 	}
 	verb, done := "add", "added"
-	switch {
-	case add && present:
-		return &toolkit.Result{Text: "peer already present — nothing to change", Data: map[string]any{"peers": clean}}, nil
-	case !add && !present:
-		return &toolkit.Result{Text: "peer not present — nothing to change", Data: map[string]any{"peers": clean}}, nil
-	case add:
-		clean = append(clean, peer)
-	default:
+	var changed []string
+	if add {
+		for _, p := range peers {
+			// the same node id at another address replaces nothing: skip known ids
+			id, _, _ := strings.Cut(p, "@")
+			known := false
+			for _, q := range clean {
+				if strings.HasPrefix(q, id+"@") {
+					known = true
+				}
+			}
+			if !known {
+				clean = append(clean, p)
+				changed = append(changed, p)
+			}
+		}
+	} else {
 		verb, done = "remove", "removed"
+		drop := map[string]bool{}
+		for _, p := range peers {
+			if have[p] {
+				drop[p] = true
+				changed = append(changed, p)
+			}
+		}
 		var keep []string
 		for _, p := range clean {
-			if p != peer {
+			if !drop[p] {
 				keep = append(keep, p)
 			}
 		}
 		clean = keep
 	}
+	if len(changed) == 0 {
+		return &toolkit.Result{Text: "nothing to change — " + map[bool]string{true: "already present", false: "not present"}[add], Data: map[string]any{"peers": clean}}, nil
+	}
 	updated := cfg[:loc[4]] + strings.Join(clean, ",") + cfg[loc[5]:]
-	if err := c.Approve(fmt.Sprintf("%s persistent peer %s", verb, peer), toolkit.TierLocalChange,
-		map[string]any{"peer": peer, "peers_after": clean, "diff": toolkit.Diff(path, cfg, updated)}); err != nil {
+	if err := c.Approve(fmt.Sprintf("%s persistent peer(s) %s", verb, strings.Join(changed, ", ")), toolkit.TierLocalChange,
+		map[string]any{"peers_after": clean, "diff": toolkit.Diff(where, cfg, updated)}); err != nil {
 		return nil, err
 	}
-	mode := os.FileMode(0o600)
-	if fi, err := h.Stat(c, path); err == nil {
-		mode = fi.Mode().Perm()
-	}
-	if err := h.WriteFile(c, path, []byte(updated), mode); err != nil {
+	if _, err := common.WriteNodeFile(c, h, "config/config.toml", []byte(updated), 0o644); err != nil {
 		return nil, err
 	}
-	return &toolkit.Result{Text: fmt.Sprintf("%s %s — %d persistent peer(s); restart the node to apply", done, peer, len(clean)),
+	return &toolkit.Result{Text: fmt.Sprintf("%s %s — %d persistent peer(s); restart the node to apply", done, strings.Join(changed, ", "), len(clean)),
 		Data: map[string]any{"peers": clean}}, nil
 }

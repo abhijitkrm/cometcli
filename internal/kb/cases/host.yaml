@@ -18,6 +18,10 @@
   warnings:
     - never delete data/priv_validator_state.json or anything under config/
     - never delete application.db/blockstore.db on a validator to free space
+  playbook_kind: report
+  playbook:
+    - {do: bash, args: {command: "df -h / {sig:node.host_home}; du -sh {sig:node.host_home}/data/* 2>/dev/null | sort -h | tail -8", description: "what fills the disk"}, note: "where the space goes"}
+    - {do: snap.prune, note: "pruning advice"}
   test:
     signals: {host.disk_used_pct: 98}
 
@@ -29,6 +33,10 @@
   fix:
     - "[read] snap.prune; du of data dirs"
     - "[change] plan pruning / cleanup / resize before it fills"
+  playbook_kind: report
+  playbook:
+    - {do: bash, args: {command: "df -h / {sig:node.host_home}; du -sh {sig:node.host_home}/data/* 2>/dev/null | sort -h | tail -8", description: "what fills the disk"}, note: "where the space goes"}
+    - {do: snap.prune, note: "pruning advice"}
   test:
     signals: {host.disk_used_pct: 88}
 
@@ -71,6 +79,9 @@
   fix:
     - "[read] bash: ps aux --sort=-rss | head"
     - "[change] reduce caches / other processes; add RAM"
+  playbook_kind: report
+  playbook:
+    - {do: bash, args: {command: "uptime; free -m; ps aux --sort=-%cpu | head -8; ps aux --sort=-rss | head -6", description: "what uses the host"}, note: "who uses the CPU and memory"}
   test:
     signals: {host.mem_used_pct: 94}
 
@@ -83,6 +94,9 @@
   fix:
     - "[read] bash: top -bn1 | head -20"
     - "[change] move other workloads off the validator host"
+  playbook_kind: report
+  playbook:
+    - {do: bash, args: {command: "uptime; free -m; ps aux --sort=-%cpu | head -8; ps aux --sort=-rss | head -6", description: "what uses the host"}, note: "who uses the CPU and memory"}
   test:
     signals: {host.load_per_cpu: 3.5}
 
@@ -98,6 +112,9 @@
     - "[change] enable chrony/systemd-timesyncd: timedatectl set-ntp true"
   verify:
     - "clock.ntp_synced true"
+  playbook:
+    - {do: bash, args: {command: "sudo -n timedatectl set-ntp true && timedatectl show -p NTPSynchronized", description: "turn on NTP time sync"}, note: "needs passwordless sudo"}
+    - {do: wait.until, args: {condition: signal, value: "clock.ntp_synced == true", timeout: 300}, note: "wait for the clock to sync"}
   test:
     signals: {clock.ntp_synced: false}
 
@@ -180,5 +197,9 @@
     - "proc.running true and stays up; wait.until synced"
   warnings:
     - don't run the node or the setup as root to get past it — files it writes become unwritable for the real user next time
+  playbook:
+    - {do: bash, args: {command: "sudo -n chown -R \"$(id -u):$(id -g)\" {sig:node.host_home}", description: "give the node home back to its user"}, note: "needs passwordless sudo; otherwise the operator runs it"}
+    - {do: node.service, args: {action: start}, note: "start it again"}
+    - {do: wait.until, args: {condition: synced, timeout: 1800}, note: "wait until it has caught up"}
   test:
     signals: {logs.permission_denied: 2, proc.running: false, logs.panic: 1}
