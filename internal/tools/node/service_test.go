@@ -48,7 +48,7 @@ func TestServiceCommands(t *testing.T) {
 		{"systemd", "status", "systemctl status 'evmd.service'"},
 		{"systemd", "restart", "systemctl restart 'evmd.service'"},
 		{"docker", "status", "docker ps -a --filter name='evmd'"},
-		{"docker", "stop", "docker stop 'evmd'"},
+		{"docker", "stop", "docker stop -t 60 'evmd'"},
 		{"launchd", "status", "launchctl list | grep -i 'evmd'"},
 		{"launchd", "restart", "launchctl kickstart -k gui/$(id -u)/'evmd'"},
 	}

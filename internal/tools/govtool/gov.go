@@ -22,6 +22,7 @@ import (
 
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
 	"github.com/abhijitkrm/cometcli/internal/tools/common"
+	"github.com/abhijitkrm/cometcli/internal/tools/upgradetool"
 	"github.com/abhijitkrm/cometcli/internal/tx"
 )
 
@@ -70,6 +71,7 @@ func (proposeTool) Schema() map[string]any {
 		"height":    toolkit.Int("upgrade: absolute halt height"),
 		"in_blocks": toolkit.Int("upgrade: halt this many blocks from now (instead of height)"),
 		"info":      toolkit.Str("upgrade: plan info (binaries JSON / release URL)"),
+		"image":     toolkit.Str("upgrade, docker nodes: the image to switch to — its binary must register the plan name (checked)"),
 		"messages":  toolkit.Str(`messages: JSON array of proposal msgs, e.g. [{"@type":"/cosmos.bank.v1beta1.MsgSend",…}]`),
 		"memo":      toolkit.Str("tx memo"),
 	}), "kind", "title", "summary")
@@ -142,7 +144,11 @@ func Build(c *toolkit.Context, a toolkit.Args, proposer string) (*Plan, error) {
 	}
 	p.Detail["voting_period"] = votingPeriod.String()
 
-	switch kind := a.String("kind", ""); kind {
+	kind := a.String("kind", "")
+	if kind == "" && a.Int("height", 0) == 0 && a.Int("in_blocks", 0) == 0 && a.String("messages", "") == "" {
+		kind = "text" // a title and summary alone are a text proposal
+	}
+	switch kind {
 	case "text":
 		if msg.Metadata == "" {
 			// the SDK rejects a proposal with neither messages nor metadata
@@ -152,6 +158,23 @@ func Build(c *toolkit.Context, a toolkit.Args, proposer string) (*Plan, error) {
 		name := a.String("name", "")
 		if !planNameRe.MatchString(name) {
 			return nil, fmt.Errorf("upgrade name %q: use the new binary's upgrade handler name (letters, digits, . _ -)", name)
+		}
+		// a name the new binary doesn't register halts the chain for good;
+		// one the running binary registers switches nothing — check both
+		// against the binaries before anything goes on chain
+		if c.Profile != nil && c.Profile.Service.Type == "docker" {
+			image := a.String("image", "")
+			if image == "" {
+				return nil, fmt.Errorf("pass image (the one you'll switch to): cometcli checks the plan name %q against its binary and the running one first — a wrong name halts the chain permanently", name)
+			}
+			ok, report, _, err := upgradetool.Ready(c, name, image)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				return nil, fmt.Errorf("not proposing — this node isn't ready for plan %q:\n%s", name, report)
+			}
+			p.Notes = append(p.Notes, "checked on "+c.Profile.Name+": "+strings.ReplaceAll(strings.TrimSpace(report), "\n", "; ")+" — run upgrade.ready on every other validator too")
 		}
 		cur, blockTime, err := chainClock(c)
 		if err != nil {

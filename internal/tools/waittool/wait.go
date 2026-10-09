@@ -73,6 +73,19 @@ func (Until) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	if v := a.String("validator", ""); v != "" && cond == "signal" && c.Profile != nil {
+		// val.* signals are about the profile's validator: point them at
+		// the one asked for
+		p := *c.Profile
+		p.Metadata = map[string]string{}
+		for k, x := range c.Profile.Metadata {
+			p.Metadata[k] = x
+		}
+		p.Metadata["valoper"] = v
+		sub := c.Derive(c)
+		sub.Profile = &p
+		c = sub
+	}
 	iv := max(time.Duration(a.Int("interval", 10))*time.Second, MinInterval)
 	if v, ok := a["interval"].(float64); ok && v > 0 && v < 1 {
 		iv = max(time.Duration(v*float64(time.Second)), MinInterval)
@@ -111,7 +124,9 @@ func (Until) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
 	for k, v := range last.data {
 		data[k] = v
 	}
-	return &toolkit.Result{Text: fmt.Sprintf("✗ %s not reached within %s — last: %s", cond, timeout(a), last.status), Data: data}, nil
+	// an error, not a result: scripts get a failing exit code, and a
+	// playbook mustn't carry on as if the condition held
+	return nil, fmt.Errorf("%s not reached within %s — last: %s", cond, timeout(a), last.status)
 }
 
 func progress(c *toolkit.Context, s string) {

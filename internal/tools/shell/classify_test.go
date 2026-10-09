@@ -76,7 +76,7 @@ func TestClassify(t *testing.T) {
 		{"find . -name '*.log' -delete", local},
 		{"cat > config.toml <<EOF\n[p2p]\npersistent_peers = \"a@b:26656\"\nEOF", local},
 		{"bash -c 'systemctl stop evmd'", local},
-		{"evmd start --home /data", local},
+		{"evmd start --home /data", forb}, // a second signer next to the service
 		{"evmd tx bank send a b 1uatom --generate-only", read},
 		{"git commit -m x", local},
 		{"tee config.toml < new.toml", local},
@@ -146,5 +146,54 @@ func TestSegmentsForRules(t *testing.T) {
 	want := []string{"cd /data", "git status", "head -5", "FOO=1 ls -l"}
 	if strings.Join(v.Segments, "|") != strings.Join(want, "|") {
 		t.Fatalf("segments = %q", v.Segments)
+	}
+}
+
+// Commands a model ran on a drill node with every approval granted: each
+// one is a double-sign or state-reset risk and must be refused in every mode.
+func TestDoubleSignAndStateResetAreRefused(t *testing.T) {
+	o := Opts{Binary: "evmd"}
+	for _, cmd := range []string{
+		"cd ~/.evmd && rm -rf data && mkdir -p data",
+		"rm -rf /var/lib/evmd/data",
+		"rm -rf data/*",
+		"rm -rf ~/.evmd/data/application.db",
+		"find ~/.evmd/data -name '*.db' -delete",
+		"cp data.backup/priv_validator_state.json data/priv_validator_state.json",
+		"cp /tmp/pvs.json ~/.evmd/data/priv_validator_state.json",
+		"install -m600 x.json /home/val/.evmd/data/priv_validator_state.json",
+		"dd if=/tmp/x of=data/priv_validator_state.json",
+		"python3 << 'PY'\nimport json\nd=json.load(open('/tmp/pvs.json'))\njson.dump(d, open('data/priv_validator_state.json','w'))\nPY",
+		"cd ~/.evmd && evmd start --home . --rpc.laddr tcp://127.0.0.1:47087",
+		"timeout 15 evmd start --home .",
+		"nohup evmd start --home /data/node &",
+		"evmd init test --home . --chain-id x",
+		"evmd rollback --home .",
+	} {
+		if v := Classify(cmd, o); v.Forbidden == "" {
+			t.Errorf("%q must be refused (got %s: %s)", cmd, tierName(v.Tier), v.Reason)
+		}
+	}
+	// reading, backing up and help stay possible
+	for _, cmd := range []string{
+		"cat ~/.evmd/data/priv_validator_state.json",
+		"cp ~/.evmd/data/priv_validator_state.json /tmp/pvs.backup",
+		"ls -la ~/.evmd/data",
+		"du -sh ~/.evmd/data",
+		"evmd start --help",
+		"rm -rf /tmp/build",
+		"rm data.csv",
+	} {
+		if v := Classify(cmd, o); v.Forbidden != "" {
+			t.Errorf("%q should be allowed: %s", cmd, v.Forbidden)
+		}
+	}
+}
+
+func TestKeySeedIsProtected(t *testing.T) {
+	for _, cmd := range []string{"cat ~/.evmd/key_seed.json", "jq .secret /data/node/key_seed.json", "docker exec val0 cat /data/node/key_seed.json"} {
+		if v := Classify(cmd, Opts{}); v.Forbidden == "" {
+			t.Errorf("%q must be refused", cmd)
+		}
 	}
 }

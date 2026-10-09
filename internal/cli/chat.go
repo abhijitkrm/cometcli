@@ -175,8 +175,19 @@ func chatCtx(cmd *cobra.Command, p *config.Profile, headless bool) (*toolkit.Con
 	return c, nil
 }
 
-func headlessApprover(_ *toolkit.Context, prompt string, tier toolkit.Tier, _ map[string]any) (bool, error) {
-	return false, fmt.Errorf("not approved: %s needs approval and -p has no one to ask — allow it with --allowedTools or --permission-mode, or run interactively", tier)
+func headlessApprover(c *toolkit.Context, prompt string, tier toolkit.Tier, _ map[string]any) (bool, error) {
+	run := "run it interactively"
+	if c != nil && c.ToolName != "" {
+		run = "run `cometcli"
+		if c.Profile != nil {
+			run += " --profile " + c.Profile.Name
+		}
+		run += " " + strings.ReplaceAll(c.ToolName, ".", " ") + "` in a terminal — it shows the request and asks"
+	}
+	if tier >= toolkit.TierOnChain {
+		return false, fmt.Errorf("not approved: -p never approves %s actions (transactions and key use need a person) — %s", tier, run)
+	}
+	return false, fmt.Errorf("not approved: %s needs approval and -p has no one to ask — allow it with --allowedTools or --permission-mode, or %s", tier, run)
 }
 
 // configureChatAgent applies the agent flags plus the chat-only ones.

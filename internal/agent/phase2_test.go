@@ -132,6 +132,7 @@ func TestBashOutputUsesToolLimit(t *testing.T) {
 		{Text: "ok", Done: true},
 	}}
 	a, _ := newShellAgent(t, prov)
+	a.conf.Egress = "filtered"
 	a.Run(context.Background(), "x")
 	if n := len(lastToolText(a)); n < 19000 || n > 30500 {
 		t.Fatalf("bash output length %d — should keep up to 30k", n)

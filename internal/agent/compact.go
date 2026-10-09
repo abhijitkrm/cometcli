@@ -112,6 +112,7 @@ func (a *Agent) compactNow(ctx context.Context, instructions string, midTurn boo
 		Model: a.Model, System: a.system(), Messages: hist,
 		Tools: a.toolDefs(), MaxTok: 8192, Effort: a.Effort,
 	}
+	a.guard(req)
 	resp, err := a.Provider.Chat(ctx, req)
 	if err != nil {
 		return err

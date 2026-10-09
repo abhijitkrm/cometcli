@@ -25,6 +25,12 @@
   warnings:
     - never unjail while catching up — it misses blocks again immediately
     - never copy priv_validator_key to a second running node to "get back fast" (double sign → tombstone)
+  playbook:
+    - {do: val.jail-check, note: "why it was jailed and what blocks the unjail"}
+    - {do: wait.until, args: {condition: synced, timeout: 1800}, note: "never unjail a node that isn't caught up"}
+    - {do: wait.until, args: {condition: unjailable, timeout: 1800}, note: "wait out the jail period"}
+    - {do: val.unjail, note: "unjail (signed by the operator key — asks you)"}
+    - {do: wait.until, args: {condition: in-consensus, timeout: 600}, note: "check it signs again"}
   test:
     signals: {val.jailed: true, val.tombstoned: false}
 
@@ -248,8 +254,9 @@
   severity: high
   symptoms: node synced but won't sign; logs show height regression / conflicting data
   match:
-    all: ["pvs.ahead_by > 1"]
-    any: ["node.catching_up == false", "logs.height_regression > 0"]
+    all: ["pvs.ahead_by > 1", "node.catching_up == false"]
+    # a validator that is signing can't be refusing to sign
+    any: ["val.signed_recent_pct < 50", "logs.height_regression > 0"]
   confirm:
     - "sec.doublesign shows priv_validator_state height vs node height"
   causes:

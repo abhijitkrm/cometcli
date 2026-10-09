@@ -179,3 +179,23 @@ func TestTelegramApproval(t *testing.T) {
 		t.Fatalf("timeout: ok=%v edited=%v", ok, f2.edited)
 	}
 }
+
+func TestRemoteKeyUseApprovalExpires(t *testing.T) {
+	var text string
+	var deadline time.Time
+	ap := RemoteApprover(func(ctx context.Context, s string) (bool, string, error) {
+		text = s
+		deadline, _ = ctx.Deadline()
+		return true, "", nil
+	}, true)
+	ok, err := ap(nil, "KEY ACCESS — sign a transaction", toolkit.TierOnChain, map[string]any{toolkit.KeyUseMark: true})
+	if err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if !strings.Contains(text, "expires in 5m") || strings.Contains(text, toolkit.KeyUseMark) {
+		t.Errorf("message: %q", text)
+	}
+	if time.Until(deadline) > KeyUseTimeout || time.Until(deadline) < KeyUseTimeout-time.Minute {
+		t.Errorf("key use approval should expire in %s, deadline in %s", KeyUseTimeout, time.Until(deadline))
+	}
+}

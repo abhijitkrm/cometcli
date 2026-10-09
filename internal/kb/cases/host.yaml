@@ -133,7 +133,7 @@
 
 - id: container-memory-limit
   title: Container memory limit too low for the node (OOM kills inside the container)
-  explains: [node-crash-loop, node-process-down, node-rpc-down, node-restarted-recently, node-killed-sigkill, host-oom-killed, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, node-catching-up, evm-rpc-down]
+  explains: [node-crash-loop, node-process-down, node-rpc-down, node-restarted-recently, node-killed-sigkill, host-oom-killed, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, node-catching-up, evm-rpc-down, val-in-set-while-syncing]
   severity: critical
   symptoms: restarts with no error in the logs; docker OOMKilled may be false because the node runs under a wrapper shell
   match:
@@ -149,5 +149,11 @@
     - "[change] restart the container if it's not recovering on its own"
   verify:
     - "proc.restarts stops increasing; proc.mem_used_pct_of_limit well below 90; wait.until synced"
+  playbook:
+    - {do: bash, args: {command: "docker update --memory 4g --memory-swap 4g {unit}", description: "raise the container memory limit to 4 GB"}, note: "raise the memory limit (also fix it in compose so it survives recreation)"}
+    - {do: node.service, args: {action: restart}, note: "restart with the new limit"}
+    - {do: wait.until, args: {condition: synced, timeout: 1800}, note: "wait until it has caught up"}
+    - {do: wait.until, args: {condition: unjailable, timeout: 1800}, when: "val.jailed == true", note: "wait out the jail period"}
+    - {do: val.unjail, when: "val.jailed == true", note: "unjail (asks you)"}
   test:
     signals: {proc.mem_limit_mb: 120, proc.oom_kills: 14, proc.restarts: 7}

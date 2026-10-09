@@ -1147,6 +1147,10 @@ func describe(p *pendingApproval) (string, string) {
 	}
 	title := "Approval needed"
 	switch {
+	case d[toolkit.KeyUseMark] == true:
+		title = "Key access · sign and broadcast"
+		lines = append(lines, p.prompt)
+		shown[toolkit.KeyUseMark] = true
 	case p.tier == toolkit.TierOnChain:
 		title = "Transaction"
 		lines = append(lines, p.prompt)

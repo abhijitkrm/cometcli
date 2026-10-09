@@ -19,6 +19,7 @@ func Register(r *toolkit.Registry) {
 	r.Register(checkTool{})
 	r.Register(prepareTool{})
 	r.Register(watchTool{})
+	RegisterFlow(r)
 }
 
 type checkTool struct{}

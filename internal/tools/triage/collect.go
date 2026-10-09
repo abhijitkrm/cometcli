@@ -34,6 +34,9 @@ import (
 // Timeout bounds each collector (tests lower it).
 var Timeout = 20 * time.Second
 
+// RemoteTimeout bounds each collector on a node reached over SSH.
+var RemoteTimeout = 60 * time.Second
+
 // Report is one sweep's outcome.
 type Report struct {
 	Chain   string            // cosmos-sdk | cosmos-evm
@@ -131,7 +134,11 @@ func CollectFor(c *toolkit.Context, since time.Duration, names []string) *Report
 		wg.Add(1)
 		go func(col collector) {
 			defer wg.Done()
-			ctx, cancel := context.WithTimeout(c, Timeout)
+			limit := Timeout
+			if c.Profile != nil && c.Profile.Transport.Type == "ssh" {
+				limit = RemoteTimeout // every probe crosses the WAN
+			}
+			ctx, cancel := context.WithTimeout(c, limit)
 			defer cancel()
 			cc := c.Derive(ctx)
 			local := kb.Signals{}
@@ -143,7 +150,7 @@ func CollectFor(c *toolkit.Context, since time.Duration, names []string) *Report
 			select {
 			case err = <-done:
 			case <-ctx.Done():
-				err = fmt.Errorf("timed out after %s", Timeout)
+				err = fmt.Errorf("timed out after %s", limit)
 			}
 			mu2.Lock()
 			defer mu2.Unlock()
@@ -760,6 +767,13 @@ func collectConfig(c *toolkit.Context, r *Report, set func(string, any)) error {
 		}
 		if json.Unmarshal(raw, &pvs) == nil {
 			set("pvs.height", num(pvs.Height))
+			// compare with the height right now: on a fast chain the
+			// height read seconds earlier makes a healthy signer look ahead
+			if cc, err := c.Comet(); err == nil {
+				if st, err := cc.Status(c); err == nil {
+					set("pvs.ahead_by", num(pvs.Height)-float64(st.SyncInfo.LatestBlockHeight))
+				}
+			}
 		}
 	}
 	if len(errs) == 2 {
@@ -856,7 +870,9 @@ func derive(r *Report) {
 			s["upgrade.blocks_to_halt"] = uh - h
 		}
 		if ph, ok := f("pvs.height"); ok {
-			s["pvs.ahead_by"] = ph - h
+			if _, measured := s["pvs.ahead_by"]; !measured {
+				s["pvs.ahead_by"] = ph - h
+			}
 		}
 		if hh, ok := f("app.halt_height"); ok && hh > 0 {
 			s["app.blocks_to_halt_height"] = hh - h

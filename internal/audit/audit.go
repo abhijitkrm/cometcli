@@ -27,6 +27,8 @@ const (
 	KindPrompt   Kind = "prompt"   // an agent prompt (redacted)
 	KindLLM      Kind = "llm"      // an LLM response digest
 	KindAlert    Kind = "alert"    // a monitor alert firing
+	KindEgress   Kind = "egress"   // content withheld from the model (key material)
+	KindKey      Kind = "key"      // a key used to sign (which, where, for what, approved by)
 )
 
 // Event is one audit record.

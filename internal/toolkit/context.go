@@ -53,6 +53,9 @@ type Context struct {
 	// HookDecision is a PreToolUse hook's verdict for this call:
 	// "allow" skips the prompt, "ask" forces one ("" = no opinion).
 	HookDecision string
+	// Purpose is why the current action is being taken (the agent's
+	// stated reason), shown when a key is about to be used.
+	Purpose string
 
 	mu      sync.Mutex
 	comet   *comet.Client

@@ -19,6 +19,7 @@ type mockProvider struct {
 	calls     int
 	lastReq   *Request
 	reqs      []*Request
+	sent      []string // each request as sent (history is mutated later)
 	err       error
 }
 
@@ -27,6 +28,16 @@ func (m *mockProvider) Chat(ctx context.Context, r *Request) (*Response, error) 
 	m.calls++
 	m.lastReq = r
 	m.reqs = append(m.reqs, r)
+	var b strings.Builder
+	b.WriteString(r.System)
+	for _, msg := range r.Messages {
+		b.WriteString(msg.Text)
+		b.Write(msg.RawSteps)
+		for _, c := range msg.Calls {
+			b.Write(c.Args)
+		}
+	}
+	m.sent = append(m.sent, b.String())
 	if m.err != nil {
 		return nil, m.err
 	}

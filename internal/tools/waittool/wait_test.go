@@ -116,9 +116,10 @@ func TestWaitTimesOutWithLastState(t *testing.T) {
 	_, chain, c, _ := setup(t)
 	chain.Set(func(c *fakenode.Comet) { c.Signs = func(int64) bool { return false } })
 	start := time.Now()
-	res, err := (Until{}).Run(c, toolkit.Args{"condition": "signing", "window": float64(10), "timeout": float64(1), "interval": 0.05})
-	if err != nil || res.Data["done"] != false || !strings.Contains(res.Text, "signed 0/10") || time.Since(start) > 3*time.Second {
-		t.Fatalf("timeout: %v %v (%s)", res, err, time.Since(start))
+	_, err := (Until{}).Run(c, toolkit.Args{"condition": "signing", "window": float64(10), "timeout": float64(1), "interval": 0.05})
+	// a wait that isn't reached is an error carrying the last state
+	if err == nil || !strings.Contains(err.Error(), "not reached") || !strings.Contains(err.Error(), "signed 0/10") || time.Since(start) > 3*time.Second {
+		t.Fatalf("timeout: %v (%s)", err, time.Since(start))
 	}
 }
 
@@ -158,8 +159,8 @@ func TestWaitSignalExpressions(t *testing.T) {
 		t.Fatal("bad expression accepted")
 	}
 	// an uncollectable signal never holds and says so
-	res, err = Until{}.Run(c, toolkit.Args{"condition": "signal", "value": "evm.height > 0", "interval": 0.02, "timeout": 1})
-	if err != nil || res.Data["done"] != false || !strings.Contains(res.Text, "unavailable") {
-		t.Fatalf("%v %v", res, err)
+	_, err = Until{}.Run(c, toolkit.Args{"condition": "signal", "value": "evm.height > 0", "interval": 0.02, "timeout": 1})
+	if err == nil || !strings.Contains(err.Error(), "unavailable") {
+		t.Fatalf("%v", err)
 	}
 }

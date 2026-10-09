@@ -4,5 +4,5 @@
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ❯ /clear   clear conversation, start a new audit session
   /compact [focus]  summarize the conversation to free context
-  /cost   token usage for this session
+  /cost   token usage for this session, and prompts answered locally
  ? for shortcuts                                               general · fake/m

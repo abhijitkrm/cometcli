@@ -249,6 +249,9 @@ func (w *Watcher) Loop(ctx context.Context, interval time.Duration, once bool) {
 	}
 }
 
+// KeyUseTimeout bounds a remote approval of a key use.
+var KeyUseTimeout = 5 * time.Minute
+
 // RemoteApprover adapts an asker (Telegram) into a toolkit.Approver:
 // transactions are refused unless allowTx, and the question carries the
 // tool's detail (command, diff, tx document).
@@ -276,6 +279,13 @@ func RemoteApprover(ask func(ctx context.Context, text string) (bool, string, er
 		ctx := context.Background()
 		if c != nil {
 			ctx = c
+		}
+		if detail[toolkit.KeyUseMark] == true {
+			// a key use is approved for this moment only
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, KeyUseTimeout)
+			defer cancel()
+			b.WriteString("\n\n⏱ expires in " + KeyUseTimeout.String())
 		}
 		ok, _, err := ask(ctx, b.String())
 		if err != nil {

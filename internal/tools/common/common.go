@@ -59,6 +59,7 @@ func identify(c *toolkit.Context) {
 	if c.Profile != nil && c.Profile.Metadata["valoper"] == "" {
 		_, _ = ValoperFromNode(c)
 	}
+	c.FeeDefaults()
 }
 
 // ValoperFromNode finds the validator this node signs for: the node's
@@ -234,7 +235,9 @@ func BroadcastMsgs(c *toolkit.Context, msgs tx.Msgs, memo string, meta map[strin
 		for k, v := range meta {
 			detail[k] = v
 		}
-		if err := c.Approve("broadcast transaction\n"+built.Doc.String(), toolkit.TierOnChain, detail); err != nil {
+		// signing is key access: asked every time, never auto-approved
+		use := toolkit.KeyUse{Address: tb.Address(), Where: tb.Signer().Describe(), Op: "transaction", Doc: built.Doc.String(), Purpose: meta["purpose"]}
+		if err := toolkit.ApproveKeyUse(c, use, detail); err != nil {
 			return nil, err
 		}
 		// sign only after approval: a container keyring asks for its

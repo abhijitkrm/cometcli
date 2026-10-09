@@ -169,7 +169,17 @@ stop if tombstoned → fix the root cause → wait for sync → wait out the jai
 
 ### Signing transactions
 
-Two signers; when both can sign, you pick one first, then approve the tx (the approval shows which signer will sign):
+Every signature is a **key access** and is approved on its own.
+- **What the approval shows**: the account, which key and where it lives, the decoded
+  messages, the fee, chain and sequence, and the agent's stated reason.
+- **No shortcuts**: no rule, mode, autopilot or earlier approval covers it, and the next
+  signature asks again.
+- **Gas**: estimated with an unsigned transaction, so the key isn't touched before you
+  approve.
+- **Remote approvals**: in `watch`, a Telegram approval of a key use expires after
+  5 minutes.
+
+Two signers; when both can sign, you pick one first, then approve the key use:
 
 - **cometcli's keyring** — `signer.key` (import with `cometcli keys add --recover`).
 - **the node container's own keyring** — the key never leaves the node: cometcli builds
@@ -545,6 +555,32 @@ session started in this directory, `-r/--resume <id>` a specific one (an id pref
 `--model`, `--effort low|medium|high|xhigh|max`, `--max-tokens N`. Every conversation is
 saved after each turn to `~/.cometcli/sessions/` (0600, already redacted).
 
+### Local answers and the model
+
+Every prompt is classified on your machine first.
+
+| What you ask | Who answers |
+|---|---|
+| A known question: "is anyone jailed?", "validator count", "how many peers", "is my node synced", "missed blocks", "open proposals", "do I need to vote", "rewards", "balance", "upgrade plan", "slashing params" | cometcli runs the read-only tools and answers from a fixed template. No model call, no tokens. Repeats within 30s come from a cache. |
+| `/incident` where triage finds one clear root case that has a playbook | cometcli runs the playbook itself; changes and transactions still ask you. Today that's node down, jailed for downtime, halt-height left set, and container memory limit. A failed step hands over to the model with everything done so far. |
+| Anything else: why/how questions, actions, unknown problems | The model. For `/incident` it starts from the triage cometcli already ran. |
+
+`/llm <question>` asks the model anyway, `/route` explains the last decision, and
+`/cost` counts local answers next to tokens. To turn routing off, set
+`agent.router: off`. Add your own questions in `~/.cometcli/intents/*.yaml` (see
+[EXTENDING.md](EXTENDING.md#known-questions)).
+
+**What the model sees.** On validator profiles, `agent.egress: strict` is the default:
+- Output of `bash`, `read`, `grep`, `node.logs` and `fleet.exec` reaches the model only
+  as a local summary.
+- Addresses, IPs, hashes, hostnames and blobs are masked, and repeated lines are folded
+  with a count.
+- Errors are kept first when output is long.
+- Your screen and the audit log still show the raw output.
+
+RPC/sentry profiles and general mode default to `filtered` (raw output after redaction).
+In every mode, anything carrying key material is withheld whole.
+
 ### Agent session commands (TUI, REPL, web)
 
 | Command | Effect |
@@ -615,6 +651,8 @@ agent:
   autopilot: [local-change]      # optional; on-chain is rejected
   redact_hosts: [val.internal]   # masked before any text reaches the LLM
   redact_endpoints: true         # also mask this profile's endpoint/SSH hosts
+  egress: ""                     # strict | filtered — default strict on validators (raw output only as local summaries)
+  router: on                     # answer known questions and known incidents locally (off = always the model)
   no_stream: false               # set true for endpoints that mishandle streaming
   effort: medium                 # reasoning depth; mapped per provider (see below)
   max_tokens: 0                  # output cap per round; 0 = provider default

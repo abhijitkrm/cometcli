@@ -16,8 +16,6 @@ import (
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
 )
 
-const testMnemonic = "legal winner thank year wave sausage worth useful legal winner thank yellow"
-
 // streamProvider wraps mockProvider with a Streamer that emits each
 // response's text in two chunks.
 type streamProvider struct{ *mockProvider }
@@ -38,14 +36,15 @@ func TestUserInputRedactedBeforeLLM(t *testing.T) {
 	prov := &mockProvider{responses: []*Response{{Text: "ok", Done: true}}}
 	a := newTestAgent(t, prov)
 	a.Redact = redact.NewRedactor("val.internal")
-	if _, err := a.Run(context.Background(), "my seed is "+testMnemonic+" and host val.internal is down"); err != nil {
+	// (a mnemonic refuses the whole message: TestKeyMaterialNeverReachesTheProvider)
+	if _, err := a.Run(context.Background(), "host val.internal is down, token=abcd1234secret"); err != nil {
 		t.Fatal(err)
 	}
 	sent := prov.lastReq.Messages[0].Text
-	if strings.Contains(sent, "sausage") || strings.Contains(sent, "val.internal") {
+	if strings.Contains(sent, "abcd1234secret") || strings.Contains(sent, "val.internal") {
 		t.Fatalf("secret reached the provider: %q", sent)
 	}
-	if !strings.Contains(sent, "[REDACTED_MNEMONIC]") || !strings.Contains(sent, "[REDACTED_HOST]") {
+	if !strings.Contains(sent, "[REDACTED_HOST]") {
 		t.Fatalf("missing redaction markers: %q", sent)
 	}
 }
@@ -385,6 +384,7 @@ func TestToolOutputANSIStripped(t *testing.T) {
 		{Text: "ok", Done: true},
 	}}
 	a := newTestAgent(t, prov, tool)
+	a.conf.Egress = "filtered"
 	a.Run(context.Background(), "logs")
 	if got := a.history[2].Text; got != "10:15AM INF committed height=15171" {
 		t.Fatalf("tool text = %q", got)

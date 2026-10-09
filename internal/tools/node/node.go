@@ -232,7 +232,13 @@ func svcRun(c *toolkit.Context, h host.Host, action string) (string, int, error)
 		if action == "status" {
 			cmd = "docker inspect -f '{{.State.Status}}|{{.State.Pid}}|{{.State.StartedAt}}|{{.Config.Image}}|{{.State.ExitCode}}|{{.State.Health.Status}}' " + common.ShellQ(unit) + " 2>/dev/null || docker ps -a --filter name=" + common.ShellQ(unit)
 		} else {
-			cmd = "docker " + action + " " + common.ShellQ(unit)
+			// docker's default 10s stop timeout SIGKILLs a node still
+			// flushing state (exit 137); give it a minute to shut down
+			grace := ""
+			if action == "stop" || action == "restart" {
+				grace = "-t 60 "
+			}
+			cmd = "docker " + action + " " + grace + common.ShellQ(unit)
 		}
 	case "launchd":
 		if action == "status" {
