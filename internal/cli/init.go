@@ -23,6 +23,9 @@ import (
 	"github.com/abhijitkrm/cometcli/internal/client/grpc"
 	"github.com/abhijitkrm/cometcli/internal/config"
 	"github.com/abhijitkrm/cometcli/internal/keys"
+	"github.com/abhijitkrm/cometcli/internal/toolkit"
+	"github.com/abhijitkrm/cometcli/internal/tools/common"
+	"golang.org/x/term"
 )
 
 // initCmd is the interactive first-run wizard: probe a node's endpoints,
@@ -239,42 +242,22 @@ func runInit(ctx context.Context, in io.Reader, out io.Writer) error {
 
 	// the node's own app.toml tells us what fee the mempool will accept
 	if p.Transport.Type != "ssh" {
-		if gp := minGasPrice(expandHome(p.Home)); gp != "" {
+		if gp, denom := minGasPriceDenom(expandHome(p.Home)); gp != "" {
 			if p.Metadata == nil {
 				p.Metadata = map[string]string{}
 			}
 			p.Metadata["gas_price"] = gp
-			say("  ✓ gas price from app.toml: %s", gp)
+			if denom != "" {
+				// fees are paid in what the node accepts — on EVM chains
+				// that's usually not the bonding denom
+				p.Metadata["fee_denom"] = denom
+			}
+			say("  ✓ fees from app.toml: %s%s per gas", gp, denom)
 		}
 	}
 
-	// --- signer key ---
-	note("an ops key signs transactions (send/delegate/unjail) — skip for read-only monitoring")
-	if askYN(r, out, "create an ops signing key now?", true) {
-		keyName := ask(r, out, "key name", "ops")
-		note("file = password-encrypted file · os = OS keychain · test = plaintext, testnets only")
-		p.Signer.Backend = ask(r, out, "keyring backend (file|os|test)", "file")
-		ring, err := keys.Open(&p)
-		if err != nil {
-			say("  ! keyring: %v", err)
-		} else {
-			k, mnemonic, err := ring.Generate(keyName, "", keys.AlgoEthSecp256k1,
-				keys.DefaultCoinType, 0, 0)
-			if err != nil {
-				say("  ! key generation failed: %v", err)
-			} else {
-				// only now is the signer real — don't save a key name that
-				// doesn't exist in the keyring
-				p.Signer.Key = keyName
-				addr, _ := k.Bech32(p.Bech32Prefix)
-				say("  ✓ key %q → %s", keyName, addr)
-				say("\n  WRITE THIS DOWN — mnemonic (never stored but the keyring):\n  %s\n", mnemonic)
-				if p.Signer.Backend == "file" {
-					say("  (file backend: set COMETCLI_KEYRING_PASSWORD before signing)")
-				}
-			}
-		}
-	}
+	// --- which validator is this node, and what can sign for it ---
+	setupSigner(&p, d, r, out, say, note)
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -321,6 +304,7 @@ func detectService(p *config.Profile) string {
 type discovered struct {
 	comet, grpc, lcd, evm string
 	home, binary          string
+	containerHome         string // the node home as the container sees it
 }
 
 func orDash(s string) string {
@@ -396,11 +380,20 @@ func inspectDocker(container string) (d discovered) {
 	// home dir: the mount whose destination looks like a node home
 	// (/.evmd, /home/x/.evmd, …). No fallback — a random mount like
 	// /var/run/docker.sock is worse than asking the user.
+	// best: a mount that actually holds a node home (config/genesis.json)
 	for _, m := range meta[0].Mounts {
+		if _, err := os.Stat(filepath.Join(m.Source, "config", "genesis.json")); err == nil {
+			d.home, d.containerHome = m.Source, m.Destination
+			break
+		}
+	}
+	for _, m := range meta[0].Mounts {
+		if d.home != "" {
+			break
+		}
 		base := filepath.Base(m.Destination)
 		if strings.HasPrefix(base, ".") || strings.Contains(base, "evmd") {
-			d.home = m.Source
-			break
+			d.home, d.containerHome = m.Source, m.Destination
 		}
 	}
 	return d
@@ -477,10 +470,12 @@ func expandHome(path string) string {
 
 // minGasPrice reads app.toml's minimum-gas-prices ("1000000000adex") and
 // returns the numeric price, so txs default to what the mempool accepts.
-func minGasPrice(home string) string {
+// minGasPriceDenom reads app.toml's minimum-gas-prices ("1000000000atest")
+// as amount and denom — the denom is what the node accepts fees in.
+func minGasPriceDenom(home string) (string, string) {
 	b, err := os.ReadFile(filepath.Join(home, "config", "app.toml"))
 	if err != nil {
-		return ""
+		return "", ""
 	}
 	for _, line := range strings.Split(string(b), "\n") {
 		line = strings.TrimSpace(line)
@@ -489,13 +484,14 @@ func minGasPrice(home string) string {
 		}
 		_, v, _ := strings.Cut(line, "=")
 		v = strings.Trim(strings.TrimSpace(v), `",`)
+		v, _, _ = strings.Cut(v, ",") // first denom when several are accepted
 		i := 0
 		for i < len(v) && (v[i] >= '0' && v[i] <= '9' || v[i] == '.') {
 			i++
 		}
-		return v[:i]
+		return v[:i], strings.TrimSpace(v[i:])
 	}
-	return ""
+	return "", ""
 }
 
 // homeFromArgs extracts `--home /path` or `--home=/path` from a cmdline.
@@ -548,4 +544,117 @@ func dockerContainers(p *config.Profile) []string {
 	}
 	sort.SliceStable(names, func(i, j int) bool { return score(names[i]) < score(names[j]) })
 	return names
+}
+
+// setupSigner identifies the validator from the node's own consensus key
+// and finds a way to sign as its operator account — the node's keyring
+// first, then importing the operator key. It never makes up a new key for
+// a validator: only the operator account can unjail, vote or edit it.
+func setupSigner(p *config.Profile, d discovered, r *bufio.Reader, out io.Writer, say func(string, ...any), note func(string)) {
+	if p.Metadata == nil {
+		p.Metadata = map[string]string{}
+	}
+	vctx := &toolkit.Context{Context: context.Background(), Profile: p}
+	valoper, verr := common.ValoperFromNode(vctx)
+	vctx.Close()
+	if verr != nil {
+		say("  · not a validator on chain (yet): %v", verr)
+		note("an ops key can send funds or create a validator later — skip for read-only monitoring")
+		if askYN(r, out, "create a new ops key now?", false) {
+			newOpsKey(p, r, out, say, note)
+		}
+		return
+	}
+	acc, _ := keys.AccFromValoper(valoper)
+	p.Metadata["valoper"] = valoper
+	say("  ✓ this node signs for validator %s\n    operator account %s — the account that unjails, votes and edits it", valoper, acc)
+
+	// the node's own keyring: signing happens inside the container, the
+	// key never leaves the node
+	if p.Service.Type == "docker" && p.Service.Unit != "" && d.containerHome != "" {
+		bin := p.Binary
+		if bin == "" {
+			bin = "evmd"
+		}
+		show := exec.Command("docker", "exec", p.Service.Unit, bin, "keys", "show", acc, "-a",
+			"--keyring-backend", "test", "--home", d.containerHome)
+		if outb, err := show.CombinedOutput(); err == nil && strings.Contains(string(outb), acc) {
+			p.Signer.Mode, p.Signer.ContainerHome, p.Signer.ContainerKeyring = "container", d.containerHome, "test"
+			say("  ✓ the node's keyring has the operator key — transactions are signed inside %s", p.Service.Unit)
+			return
+		}
+		ls := exec.Command("docker", "exec", p.Service.Unit, "ls", d.containerHome+"/keyring-file")
+		if err := ls.Run(); err == nil {
+			p.Signer.Mode, p.Signer.ContainerHome = "container", d.containerHome
+			say("  ✓ the node has an encrypted (file) keyring — cometcli signs inside %s and asks for its password when needed", p.Service.Unit)
+			return
+		}
+	}
+	note("no copy of the operator key was found on the node — import it to send transactions from cometcli")
+	note("(read-only checks, triage and incidents work without it)")
+	if !askYN(r, out, "import the operator key now? (you'll type its mnemonic; it isn't shown)", false) {
+		say("  · skipped — import later: cometcli keys add --name operator --recover, then cometcli profile add %s --signer operator", p.Name)
+		return
+	}
+	note("file = password-encrypted file · os = OS keychain · test = plaintext, testnets only")
+	p.Signer.Backend = ask(r, out, "keyring backend (file|os|test)", "file")
+	mnemonic, err := readHidden(r, out, "operator mnemonic: ")
+	if err != nil || strings.TrimSpace(mnemonic) == "" {
+		say("  ! no mnemonic read — skipped")
+		return
+	}
+	ring, err := keys.Open(p)
+	if err != nil {
+		say("  ! keyring: %v", err)
+		return
+	}
+	k, _, err := ring.Generate("operator", strings.TrimSpace(mnemonic), keys.AlgoEthSecp256k1, keys.DefaultCoinType, 0, 0)
+	if err != nil {
+		say("  ! import failed: %v", err)
+		return
+	}
+	got, _ := k.Bech32(p.Bech32Prefix)
+	if got != acc {
+		_ = ring.Remove("operator")
+		say("  ! that mnemonic is %s, not the operator account %s — not saved (check the coin type / algorithm)", got, acc)
+		return
+	}
+	p.Signer.Key, p.Signer.Mode = "operator", "local"
+	say("  ✓ operator key imported as \"operator\"")
+}
+
+// newOpsKey generates a fresh key (non-validator profiles only).
+func newOpsKey(p *config.Profile, r *bufio.Reader, out io.Writer, say func(string, ...any), note func(string)) {
+	keyName := ask(r, out, "key name", "ops")
+	note("file = password-encrypted file · os = OS keychain · test = plaintext, testnets only")
+	p.Signer.Backend = ask(r, out, "keyring backend (file|os|test)", "file")
+	ring, err := keys.Open(p)
+	if err != nil {
+		say("  ! keyring: %v", err)
+		return
+	}
+	k, mnemonic, err := ring.Generate(keyName, "", keys.AlgoEthSecp256k1, keys.DefaultCoinType, 0, 0)
+	if err != nil {
+		say("  ! key generation failed: %v", err)
+		return
+	}
+	p.Signer.Key = keyName
+	addr, _ := k.Bech32(p.Bech32Prefix)
+	say("  ✓ key %q → %s", keyName, addr)
+	say("\n  WRITE THIS DOWN — the mnemonic is shown once. Don't paste it into chats or tickets:\n  %s\n", mnemonic)
+}
+
+// readHidden reads a secret without echo on a terminal.
+func readHidden(r *bufio.Reader, out io.Writer, prompt string) (string, error) {
+	fmt.Fprint(out, prompt)
+	if fd := int(os.Stdin.Fd()); term.IsTerminal(fd) {
+		b, err := term.ReadPassword(fd)
+		fmt.Fprintln(out)
+		return string(b), err
+	}
+	line, err := r.ReadString('\n')
+	if err != nil && line == "" {
+		return "", err
+	}
+	return line, nil
 }

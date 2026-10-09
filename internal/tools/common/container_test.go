@@ -2,6 +2,7 @@ package common
 
 import (
 	"context"
+	"github.com/abhijitkrm/cometcli/internal/keys"
 	"github.com/cosmos/btcutil/bech32"
 	"os"
 	"strings"
@@ -185,5 +186,34 @@ func TestMessageAddressAndSignerAgree(t *testing.T) {
 	}
 	if acct != b.Address() || picks != 1 {
 		t.Fatalf("message %s, signer %s, asked %d times", acct, b.Address(), picks)
+	}
+}
+
+// The node's keyring holds the operator key under some name we don't
+// know: signing goes by the operator account's address.
+func TestContainerSignsByOperatorAddress(t *testing.T) {
+	n, c, _ := containerSetup(t, "test")
+	c.Profile.Signer = config.Signer{} // no key names anywhere
+	valoper, err := keys.ValAddress(fakenode.TestAddress())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Profile.Metadata["valoper"] = valoper
+	if _, err := BroadcastMsgs(c, send("cosmos1dest"), "", nil, tx.Options{}); err != nil {
+		t.Fatalf("container signing by address: %v", err)
+	}
+	if b, _, _ := n.Snapshot(); len(b) != 1 {
+		t.Fatalf("broadcasts = %d", len(b))
+	}
+}
+
+func TestCantSignExplainsTheFix(t *testing.T) {
+	_, c, _ := containerSetup(t, "test")
+	c.Profile.Service = config.Service{} // no container, no local key
+	c.Profile.Signer = config.Signer{}
+	c.Profile.Metadata["valoper"], _ = keys.ValAddress(fakenode.TestAddress())
+	_, err := BroadcastMsgs(c, send("cosmos1dest"), "", nil, tx.Options{})
+	if err == nil || !strings.Contains(err.Error(), "operator account") || !strings.Contains(err.Error(), "keys add --name operator --recover") || !strings.Contains(err.Error(), "don't look for keys yourself") {
+		t.Fatalf("err = %v", err)
 	}
 }

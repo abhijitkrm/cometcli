@@ -3,6 +3,8 @@
 package common
 
 import (
+	"bytes"
+	query "cosmossdk.io/api/cosmos/base/query/v1beta1"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -31,16 +33,93 @@ func Valoper(c *toolkit.Context, args toolkit.Args) (string, error) {
 	if c.Profile != nil && c.Profile.Metadata["valoper"] != "" {
 		return c.Profile.Metadata["valoper"], nil
 	}
+	// the node knows which validator it is: its consensus key is on chain
+	if v, err := ValoperFromNode(c); err == nil {
+		return v, nil
+	} else if c.Profile == nil || c.Profile.Signer.Key == "" {
+		return "", fmt.Errorf("can't tell which validator this node is (%v) — pass --validator <valoper>, or save it: cometcli profile add %s --valoper <valoper>", err, profileName(c))
+	}
 	tb, err := c.Tx()
 	if err != nil {
-		return "", fmt.Errorf("pass --validator <valoper> or configure signer.key: %w", err)
+		return "", fmt.Errorf("can't tell which validator this node is — pass --validator <valoper>, or save it: cometcli profile add %s --valoper <valoper> (%v)", profileName(c), err)
 	}
 	return tb.ValAddress()
+}
+
+func profileName(c *toolkit.Context) string {
+	if c.Profile != nil && c.Profile.Name != "" {
+		return c.Profile.Name
+	}
+	return "<profile>"
+}
+
+// identify learns which validator the node is before a signer is picked,
+// so the signer can be matched to the operator account.
+func identify(c *toolkit.Context) {
+	if c.Profile != nil && c.Profile.Metadata["valoper"] == "" {
+		_, _ = ValoperFromNode(c)
+	}
+}
+
+// ValoperFromNode finds the validator this node signs for: the node's
+// consensus address (CometBFT status) matched against every validator's
+// consensus key on chain. The result is remembered on the profile for
+// the rest of the process (not saved to disk — init does that).
+func ValoperFromNode(c *toolkit.Context) (string, error) {
+	if c.Profile == nil {
+		return "", fmt.Errorf("no profile")
+	}
+	cc, err := c.Comet()
+	if err != nil {
+		return "", err
+	}
+	st, err := cc.Status(c)
+	if err != nil {
+		return "", err
+	}
+	want := []byte(st.ValidatorInfo.Address)
+	if len(want) == 0 {
+		return "", fmt.Errorf("the node reports no consensus key")
+	}
+	g, err := c.GRPC()
+	if err != nil {
+		return "", err
+	}
+	var key []byte
+	for {
+		res, err := g.Staking.Validators(c, &stakingv1beta1.QueryValidatorsRequest{Pagination: &query.PageRequest{Key: key, Limit: 200}})
+		if err != nil {
+			return "", err
+		}
+		for _, v := range res.Validators {
+			if v.ConsensusPubkey == nil {
+				continue
+			}
+			pub := protowireFieldBytes(v.ConsensusPubkey.Value, 1)
+			if pub == nil {
+				continue
+			}
+			sum := sha256.Sum256(pub)
+			if bytes.Equal(sum[:20], want) {
+				if c.Profile.Metadata == nil {
+					c.Profile.Metadata = map[string]string{}
+				}
+				c.Profile.Metadata["valoper"] = v.OperatorAddress
+				return v.OperatorAddress, nil
+			}
+		}
+		if res.Pagination == nil || len(res.Pagination.NextKey) == 0 {
+			break
+		}
+		key = res.Pagination.NextKey
+	}
+	return "", fmt.Errorf("no validator on chain uses this node's consensus key — it isn't a validator (yet), or runs a different key than the one registered")
 }
 
 // Account resolves the bech32 address of the key that will sign — the
 // same choice BroadcastMsgs uses, so messages and signature always agree.
 func Account(c *toolkit.Context) (string, error) {
+	identify(c)
 	tb, err := c.TxSigner()
 	if err != nil {
 		return "", err
@@ -132,6 +211,7 @@ func TxOpts(a toolkit.Args) tx.Options {
 // The tx Doc (decoded messages, fee, gas) is always shown before approval.
 func BroadcastMsgs(c *toolkit.Context, msgs tx.Msgs, memo string, meta map[string]string, opt tx.Options) (*toolkit.Result, error) {
 	opt.Memo = memo
+	identify(c)
 	tb, err := c.TxSigner()
 	if err != nil {
 		return nil, err

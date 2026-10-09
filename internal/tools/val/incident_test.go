@@ -2,6 +2,7 @@ package val
 
 import (
 	"context"
+	"github.com/abhijitkrm/cometcli/internal/tools/common"
 	"os"
 	"path/filepath"
 	"strings"
@@ -153,5 +154,24 @@ func TestGatherFallsBackWhenNodeCantAnswer(t *testing.T) {
 	}
 	if !f.Jailed || !c2.GRPCFallback {
 		t.Fatalf("jailed=%v fallback=%v", f.Jailed, c2.GRPCFallback)
+	}
+}
+
+// No saved valoper and a signer key that isn't the operator: the node's
+// consensus key still identifies the validator (the EC2 case).
+func TestValidatorFoundFromTheNodeItself(t *testing.T) {
+	_, c, valoper, _ := setupChain(t)
+	c.Profile.Metadata["valoper"] = ""
+	c.Profile.Signer.Key = "unrelated"
+	got, err := common.Valoper(c, toolkit.Args{})
+	if err != nil || got != valoper {
+		t.Fatalf("valoper = %q, %v; want %q", got, err, valoper)
+	}
+	if c.Profile.Metadata["valoper"] != valoper {
+		t.Fatal("not remembered on the profile")
+	}
+	res, err := (statusTool{}).Run(c, toolkit.Args{})
+	if err != nil || !strings.Contains(res.Text, valoper) {
+		t.Fatalf("val.status without a valoper: %v %v", res, err)
 	}
 }

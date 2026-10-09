@@ -329,6 +329,19 @@ type stakingSrv struct {
 	n *Node
 }
 
+// Validators lists the node's validator plus another one, so lookups by
+// consensus key must actually match.
+func (s *stakingSrv) Validators(_ context.Context, _ *stakingv1beta1.QueryValidatorsRequest) (*stakingv1beta1.QueryValidatorsResponse, error) {
+	s.n.mu.Lock()
+	defer s.n.mu.Unlock()
+	other := &stakingv1beta1.Validator{OperatorAddress: "cosmosvaloper1other", ConsensusPubkey: &anypb.Any{TypeUrl: "/cosmos.crypto.ed25519.PubKey", Value: []byte{0x0a, 0x20, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}}}
+	vals := []*stakingv1beta1.Validator{other}
+	if s.n.Validator != nil {
+		vals = append(vals, s.n.Validator)
+	}
+	return &stakingv1beta1.QueryValidatorsResponse{Validators: vals}, nil
+}
+
 func (s *stakingSrv) Validator(_ context.Context, r *stakingv1beta1.QueryValidatorRequest) (*stakingv1beta1.QueryValidatorResponse, error) {
 	s.n.mu.Lock()
 	defer s.n.mu.Unlock()
