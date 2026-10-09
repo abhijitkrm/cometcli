@@ -89,6 +89,9 @@ func newChatPane(c *toolkit.Context, reg *toolkit.Registry, appr *tuiApprover, s
 	} else {
 		ag.OnEvent = func(e agent.Event) { p.push(evAgent{e}) }
 		p.agent = ag
+		if !ag.HasModel() {
+			p.append("info", "no agent provider — known questions are answered locally; for the rest set one: cometcli config set agent.provider groq")
+		}
 		var notes []string
 		for _, fn := range setup {
 			note, err := fn(ag)

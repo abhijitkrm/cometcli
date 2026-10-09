@@ -262,6 +262,38 @@ cometcli network check --network primium-1 --nodes val1,archive1
 | archive | `pruning = nothing` (app.toml or `--pruning nothing`) · `tx_index = kv` · with `--prod`: CORS/unlock hardening |
 | rpc | `tx_index = kv` · with `--prod`: CORS/unlock hardening |
 
+### Creating a new network
+
+```bash
+cometcli network import run-genesis/network-config.env --chain-id mychain-1     # the new network's spec
+cometcli profile add v1 --ssh-host 203.0.113.1 --service docker --unit primium-validator --role validator
+#   … one profile per genesis validator (build the image on each: upgrade build)
+cometcli genesis create mychain-1 --validators v1,v2,v3,v4 --keyring file --accounts treasury.txt
+```
+
+`genesis create` runs node-setup's distributed genesis workflow, with cometcli as the
+coordinator:
+
+1. **On each validator's own host:** `init` in the image, so the node and consensus keys
+   stay there, and the operator key goes into the node's own keyring.
+2. **Base genesis**, built from the spec:
+   - staking, gov, slashing, mint, distribution and feemarket parameters
+   - EVM precompiles (by name, sorted), access control and erc20
+   - denom metadata and block gas
+   - every validator funded, plus `--accounts` (lines of `<address> <amount>`, bech32 or 0x)
+3. **Each gentx signed on its own host.** Only the gentx comes back.
+4. **`collect-gentxs` and strict `validate-genesis`.**
+5. **Start every node:**
+   - the final genesis is installed everywhere, and also saved for later joins
+   - configs are rendered for the validator role, with every other validator as a peer
+   - compose files are written and every node starts
+6. **Wait for blocks.**
+
+Mnemonics are shown only on your terminal, or written to `--mnemonics-to <dir>`
+(mode 0600). Existing node homes are never overwritten. Several validators on one machine:
+`--docker-network <net> --port-offset N --port-step 10 --home '~/nodes/{profile}'`.
+Back up each validator's `priv_validator_key.json` off-machine afterwards.
+
 ### Adding nodes to a network
 
 ```bash

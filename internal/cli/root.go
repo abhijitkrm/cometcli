@@ -79,7 +79,7 @@ status, cometcli doctor, cometcli tx unjail) and a tool the agent calls.`,
 		}
 		root.AddCommand(c)
 	}
-	root.AddCommand(profileCmd(), auditCmd(), versionCmd(), initCmd(), sessionsCmd(), oneCmd(reg), configCmd(), trustCmd(), watchCmd(reg), drillCmd(reg), sshCmd())
+	root.AddCommand(profileCmd(), auditCmd(), versionCmd(), initCmd(), sessionsCmd(), oneCmd(reg), configCmd(), trustCmd(), watchCmd(reg), drillCmd(reg), sshCmd(), genesisCmd(reg))
 	root.AddCommand(extra...)
 	return root
 }

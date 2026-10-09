@@ -12,7 +12,7 @@ import (
 )
 
 func networkImportCmd() *cobra.Command {
-	var naming, repo, fromNode string
+	var naming, repo, fromNode, chainID string
 	var force bool
 	cmd := &cobra.Command{
 		Use:   "import <network-config.env> [more.env …]",
@@ -56,6 +56,9 @@ chain and every node against. Keys with no spec field are kept under extra.`,
 			if naming != "" {
 				spec.Image.Naming = naming
 			}
+			if chainID != "" {
+				spec.Chain.ID = chainID // a new network from an existing one's settings
+			}
 			if repo != "" {
 				spec.Image.Repo = repo
 			}
@@ -93,6 +96,7 @@ chain and every node against. Keys with no spec field are kept under extra.`,
 	cmd.Flags().StringVar(&naming, "image-naming", "", "how images built from releases are named, e.g. primium-{tag}")
 	cmd.Flags().StringVar(&repo, "repo", "", "official source repo (default cosmos/evm)")
 	cmd.Flags().BoolVar(&force, "force", false, "replace an existing spec")
+	cmd.Flags().StringVar(&chainID, "chain-id", "", "use this chain id (a new network with these settings)")
 	cmd.Flags().StringVar(&fromNode, "from-node", "", "describe the network from this running node's profile, and save its genesis.json")
 	return cmd
 }
