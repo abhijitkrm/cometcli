@@ -208,7 +208,7 @@ type convertTool struct{}
 
 func (convertTool) Name() string { return "keys.convert" }
 func (convertTool) Desc() string {
-	return "Convert an address: bech32 ↔ 0x hex"
+	return "Convert an address between its forms: account (cosmos1…), validator operator (cosmosvaloper1…) and 0x hex"
 }
 func (convertTool) Schema() map[string]any {
 	return toolkit.ObjSchema(map[string]any{
@@ -245,7 +245,19 @@ func (convertTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, err
 		if err != nil {
 			return nil, err
 		}
-		fmt.Fprintf(&b, "bech32: %s\nhex:    %s\n", addr, hex)
+		hrp := addr[:strings.LastIndex(addr, "1")]
+		if strings.HasSuffix(hrp, "valcons") {
+			fmt.Fprintf(&b, "consensus: %s\nhex:       %s\n(a consensus address is derived from the consensus key — it has no account form)\n", addr, hex)
+		} else {
+			// an account and its validator operator share the same bytes
+			base := strings.TrimSuffix(hrp, "valoper")
+			var raw []byte
+			fmt.Sscanf(hex, "0x%x", &raw)
+			k := keys.Key{Address: raw}
+			acc, _ := k.Bech32(base)
+			val, _ := k.Bech32(base + "valoper")
+			fmt.Fprintf(&b, "account:  %s\nvaloper:  %s\nhex:      %s\n", acc, val, hex)
+		}
 	}
 	return &toolkit.Result{Text: b.String(), Data: map[string]any{"input": addr}}, nil
 }

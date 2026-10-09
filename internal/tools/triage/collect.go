@@ -205,8 +205,19 @@ func collectComet(c *toolkit.Context, r *Report, set func(string, any)) error {
 	if ni, err := cc.NetInfo(c); err == nil {
 		set("node.peers", float64(ni.NPeers))
 	}
+	// average block time over the last 100 blocks
+	if h := st.SyncInfo.LatestBlockHeight; h > 101 {
+		back := h - 100
+		if b, err := cc.Block(c, &back); err == nil && b.Block != nil {
+			if d := st.SyncInfo.LatestBlockTime.Sub(b.Block.Time); d > 0 {
+				set("node.block_time_s", round2(d.Seconds()/100))
+			}
+		}
+	}
 	return nil
 }
+
+func round2(f float64) float64 { return float64(int64(f*100+0.5)) / 100 }
 
 func collectChain(c *toolkit.Context, r *Report, set func(string, any)) error {
 	if c.Profile == nil || c.Profile.Endpoints.GRPC == "" {

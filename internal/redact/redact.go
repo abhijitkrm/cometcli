@@ -46,7 +46,7 @@ func Text(s string) string {
 
 // hashLabelRe ends with a label that marks the following hex as a hash
 // (tx, block, app hash): public data the operator needs, not a key.
-var hashLabelRe = regexp.MustCompile(`(?i)(hash["']?\s*(:|=)?\s*["']?|\btxs?\s+(get\s+)?(--hash\s+)?|\b(query|q)\s+tx\s+(--type[= ]hash\s+)?)$`)
+var hashLabelRe = regexp.MustCompile("(?i)(hash[\"'`*]*\\s*(:|=|\\bis\\b|\\bwas\\b)?\\s*[\"'`*]*\\s*(0x)?|\\btxs?\\s+(get\\s+)?(--hash\\s+)?|\\b(query|q)\\s+tx\\s+(--type[= ]hash\\s+)?)$")
 
 // scrubHex64 redacts 64-char hex (a private key's shape) unless it is
 // labelled as a hash: "tx hash: AB…", "txhash=…", "\"hash\": \"0x…\"".

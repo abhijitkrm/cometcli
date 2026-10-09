@@ -1431,9 +1431,9 @@ func todoLines(ts []agent.Todo) string {
 	return strings.Join(out, "\n")
 }
 
-// verbs for the spinner, one picked per turn
-var verbs = []string{"Thinking", "Pondering", "Investigating", "Digging", "Checking", "Inspecting", "Crunching",
-	"Mulling", "Percolating", "Synthesizing", "Ruminating", "Deliberating", "Tinkering", "Sleuthing", "Untangling"}
+// verbs for the spinner, one picked per turn — comet-flavoured
+var verbs = []string{"Orbiting", "Charting", "Stargazing", "Tracing the tail", "Plotting a course", "Scanning the sky",
+	"Streaking", "Navigating", "Surveying", "Triangulating", "Observing", "Aligning", "Mapping the orbit", "Sweeping the sky"}
 
 func lastLines(s string, n int) string {
 	lines := strings.Split(s, "\n")

@@ -44,6 +44,13 @@ func (c *Context) containerKey() string {
 	if k := c.Profile.Signer.ContainerKey; k != "" {
 		return k
 	}
+	// evmd takes an address wherever it takes a key name: the operator
+	// account finds the right key whatever it's called in the keyring
+	if v := c.Profile.Metadata["valoper"]; v != "" {
+		if acc, err := keys.AccFromValoper(v); err == nil {
+			return acc
+		}
+	}
 	return c.Profile.Signer.Key
 }
 
@@ -136,9 +143,38 @@ func (c *Context) chooseSigner() (*tx.Builder, error) {
 	case localErr == nil:
 		return localB, nil
 	case containerOK:
-		return c.containerBuilder()
+		b, err := c.containerBuilder()
+		if err != nil {
+			return nil, c.cantSign(localErr, err)
+		}
+		return b, nil
 	}
-	return nil, fmt.Errorf("no key can sign for profile %q — import the operator key (`cometcli keys add --recover`, then set signer.key) or point signer.container / signer.container_key at the node container's keyring (%v)", c.Profile.Name, localErr)
+	return nil, c.cantSign(localErr, nil)
+}
+
+// cantSign explains, once and completely, why nothing can sign for this
+// validator and how to fix it — so nobody goes hunting through keyrings.
+func (c *Context) cantSign(localErr, containerErr error) error {
+	who := "the signing account"
+	if v := c.Profile.Metadata["valoper"]; v != "" {
+		if acc, err := keys.AccFromValoper(v); err == nil {
+			who = "the operator account " + acc + " (validator " + v + ")"
+		}
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "no key available to sign as %s.", who)
+	if localErr != nil {
+		fmt.Fprintf(&b, "\n  - cometcli's keyring: %v", localErr)
+	}
+	if containerErr != nil {
+		fmt.Fprintf(&b, "\n  - node container %s: %v", c.signerContainer(), containerErr)
+	} else if c.signerContainer() == "" {
+		b.WriteString("\n  - node container: none configured")
+	}
+	fmt.Fprintf(&b, "\nfix (operator): import the operator key — `cometcli keys add --name operator --recover` then `cometcli profile add %s --signer operator` —", c.Profile.Name)
+	b.WriteString(" or, if the node's own keyring has it under another home/keyring, set signer.container_home / signer.container_keyring.")
+	b.WriteString("\nThis is a setup step only the operator can do: stop and tell them; don't look for keys yourself.")
+	return fmt.Errorf("%s", b.String())
 }
 
 // containerBuilder sets up signing inside the node container: it detects
