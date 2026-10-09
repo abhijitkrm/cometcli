@@ -68,8 +68,19 @@ func (Triage) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
 	base := LoadKB(c)
 	hits := base.Match(r.Signals, r.Chain)
 	return &toolkit.Result{Text: Render(r, hits, a.String("signals", "")), Data: map[string]any{
-		"chain": r.Chain, "signals": r.Signals, "sources": r.Sources, "cases": hitIDs(hits),
+		"chain": r.Chain, "signals": r.Signals, "sources": r.Sources, "cases": hitIDs(hits), "roots": rootIDs(hits),
 	}}, nil
+}
+
+// rootIDs are the incident cases nothing else explains, best first.
+func rootIDs(hits []kb.Hit) []string {
+	var ids []string
+	for _, h := range hits {
+		if h.SymptomOf == "" && h.Case.Kind != "advisory" {
+			ids = append(ids, h.Case.ID)
+		}
+	}
+	return ids
 }
 
 func hitIDs(hits []kb.Hit) []string {

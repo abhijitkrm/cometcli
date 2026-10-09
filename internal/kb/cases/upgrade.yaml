@@ -60,6 +60,12 @@
     - left over from a manual coordinated upgrade
   fix:
     - "[change] set halt-height = 0 after the coordinated halt is done; restart"
+  playbook:
+    - {do: bash, args: {command: "f={home}/config/app.toml && sed 's/^halt-height = .*/halt-height = 0/' \"$f\" > \"$f.cometcli-tmp\" && cat \"$f.cometcli-tmp\" > \"$f\" && rm \"$f.cometcli-tmp\" && grep '^halt-height' \"$f\"", description: "set halt-height = 0 in app.toml"}, note: "clear the leftover halt-height"}
+    - {do: node.service, args: {action: restart}, note: "restart so the node picks it up"}
+    - {do: wait.until, args: {condition: synced, timeout: 1800}, note: "wait until it has caught up"}
+    - {do: wait.until, args: {condition: unjailable, timeout: 1800}, when: "val.jailed == true", note: "wait out the jail period"}
+    - {do: val.unjail, when: "val.jailed == true", note: "unjail (asks you)"}
   test:
     signals: {app.blocks_to_halt_height: 200, app.halt_height: 1200}
 

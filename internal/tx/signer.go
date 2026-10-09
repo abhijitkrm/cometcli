@@ -39,9 +39,19 @@ type LocalSigner struct {
 func (s *LocalSigner) Address() string  { return s.Addr }
 func (s *LocalSigner) Describe() string { return "cometcli keyring (" + s.Key.Name + ")" }
 
-// SimBytes signs for real — simulation of a signed tx is the most faithful.
-func (s *LocalSigner) SimBytes(ctx context.Context, b *Builder, p *Prepared) ([]byte, error) {
-	return s.Sign(ctx, b, p)
+// SimBytes builds an unsigned tx carrying the public key: the SDK skips
+// signature checks when simulating, and the key isn't touched before the
+// operator approves the signature.
+func (s *LocalSigner) SimBytes(_ context.Context, b *Builder, p *Prepared) ([]byte, error) {
+	pk, err := s.pubKeyAny()
+	if err != nil {
+		return nil, err
+	}
+	authInfo, err := b.authInfo(pk, p.Opt, p.Seq)
+	if err != nil {
+		return nil, err
+	}
+	return proto.Marshal(&txv1beta1.TxRaw{BodyBytes: p.Body, AuthInfoBytes: authInfo, Signatures: [][]byte{{}}})
 }
 
 func (s *LocalSigner) Sign(_ context.Context, b *Builder, p *Prepared) ([]byte, error) {

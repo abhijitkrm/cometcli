@@ -323,6 +323,21 @@ agent.
   operator-only.
 - **Redaction** — keys, mnemonics, JWTs, bearer tokens and URL credentials are
   scrubbed from everything entering and leaving the agent (tx hashes stay visible).
+- **Egress gate** — the last check before any request reaches a model provider:
+  - Anything still carrying key material is withheld whole, never partly sent. This
+    covers PEM/OpenSSH keys, consensus keys, mnemonics, keystores, keyring entries and
+    API tokens.
+  - A message from you containing a mnemonic isn't sent at all.
+  - On validators (`agent.egress: strict`, the default) the model never sees raw shell,
+    file or log output. It gets a local summary instead: identifiers masked, repeats
+    folded.
+- **Key access** — every signature is approved on its own. The approval shows the
+  account, which key and where it lives, the decoded messages, the fee and why. It is
+  never auto-approved, in any mode. Remote (Telegram) approvals of a key use expire in
+  5 minutes.
+- **Local answers** — known questions ("is anyone jailed?", "how many peers?") and
+  known incidents with a playbook are answered by cometcli itself with no model call.
+  `/llm` asks the model anyway; `/route` shows why a prompt went where it did.
 - **Audit** — every tool call, shell command, prompt and transaction lands in
   `~/.cometcli/audit/YYYY-MM-DD.jsonl` (`cometcli audit` to tail it).
 - **Bounded execution** — every tool runs under a deadline; long requests pause
@@ -338,6 +353,7 @@ credentials       # API keys saved by `config set-key` (0600)
 settings.json     # permission rules, hooks, MCP servers (also per project: .cometcli/)
 COMET.md          # memory the agent always reads (also per project)
 kb/               # your own knowledge-base cases
+intents/          # your own known questions (answered without a model call)
 history/          # triage signal history per profile (30 days)
 incidents/        # incident records and postmortems per profile
 keys/             # ops keyring (file backend)

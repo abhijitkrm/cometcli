@@ -223,6 +223,14 @@ type AgentConf struct {
 	RedactHosts []string `yaml:"redact_hosts,omitempty"`
 	// RedactEndpoints also masks the profile's own endpoint/SSH hosts.
 	RedactEndpoints bool `yaml:"redact_endpoints,omitempty"`
+	// Egress is how much raw output reaches the model: strict (shell,
+	// file and log output only as local summaries) or filtered (raw after
+	// redaction). Default: strict for validators, filtered otherwise. Key
+	// material is withheld in every mode.
+	Egress string `yaml:"egress,omitempty"`
+	// Router answers known questions (~/.cometcli/intents and built-ins)
+	// without a model call: on (default) | off.
+	Router string `yaml:"router,omitempty"`
 	// NoStream disables token streaming for endpoints that mishandle it.
 	NoStream bool `yaml:"no_stream,omitempty"`
 	// Effort is the reasoning depth: low | medium | high | xhigh | max

@@ -218,6 +218,28 @@ list of them:
     signals: {node.peers: 0, config.pex: false, logs.peer_net: 3}   # must match
 ```
 
+A case can also carry a **playbook**: the fix as steps cometcli runs itself on
+`/incident` when the case is the clear root cause (the only root, or the most severe), with
+no model call:
+
+```yaml
+  playbook:
+    - {do: node.logs, args: {lines: 40}, note: "the last lines before it stopped"}
+    - {do: node.service, args: {action: start}}
+    - {do: wait.until, args: {condition: synced, timeout: 1800}}
+    - {do: val.unjail, when: "val.jailed == true", note: "asks you"}
+    - {do: bash, args: {command: "docker update --memory 4g {unit}"}}
+```
+
+- `do` is any tool.
+- `when` is a condition on the triage signals; the step is skipped if it doesn't hold.
+- String arguments may use `{unit}`, `{home}`, `{binary}` and `{container_home}` from the
+  profile.
+- Every step goes through the normal gates: shell commands are classified, changes ask,
+  and transactions ask for key access.
+- A declined step stops the playbook. A failed step hands the incident to the model with
+  what was done.
+
 Conditions are `<signal> <op> <value>` with `== != > >= < <= contains exists missing`;
 values are numbers, `true`/`false`, or strings. A signal triage couldn't collect never
 satisfies a condition (except `missing`). `cometcli node triage` prints every signal name
@@ -225,3 +247,32 @@ and value — write conditions against those. Fix steps must start with `[read]`
 or `[tx]`; the agent still goes through the normal approvals for each. Ranking: more matched
 conditions first, then severity. The built-in suite checks every case's `test` fixture
 ranks it in the top 3 and that a healthy node matches nothing.
+
+## Known questions
+
+Questions cometcli answers without a model call live in an intent catalog. Built-ins ship
+in the binary (`internal/router/intents/`). Yours go in `~/.cometcli/intents/*.yaml`; the
+same `id` overrides a built-in.
+
+```yaml
+- id: sentry-peers
+  title: peers on the sentries
+  scope: node                       # node: one node | chain: any node of the chain
+  patterns: ['^sentry peers$']      # regexes over the lowercased prompt; a hit routes here
+  examples:                         # phrasings; a close enough prompt routes here
+    - how many peers do the sentries have
+  steps:                            # read-only tools only (observe/diagnose)
+    - {as: p, tool: node.peers}
+  answer: |                         # Go text/template; each step is .<as> with .Text .Data .Err
+    **{{.node}}** has {{get .p.Data "count"}} peers.
+    {{trim .p.Text}}
+  ttl: 30s                          # reuse the answer this long
+```
+
+Some prompts always go to the model, whatever matches:
+- open-ended ones: why, how do I, explain, should I, …
+- actions: unjail, restart, vote yes, …
+- multi-line prompts and long prompts
+
+If a step fails, the model answers instead. Template functions: `get`, `trim`, `lines`,
+`filter`, `count`.

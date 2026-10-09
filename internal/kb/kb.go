@@ -46,6 +46,10 @@ type Case struct {
 	Verify   []string `yaml:"verify,omitempty"`
 	Warnings []string `yaml:"warnings,omitempty"`
 	Refs     []string `yaml:"refs,omitempty"`
+	// Playbook is the fix as steps cometcli runs itself, with no model,
+	// when this case is the clear root cause. Changes and transactions in
+	// it still ask the operator.
+	Playbook []PlayStep `yaml:"playbook,omitempty"`
 	Test     struct {
 		Signals Signals `yaml:"signals"`
 	} `yaml:"test,omitempty"`
@@ -56,6 +60,23 @@ type Case struct {
 }
 
 var severityRank = map[string]int{"critical": 4, "high": 3, "medium": 2, "low": 1}
+
+// PlayStep is one playbook step: a registry tool and its arguments.
+// String arguments may use {unit}, {home}, {binary} and {container_home}
+// from the profile.
+type PlayStep struct {
+	Do   string         `yaml:"do"`
+	Args map[string]any `yaml:"args,omitempty"`
+	// When is a signal condition evaluated on the triage signals; the step
+	// is skipped when it doesn't hold.
+	When string `yaml:"when,omitempty"`
+	Note string `yaml:"note,omitempty"` // what the step is for, shown to the operator
+
+	when *Cond
+}
+
+// Applies reports whether the step runs for these signals.
+func (s *PlayStep) Applies(sig Signals) bool { return s.when == nil || s.when.Eval(sig) }
 
 // compile parses and checks a case.
 func (c *Case) compile() error {
@@ -89,6 +110,20 @@ func (c *Case) compile() error {
 			return fmt.Errorf("case %s: %w", c.ID, err)
 		}
 		c.any = append(c.any, cond)
+	}
+	for i := range c.Playbook {
+		st := &c.Playbook[i]
+		if st.Do == "" {
+			return fmt.Errorf("case %s: playbook step %d has no tool (do)", c.ID, i+1)
+		}
+		st.when = nil
+		if st.When != "" {
+			cond, err := ParseCond(st.When)
+			if err != nil {
+				return fmt.Errorf("case %s: playbook step %d: %w", c.ID, i+1, err)
+			}
+			st.when = &cond
+		}
 	}
 	for _, x := range c.Explains {
 		if x == c.ID {
@@ -324,6 +359,18 @@ func (c *Case) Render() string {
 	section("fix", c.Fix)
 	section("verify", c.Verify)
 	section("NEVER", c.Warnings)
+	var play []string
+	for _, st := range c.Playbook {
+		line := st.Do
+		if st.Note != "" {
+			line += " — " + st.Note
+		}
+		if st.When != "" {
+			line += " (when " + st.When + ")"
+		}
+		play = append(play, line)
+	}
+	section("playbook (run by cometcli itself on /incident when this is the clear root cause)", play)
 	if len(c.Refs) > 0 {
 		fmt.Fprintf(&b, "refs: %s\n", strings.Join(c.Refs, " "))
 	}

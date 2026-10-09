@@ -149,5 +149,11 @@
     - "[change] restart the container if it's not recovering on its own"
   verify:
     - "proc.restarts stops increasing; proc.mem_used_pct_of_limit well below 90; wait.until synced"
+  playbook:
+    - {do: bash, args: {command: "docker update --memory 4g --memory-swap 4g {unit}", description: "raise the container memory limit to 4 GB"}, note: "raise the memory limit (also fix it in compose so it survives recreation)"}
+    - {do: node.service, args: {action: restart}, note: "restart with the new limit"}
+    - {do: wait.until, args: {condition: synced, timeout: 1800}, note: "wait until it has caught up"}
+    - {do: wait.until, args: {condition: unjailable, timeout: 1800}, when: "val.jailed == true", note: "wait out the jail period"}
+    - {do: val.unjail, when: "val.jailed == true", note: "unjail (asks you)"}
   test:
     signals: {proc.mem_limit_mb: 120, proc.oom_kills: 14, proc.restarts: 7}

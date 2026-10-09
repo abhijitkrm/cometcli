@@ -1,0 +1,84 @@
+- id: jailed-validators
+  title: jailed validators on the chain
+  scope: chain
+  patterns:
+    - '^(is )?any(one|body)? (validator )?jailed$'
+    - '^(list )?jailed validators?$'
+    - '^who is jailed$'
+  examples:
+    - is anyone jailed
+    - are any validators jailed
+    - which validators are jailed
+    - list jailed validators
+  steps:
+    - {as: j, tool: chain.validators, args: {status: jailed}}
+  answer: |
+    {{$n := get .j.Data "count"}}{{if $n}}**{{$n}} validator(s) jailed:**{{else}}**No validator is jailed.**{{end}}
+    {{trim .j.Text}}
+
+- id: validator-count
+  title: active validator count
+  scope: chain
+  patterns:
+    - '^(what is the )?validators? count$'
+    - '^how many (active |bonded )?validators?( are there)?$'
+  examples:
+    - what is the validator count
+    - how many validators are in the active set
+    - how many bonded validators
+    - active set size
+  steps:
+    - {as: v, tool: chain.validators, args: {status: bonded}}
+  answer: |
+    **{{get .v.Data "count"}} bonded validators** on the chain.
+    {{trim .v.Text}}
+
+- id: proposals
+  title: proposals in voting
+  scope: chain
+  patterns:
+    - '^(open|active|current) (governance )?proposals?$'
+    - '^proposals?$'
+  examples:
+    - are there any open proposals
+    - active governance proposals
+    - what proposals are in voting
+    - list proposals
+  steps:
+    - {as: g, tool: chain.gov, args: {status: voting}}
+  answer: |
+    {{$n := count (get .g.Data "proposals")}}{{if $n}}**{{$n}} proposal(s) in voting:**{{else}}**No proposals in voting.**{{end}}
+    {{trim .g.Text}}
+
+- id: upgrade-plan
+  title: scheduled upgrade
+  scope: chain
+  patterns:
+    - '^(is there an? |any )?upgrade (plan|scheduled|planned)$'
+    - '^upgrade plan$'
+  examples:
+    - is there an upgrade scheduled
+    - any upgrade planned
+    - what is the next upgrade
+    - upgrade plan
+  steps:
+    - {as: u, tool: chain.upgrade-plan}
+  answer: |
+    {{if get .u.Data "plan"}}**Upgrade scheduled:**{{else}}**No upgrade scheduled.**{{end}}
+    {{trim .u.Text}}
+
+- id: slashing-params
+  title: slashing parameters
+  scope: chain
+  patterns:
+    - '^(slashing|chain) param(eter)?s?$'
+    - '^signed blocks window$'
+  examples:
+    - what are the slashing params
+    - what is the signed blocks window
+    - downtime jail duration
+    - chain params
+  steps:
+    - {as: p, tool: chain.params}
+  answer: |
+    {{trim .p.Text}}

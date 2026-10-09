@@ -99,6 +99,7 @@ type Node struct {
 	Proposals []*govv1.Proposal
 
 	Simulations int
+	simSigs     [][]byte // signatures of the latest simulated tx
 	Broadcasts  []Tx     // accepted to the mempool, in order
 	Rejected    []string // raw logs of rejected broadcasts
 	committed   map[string]*abciv1beta1.TxResponse
@@ -265,6 +266,10 @@ func (s *txSrv) Simulate(_ context.Context, r *txv1beta1.SimulateRequest) (*txv1
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.Simulations++
+	var tr txv1beta1.TxRaw
+	if proto.Unmarshal(r.TxBytes, &tr) == nil {
+		n.simSigs = tr.Signatures
+	}
 	d, err := n.verifyTx(r.TxBytes, n.AccNum, true)
 	if err != nil {
 		return nil, status.Error(codes.Unknown, err.Error())
@@ -467,4 +472,23 @@ func (n *Node) Profile(t testing.TB, algo string) *config.Profile {
 		t.Fatal(err)
 	}
 	return p
+}
+
+// LastSimSignatures is how many signatures the latest simulated tx had.
+func (n *Node) LastSimSignatures() int {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return len(n.simSigs)
+}
+
+// LastSimSigned reports whether the latest simulated tx was really signed.
+func (n *Node) LastSimSigned() bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	for _, s := range n.simSigs {
+		if len(s) > 0 {
+			return true
+		}
+	}
+	return false
 }

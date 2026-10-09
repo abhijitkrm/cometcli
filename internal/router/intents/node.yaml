@@ -1,0 +1,134 @@
+# Known questions answered without a model call. Each runs read-only
+# tools and renders a fixed answer. Add your own in ~/.cometcli/intents/.
+#
+#   patterns: regexes over the normalized prompt (lowercase, no punctuation)
+#   examples: phrasings; a prompt close enough to one routes here
+#   scope:    node (one specific node) | chain (any node of the chain)
+#   answer:   Go text/template; each step's result is .<as> with .Text,
+#             .Data and .Err; .node is the profile name
+
+- id: node-status
+  title: node height and sync
+  patterns:
+    - '^(node )?status$'
+    - '^(is (it|the node|my node) )?(synced|in sync|catching up)$'
+    - '^(what is the |current )?(block )?height$'
+  examples:
+    - is my node synced
+    - is the node catching up
+    - what height is the node at
+    - node sync status
+    - latest block height
+  steps:
+    - {as: st, tool: node.status}
+  answer: |
+    **{{.node}}** — {{if get .st.Data "catching_up"}}catching up, at height {{get .st.Data "height"}}{{else}}in sync at height {{get .st.Data "height"}}{{end}}
+    {{trim .st.Text}}
+
+- id: node-peers
+  title: peer count
+  patterns:
+    - '^(how many )?peers$'
+    - '^peer count$'
+  examples:
+    - how many peers do I have
+    - how many peers is the node connected to
+    - peer count
+    - list peers
+  steps:
+    - {as: p, tool: node.peers}
+  answer: |
+    **{{.node}}** has {{get .p.Data "count"}} peers{{if not (get .p.Data "listening")}} and is **not listening** for inbound connections{{end}}.
+    {{trim .p.Text}}
+
+- id: val-me
+  title: my validator's status
+  patterns:
+    - '^(is )?my validator (ok|okay|bonded|jailed|active|status)$'
+    - '^am i jailed$'
+    - '^validator status$'
+  examples:
+    - is my validator jailed
+    - is my validator bonded
+    - my validator status
+    - am I jailed
+    - is the validator active
+  steps:
+    - {as: v, tool: val.status}
+    - {as: s, tool: val.signing, optional: true}
+  answer: |
+    {{$j := get .v.Data "jailed"}}**{{get .v.Data "moniker"}}** ({{.node}}) is {{if $j}}**jailed**{{else}}{{get .v.Data "status"}}{{end}}.
+    {{trim .v.Text}}
+    {{if not .s.Err}}{{trim .s.Text}}{{end}}
+    {{if $j}}Run `/incident` to find why and recover it.{{end}}
+
+- id: val-signing
+  title: missed blocks and uptime
+  patterns:
+    - '^(missed blocks|uptime|signing info)$'
+  examples:
+    - how many blocks have I missed
+    - what is my uptime
+    - missed blocks count
+    - signing info
+  steps:
+    - {as: s, tool: val.signing}
+  answer: |
+    **{{.node}}** — {{get .s.Data "missed"}} missed in the {{get .s.Data "window"}}-block window ({{get .s.Data "uptime_pct"}}% uptime){{if get .s.Data "tombstoned"}}, **TOMBSTONED**{{end}}.
+    {{trim .s.Text}}
+
+- id: val-consensus
+  title: in consensus and signing
+  patterns:
+    - '^am i (signing|in consensus)$'
+    - '^(is my validator )?(signing|in consensus)$'
+  examples:
+    - am I signing blocks
+    - is my validator in consensus
+    - am I in the active set and signing
+  steps:
+    - {as: c, tool: val.consensus}
+  answer: |
+    **{{.node}}** {{if get .c.Data "in_consensus"}}is in consensus — signed {{get .c.Data "signed"}} of the last {{get .c.Data "checked"}} blocks{{else}}is **not** in consensus{{end}}.
+    {{trim .c.Text}}
+
+- id: val-rewards
+  title: rewards and commission
+  patterns:
+    - '^(my )?(rewards|commission)$'
+  examples:
+    - how much rewards do I have
+    - outstanding rewards and commission
+    - my commission
+  steps:
+    - {as: r, tool: val.rewards}
+  answer: |
+    **{{.node}}** rewards:
+    {{trim .r.Text}}
+
+- id: val-pending-votes
+  title: proposals I haven't voted on
+  patterns:
+    - '^(do i (need|have) to vote|pending votes|have i voted)$'
+  examples:
+    - do I need to vote on anything
+    - have I voted on the open proposals
+    - pending votes
+  steps:
+    - {as: v, tool: val.votes}
+  answer: |
+    {{$n := count (get .v.Data "pending_votes")}}{{if $n}}**{{$n}} proposal(s) still need your vote.**{{else}}No votes pending.{{end}}
+    {{trim .v.Text}}
+
+- id: balance
+  title: signer balance
+  patterns:
+    - '^(my |account )?balance$'
+  examples:
+    - what is my balance
+    - how much do I have in my account
+    - account balance
+  steps:
+    - {as: b, tool: chain.balance}
+  answer: |
+    {{trim .b.Text}}

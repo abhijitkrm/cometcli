@@ -16,8 +16,10 @@ import (
 	"github.com/abhijitkrm/cometcli/internal/audit"
 	"github.com/abhijitkrm/cometcli/internal/client/host"
 	"github.com/abhijitkrm/cometcli/internal/config"
+	"github.com/abhijitkrm/cometcli/internal/egress"
 	"github.com/abhijitkrm/cometcli/internal/hooks"
 	"github.com/abhijitkrm/cometcli/internal/redact"
+	"github.com/abhijitkrm/cometcli/internal/router"
 	"github.com/abhijitkrm/cometcli/internal/settings"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
 )
@@ -92,7 +94,11 @@ type Agent struct {
 	rounds    int             // model rounds in the latest Run
 	ownCtx    bool            // a.Ctx was built by SwitchScope
 	ext       *ext            // settings, hooks, commands, MCP servers
-	parent    *Agent          // set on subagents
+	catalog   *router.Catalog // known questions answered without a model call
+	answers   router.Cache
+	routes    RouteStats
+	lastRoute router.Match
+	parent    *Agent // set on subagents
 	def       *settings.AgentDef
 }
 
@@ -157,6 +163,11 @@ func New(c *toolkit.Context, reg *toolkit.Registry) (*Agent, error) {
 	}
 	a.WorkRoot = cwd
 	a.Tools = toolkit.NewSession("")
+	if d, err := config.Path("intents"); err == nil {
+		if a.catalog, err = router.Load(d); err != nil {
+			e.notes = append(e.notes, "intents: "+err.Error()+" — local answers are off")
+		}
+	}
 	a.ext = e
 	if a.Model == "" {
 		a.Model = modelOf(prov)
@@ -345,7 +356,22 @@ func (a *Agent) run(ctx context.Context, input string) (string, error) {
 		}
 	}
 	defer a.grantTurnRules()()
+	if f := egress.Scan(input); len(f) > 0 { // before redaction: refuse, don't half-send
+		a.withheld("your message", f)
+		return "", fmt.Errorf("not sent: your message contained key material (%s). cometcli never needs a key in chat — keys are used only through its signing tools, on this machine", egress.Kinds(f))
+	}
 	input = a.Redact.Text(input)
+	forced := strings.HasPrefix(input, forceModel)
+	input = strings.TrimPrefix(input, forceModel)
+	if strings.HasPrefix(input, incidentMarker) {
+		return a.runIncident(ctx, strings.TrimPrefix(input, incidentMarker))
+	}
+	if !forced && a.routerOn() {
+		if text, ok := a.routeLocal(ctx, input); ok {
+			return text, nil
+		}
+	}
+	a.routes.Model++
 	if lg := a.Audit(); lg != nil {
 		_ = lg.Log(audit.KindPrompt, a.profileName(), map[string]any{"text": input})
 	}
@@ -497,6 +523,7 @@ func (a *Agent) chat(ctx context.Context, req *Request) (*Response, error) {
 	ctx = WithRetryNotice(ctx, func(attempt int, wait time.Duration, reason string) {
 		a.emit(Event{Kind: EvNotice, Text: fmt.Sprintf("%s: %s — retrying in %s (attempt %d)", a.Provider.Name(), reason, wait.Round(100*time.Millisecond), attempt+1)})
 	})
+	a.guard(req)
 	if s, ok := a.Provider.(Streamer); ok && a.Stream {
 		return s.Stream(ctx, req, func(chunk string) {
 			a.emit(Event{Kind: EvDelta, Text: chunk})
@@ -570,6 +597,7 @@ func (a *Agent) execCall(ctx context.Context, call Call) Msg {
 	}
 
 	runCtx, cancel := a.toolCtx(ctx, t, args)
+	runCtx.Purpose = a.purpose()
 	var res *toolkit.Result
 	in := a.hookInput(hooks.PreToolUse)
 	in.ToolName, in.ToolInput = name, args
@@ -620,6 +648,9 @@ func (a *Agent) execCall(ctx context.Context, call Call) Msg {
 		text = clip(text, limit)                 // bound context growth
 		text = a.Redact.Text(text)
 	}
+	// what the model sees: on strict profiles raw output is replaced by a
+	// local summary (the operator's UI and the audit log keep the raw text)
+	llmText := egress.ForModel(a.egressMode(), name, text)
 	if lg := a.Audit(); lg != nil {
 		var data map[string]any
 		if res != nil {
@@ -635,7 +666,7 @@ func (a *Agent) execCall(ctx context.Context, call Call) Msg {
 	}
 	text += postNote
 	a.emit(Event{Kind: EvToolResult, Tool: name, Tier: t.Tier().String(), Text: firstLine(text), Output: preview(text)})
-	return Msg{Role: "tool", CallID: call.ID, ToolName: name, Text: text}
+	return Msg{Role: "tool", CallID: call.ID, ToolName: name, Text: llmText + postNote}
 }
 
 // toolCtx derives the per-call tool context: the turn's cancellation, a

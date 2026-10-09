@@ -379,7 +379,7 @@ func isDigits(s string) bool {
 
 // --- sensitive material --------------------------------------------------
 
-var protectedRe = regexp.MustCompile(`priv_validator_key\.json|node_key\.json|(^|/)\.?mnemonics?(\.txt)?(/|$)|mnemonic|keyring-(file|test|os)|/\.ssh/id_|\.cometcli/keys|\.gnupg/`)
+var protectedRe = regexp.MustCompile(`priv_validator_key\.json|node_key\.json|(^|/)\.?mnemonics?(\.txt)?(/|$)|mnemonic|keyring-(file|test|os)|/\.ssh/id_|\.cometcli/keys|\.gnupg/|(^|/)keystore(/|$)|(^|/)utc--[0-9]`)
 
 func protectedPath(word string) (bool, string) {
 	if m := protectedRe.FindString(strings.ToLower(word)); m != "" {

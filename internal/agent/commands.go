@@ -44,7 +44,9 @@ const CommandHelp = `  /mode [ops|accept-edits|readonly|bypass]  show or set the
   /reset, /clear                clear conversation, start a new audit session
   /status                       current setup: model, mode, scope, memory, MCP (+ live node snapshot in node mode)
   /compact [focus]              summarize the conversation to free context
-  /cost                         token usage for this session
+  /cost                         token usage for this session, and prompts answered locally
+  /llm <question>               ask the model even when cometcli knows the answer
+  /route                        why the last prompt was answered locally or sent to the model
   /effort [low|medium|high|xhigh|max|default]  show or set reasoning depth
   /permissions                  show permission rules
   /allow|/ask|/deny <rule>      add a rule for this session, e.g. /allow bash(docker logs:*)
@@ -274,12 +276,31 @@ func RunCommand(a *Agent, c *toolkit.Context, reg *toolkit.Registry, line string
 			return "compacted — the summary is attached to your next message", nil
 		}}, nil
 
+	case "/llm":
+		if err := needAgent(); err != nil {
+			return CmdResult{}, err
+		}
+		q := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), f[0]))
+		if q == "" {
+			return CmdResult{}, fmt.Errorf("usage: /llm <question> — ask the model even when cometcli knows the answer")
+		}
+		return CmdResult{Text: "/llm", Prompt: forceModel + q}, nil
+
+	case "/route":
+		if err := needAgent(); err != nil {
+			return CmdResult{}, err
+		}
+		return CmdResult{Text: a.RouteWhy()}, nil
+
 	case "/cost", "/usage":
 		if err := needAgent(); err != nil {
 			return CmdResult{}, err
 		}
 		u, last := a.Usage()
 		txt := fmt.Sprintf("input %s (cached %s) · output %s", humanTok(u.Input), humanTok(u.CacheRead), humanTok(u.Output))
+		if r := a.Routes(); r.Local+r.Model > 0 {
+			txt += fmt.Sprintf("\nprompts: %d answered locally (no tokens%s), %d sent to the model", r.Local+r.Cached, cachedNote(r.Cached), r.Model)
+		}
 		if last > 0 {
 			txt += fmt.Sprintf("\ncontext %s of %s — auto-compacts at %s", humanTok(last), humanTok(a.contextWindow()), humanTok(a.compactThreshold()))
 		}
@@ -484,6 +505,10 @@ func RunCommand(a *Agent, c *toolkit.Context, reg *toolkit.Registry, line string
 				prompt = "This is about one of the operator's nodes: call use_node with the right profile first.\n\n" + prompt
 			}
 		}
+		if name == "incident" && a.Node() && a.routerOn() {
+			// triage and known cases run locally first (runIncident)
+			prompt = incidentMarker + args
+		}
 		return CmdResult{Text: text, Prompt: prompt}, nil
 	}
 	return CmdResult{}, ErrUnknownCommand
@@ -547,4 +572,11 @@ func humanTok(n int) string {
 		return fmt.Sprintf("%.1fk", float64(n)/1e3)
 	}
 	return fmt.Sprint(n)
+}
+
+func cachedNote(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf(", %d from cache", n)
 }
