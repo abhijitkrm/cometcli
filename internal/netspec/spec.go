@@ -30,8 +30,10 @@ type Spec struct {
 	Genesis   Genesis   `yaml:"genesis"`
 	Consensus Consensus `yaml:"consensus"`
 	Services  Services  `yaml:"services"`
-	// MinGasPrice is the node's minimum-gas-prices amount in Chain.Denom.
+	// MinGasPrice is the node's minimum-gas-prices amount, in FeeDenom
+	// (the bond denom when that's empty — EVM chains often differ).
 	MinGasPrice string `yaml:"min_gas_price"`
+	FeeDenom    string `yaml:"fee_denom,omitempty"`
 	DBBackend   string `yaml:"db_backend"` // goleveldb | rocksdb
 	HostHome    string `yaml:"host_home,omitempty"`
 	// Extra keeps imported settings with no field yet, so nothing is lost.
@@ -434,4 +436,12 @@ func human(sec int64) string {
 // Sort orders findings worst first.
 func Sort(f []Finding) {
 	sort.SliceStable(f, func(i, j int) bool { return f[i].Sev > f[j].Sev })
+}
+
+// GasDenom is what fees are paid in.
+func (s *Spec) GasDenom() string {
+	if s.FeeDenom != "" {
+		return s.FeeDenom
+	}
+	return s.Chain.Denom
 }

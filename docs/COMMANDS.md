@@ -262,6 +262,41 @@ cometcli network check --network primium-1 --nodes val1,archive1
 | archive | `pruning = nothing` (app.toml or `--pruning nothing`) · `tx_index = kv` · with `--prod`: CORS/unlock hardening |
 | rpc | `tx_index = kv` · with `--prod`: CORS/unlock hardening |
 
+### Adding nodes to a network
+
+```bash
+cometcli network import --from-node val1                   # spec + genesis.json from a running node
+cometcli profile add arch1 --ssh-host 203.0.113.9 --service docker --unit primium-archive --role archive
+cometcli --profile arch1 node provision --peers_from val1,val2         # init, genesis, configs, compose, start
+cometcli --profile arch1 node provision --reconfigure                  # re-render configs of an existing node
+```
+
+`node provision` sets up a node on the profile's host, local or over SSH, following the
+spec:
+1. Checks the image is on the host. If not, build it first with `upgrade build`.
+2. Checks the node home is writable. If not, it prints the one-time `sudo chown`.
+3. Runs `init` in the image as the home's owner.
+4. Installs the network's genesis (from `--from-node`).
+5. Renders `config.toml`, `app.toml` and `client.toml` for the role. Only the needed keys
+   change; comments stay. The result passes `network check`.
+6. Writes `docker-compose.yml` into the node home and starts it:
+   - the command includes `--pruning nothing` for archives and the ws-origins flag
+   - validators publish RPC, REST, gRPC and EVM on 127.0.0.1 only; P2P is public
+   - the stop grace period is 60s
+7. Updates the profile.
+
+Peers come from `--peers` or from running nodes via `--peers_from`. For several nodes on
+one machine, use `--docker_network <net> --port_offset N`.
+
+**It refuses a home that already holds a validator key**, since re-initialising would replace
+its keys and state (a double-sign risk). `--reconfigure` re-renders configs only.
+
+For a validator, once it's synced:
+1. The operator creates its key in the node's own keyring, in their terminal.
+2. Fund it.
+3. Run `cometcli --profile <p> val create --amount <stake>`. The consensus key and moniker come
+   from the node, and commission is encoded the way the chain's cosmos-sdk version expects.
+
 ## Remote nodes over SSH
 
 Run cometcli on your laptop and manage a node on another machine. Every host

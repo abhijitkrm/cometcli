@@ -17,6 +17,7 @@ import (
 
 	authv1beta1 "cosmossdk.io/api/cosmos/auth/v1beta1"
 	bankv1beta1 "cosmossdk.io/api/cosmos/bank/v1beta1"
+	cmtservice "cosmossdk.io/api/cosmos/base/tendermint/v1beta1"
 	distv1beta1 "cosmossdk.io/api/cosmos/distribution/v1beta1"
 	govv1 "cosmossdk.io/api/cosmos/gov/v1"
 	govv1beta1 "cosmossdk.io/api/cosmos/gov/v1beta1"
@@ -41,6 +42,7 @@ type Conn struct {
 	Staking  stakingv1beta1.QueryClient
 	Tx       txv1beta1.ServiceClient
 	Upgrade  upgradev1beta1.QueryClient
+	Node     cmtservice.ServiceClient
 }
 
 // Dial connects. Endpoint may be "host:port" or "host:port;tls".
@@ -89,6 +91,7 @@ func DialVia(ctx context.Context, endpoint string, dial func(ctx context.Context
 		Staking:  stakingv1beta1.NewQueryClient(cc),
 		Tx:       txv1beta1.NewServiceClient(cc),
 		Upgrade:  upgradev1beta1.NewQueryClient(cc),
+		Node:     cmtservice.NewServiceClient(cc),
 	}, nil
 }
 

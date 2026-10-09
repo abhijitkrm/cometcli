@@ -8,10 +8,11 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/abhijitkrm/cometcli/internal/netspec"
+	"github.com/abhijitkrm/cometcli/internal/tools/networktool"
 )
 
 func networkImportCmd() *cobra.Command {
-	var naming, repo string
+	var naming, repo, fromNode string
 	var force bool
 	cmd := &cobra.Command{
 		Use:   "import <network-config.env> [more.env …]",
@@ -20,9 +21,26 @@ func networkImportCmd() *cobra.Command {
 complete; run-validator / run-archive ones fill in the rest) and writes
 ~/.cometcli/networks/<chain-id>.yaml — the spec network check compares the
 chain and every node against. Keys with no spec field are kept under extra.`,
-		Args: cobra.MinimumNArgs(1),
+		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var spec *netspec.Spec
+			var genesis []byte
+			if fromNode != "" {
+				flagProfile = fromNode
+				c, err := NewCtx(cmd, true)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if spec, genesis, err = networktool.FromNode(c); err != nil && spec == nil {
+					return err
+				} else if err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "warning: no genesis: %v\n", err)
+				}
+			}
+			if spec == nil && len(args) == 0 {
+				return fmt.Errorf("pass network-config.env files, or --from-node <profile>")
+			}
 			for _, f := range args {
 				raw, err := os.ReadFile(f)
 				if err != nil {
@@ -55,6 +73,16 @@ chain and every node against. Keys with no spec field are kept under extra.`,
 			}
 			out := cmd.OutOrStdout()
 			fmt.Fprintf(out, "network %s → %s (%d settings kept under extra)\n", spec.Chain.ID, p, len(spec.Extra))
+			if genesis != nil {
+				gp, err := networktool.GenesisPath(spec.Chain.ID)
+				if err == nil {
+					err = os.WriteFile(gp, genesis, 0o600)
+				}
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(out, "genesis (%d bytes) → %s\n", len(genesis), gp)
+			}
 			for _, f := range spec.Review(false) {
 				fmt.Fprintf(out, "%-4s %s\n", f.Sev, f.What)
 			}
@@ -65,6 +93,7 @@ chain and every node against. Keys with no spec field are kept under extra.`,
 	cmd.Flags().StringVar(&naming, "image-naming", "", "how images built from releases are named, e.g. primium-{tag}")
 	cmd.Flags().StringVar(&repo, "repo", "", "official source repo (default cosmos/evm)")
 	cmd.Flags().BoolVar(&force, "force", false, "replace an existing spec")
+	cmd.Flags().StringVar(&fromNode, "from-node", "", "describe the network from this running node's profile, and save its genesis.json")
 	return cmd
 }
 

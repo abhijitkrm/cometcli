@@ -28,14 +28,14 @@ func (createTool) Desc() string {
 func (createTool) Schema() map[string]any {
 	return toolkit.ObjSchema(common.WithTx(map[string]any{
 		"amount":                toolkit.Str("self-delegation, e.g. 1000000atest"),
-		"pubkey":                toolkit.Str(`consensus pubkey JSON, e.g. {"@type":"/cosmos.crypto.ed25519.PubKey","key":"..."}`),
-		"moniker":               toolkit.Str("validator name"),
+		"pubkey":                toolkit.Str(`consensus pubkey JSON, e.g. {"@type":"/cosmos.crypto.ed25519.PubKey","key":"..."} (default: this node's own, from its status)`),
+		"moniker":               toolkit.Str("validator name (default: the node's moniker)"),
 		"commission-rate":       toolkit.Str("initial commission, e.g. 0.05"),
 		"commission-max-rate":   toolkit.Str("max commission, e.g. 0.20"),
 		"commission-max-change": toolkit.Str("max daily change, e.g. 0.01"),
 		"min-self-delegation":   toolkit.Str("min self delegation (default 1)"),
 		"memo":                  toolkit.Str("tx memo"),
-	}), "amount", "pubkey", "moniker")
+	}), "amount")
 }
 func (createTool) Tier() toolkit.Tier { return toolkit.TierOnChain }
 
@@ -44,7 +44,28 @@ func (t createTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, er
 	if err != nil {
 		return nil, err
 	}
-	pkAny, err := parsePubkeyJSON(a.String("pubkey", ""))
+	pkJSON, moniker := a.String("pubkey", ""), a.String("moniker", "")
+	if pkJSON == "" || moniker == "" {
+		// the node this profile manages: its consensus key and moniker
+		cc, err := c.Comet()
+		if err != nil {
+			return nil, err
+		}
+		st, err := cc.Status(c)
+		if err != nil {
+			return nil, fmt.Errorf("reading the node's consensus key: %w", err)
+		}
+		if st.SyncInfo.CatchingUp {
+			return nil, fmt.Errorf("the node is still catching up — create the validator once it's synced, or it starts missing blocks right away")
+		}
+		if pkJSON == "" {
+			pkJSON = fmt.Sprintf(`{"@type":"/cosmos.crypto.ed25519.PubKey","key":%q}`, base64.StdEncoding.EncodeToString(st.ValidatorInfo.PubKey.Bytes()))
+		}
+		if moniker == "" {
+			moniker = st.NodeInfo.Moniker
+		}
+	}
+	pkAny, err := parsePubkeyJSON(pkJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -52,15 +73,15 @@ func (t createTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, er
 	if err != nil {
 		return nil, err
 	}
-	rate, err := common.DecScaled(defStr(a.String("commission-rate", ""), "0.05"))
+	rate, err := common.TxDec(c, defStr(a.String("commission-rate", ""), "0.05"))
 	if err != nil {
 		return nil, fmt.Errorf("commission-rate: %w", err)
 	}
-	maxRate, err := common.DecScaled(defStr(a.String("commission-max-rate", ""), "0.20"))
+	maxRate, err := common.TxDec(c, defStr(a.String("commission-max-rate", ""), "0.20"))
 	if err != nil {
 		return nil, fmt.Errorf("commission-max-rate: %w", err)
 	}
-	maxChange, err := common.DecScaled(defStr(a.String("commission-max-change", ""), "0.01"))
+	maxChange, err := common.TxDec(c, defStr(a.String("commission-max-change", ""), "0.01"))
 	if err != nil {
 		return nil, fmt.Errorf("commission-max-change: %w", err)
 	}
@@ -69,7 +90,7 @@ func (t createTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, er
 		DelegatorAddress: acct,
 		Pubkey:           pkAny,
 		Value:            coin,
-		Description:      &stakingv1beta1.Description{Moniker: a.String("moniker", "")},
+		Description:      &stakingv1beta1.Description{Moniker: moniker},
 		Commission: &stakingv1beta1.CommissionRates{
 			Rate:          rate,
 			MaxRate:       maxRate,
@@ -78,7 +99,7 @@ func (t createTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, er
 		MinSelfDelegation: defStr(a.String("min-self-delegation", ""), "1"),
 	}
 	return common.BroadcastMsgs(c, tx.Msgs{msg}, a.String("memo", ""),
-		map[string]string{"action": "create-validator", "moniker": a.String("moniker", "")}, common.TxOpts(a))
+		map[string]string{"action": "create-validator", "moniker": moniker}, common.TxOpts(a))
 }
 
 // parsePubkeyJSON accepts `{"@type":"/cosmos.crypto.ed25519.PubKey","key":"<b64>"}`.

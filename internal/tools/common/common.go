@@ -5,6 +5,7 @@ package common
 import (
 	"bytes"
 	query "cosmossdk.io/api/cosmos/base/query/v1beta1"
+	cmtservice "cosmossdk.io/api/cosmos/base/tendermint/v1beta1"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -441,4 +442,52 @@ func DecPct(s string) string {
 	}
 	f, _ := new(big.Rat).Mul(r, big.NewRat(100, 1)).Float64()
 	return strconv.FormatFloat(f, 'f', -1, 64)
+}
+
+// SDKVersion is the cosmos-sdk version the node's app was built with
+// (from its build deps), remembered on the profile for the process.
+func SDKVersion(c *toolkit.Context) string {
+	if c.Profile != nil && c.Profile.Metadata["sdk_version"] != "" {
+		return c.Profile.Metadata["sdk_version"]
+	}
+	g, err := c.GRPC()
+	if err != nil {
+		return ""
+	}
+	res, err := g.Node.GetNodeInfo(c, &cmtservice.GetNodeInfoRequest{})
+	if err != nil || res.ApplicationVersion == nil {
+		return ""
+	}
+	for _, m := range res.ApplicationVersion.BuildDeps {
+		if m.Path == "github.com/cosmos/cosmos-sdk" {
+			v := m.Version
+			if c.Profile != nil {
+				if c.Profile.Metadata == nil {
+					c.Profile.Metadata = map[string]string{}
+				}
+				c.Profile.Metadata["sdk_version"] = v
+			}
+			return v
+		}
+	}
+	return ""
+}
+
+var sdkMinorRe = regexp.MustCompile(`^v0\.(\d+)\.`)
+
+// TxDec encodes a decimal (e.g. "0.05") for a transaction field typed
+// cosmos.Dec: cosmos-sdk v0.54+ decodes txs through the protobuf v2 API,
+// where it's the plain decimal; earlier versions take the legacy scaled
+// integer (0.05 → 50000000000000000). Sending the wrong form makes 5%
+// read as 5×10^16.
+func TxDec(c *toolkit.Context, s string) (string, error) {
+	if m := sdkMinorRe.FindStringSubmatch(SDKVersion(c)); m != nil {
+		if minor, _ := strconv.Atoi(m[1]); minor >= 54 {
+			if _, ok := new(big.Rat).SetString(s); !ok {
+				return "", fmt.Errorf("%q isn't a decimal", s)
+			}
+			return s, nil
+		}
+	}
+	return DecScaled(s)
 }

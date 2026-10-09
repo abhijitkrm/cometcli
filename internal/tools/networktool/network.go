@@ -24,7 +24,10 @@ import (
 )
 
 // Register adds the network.* tools.
-func Register(r *toolkit.Registry) { r.Register(checkTool{}) }
+func Register(r *toolkit.Registry) {
+	r.Register(checkTool{})
+	RegisterProvision(r)
+}
 
 type checkTool struct{}
 

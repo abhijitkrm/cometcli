@@ -117,8 +117,8 @@ func (s *Spec) Expectations(role Role, version string, prod bool) []Expect {
 			Check: func(g any) bool { return fmt.Sprint(g) != "app" }, Want: "flood (not app)",
 			Why: version + " pins CometBFT 0.38, which doesn't support mempool type \"app\""})
 	}
-	if s.MinGasPrice != "" && s.Chain.Denom != "" {
-		want := s.MinGasPrice + s.Chain.Denom
+	if s.MinGasPrice != "" && s.GasDenom() != "" {
+		want := s.MinGasPrice + s.GasDenom()
 		add(Expect{File: "app.toml", Key: []string{"minimum-gas-prices"}, Sev: Warn, Check: eq(want), Want: want,
 			Why: "the fee the mempool accepts; nodes that disagree reject each other's txs"})
 	}
