@@ -74,7 +74,7 @@ func (a *Agent) routeLocal(ctx context.Context, input string) (string, bool) {
 		r := router.Result{}
 		if err != nil {
 			r.Err = err.Error()
-			a.emit(Event{Kind: EvToolResult, Tool: st.Tool, Text: "error: " + a.Redact.Text(firstLine(r.Err))})
+			a.emit(Event{Kind: EvToolResult, Tool: st.Tool, Err: a.Redact.Text(firstLine(r.Err))})
 			if !st.Optional {
 				// the model explains failures better than a template
 				a.lastRoute.Why += "; " + st.Tool + " failed"

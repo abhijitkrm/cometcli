@@ -189,7 +189,7 @@ func (a *Agent) runTool(ctx context.Context, t toolkit.Tool, args toolkit.Args, 
 		lg.ToolSeen(a.profileName(), name, t.Tier().String(), shown, data, err, "")
 	}
 	if err != nil {
-		a.emit(Event{Kind: EvToolResult, Tool: name, Tier: t.Tier().String(), Text: "error: " + a.Redact.Text(firstLine(err.Error()))})
+		a.emit(Event{Kind: EvToolResult, Tool: name, Tier: t.Tier().String(), Err: a.Redact.Text(firstLine(err.Error()))})
 		return nil, err
 	}
 	text := a.Redact.Text(ansiRe.ReplaceAllString(res.Text, ""))

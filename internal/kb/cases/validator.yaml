@@ -254,8 +254,9 @@
   severity: high
   symptoms: node synced but won't sign; logs show height regression / conflicting data
   match:
-    all: ["pvs.ahead_by > 1"]
-    any: ["node.catching_up == false", "logs.height_regression > 0"]
+    all: ["pvs.ahead_by > 1", "node.catching_up == false"]
+    # a validator that is signing can't be refusing to sign
+    any: ["val.signed_recent_pct < 50", "logs.height_regression > 0"]
   confirm:
     - "sec.doublesign shows priv_validator_state height vs node height"
   causes:

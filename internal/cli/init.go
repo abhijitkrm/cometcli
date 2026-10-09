@@ -559,21 +559,7 @@ func minGasPriceDenom(ctx context.Context, h host.Host, home string) (string, st
 	if err != nil {
 		return "", ""
 	}
-	for _, line := range strings.Split(string(b), "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "minimum-gas-prices") {
-			continue
-		}
-		_, v, _ := strings.Cut(line, "=")
-		v = strings.Trim(strings.TrimSpace(v), `",`)
-		v, _, _ = strings.Cut(v, ",") // first denom when several are accepted
-		i := 0
-		for i < len(v) && (v[i] >= '0' && v[i] <= '9' || v[i] == '.') {
-			i++
-		}
-		return v[:i], strings.TrimSpace(v[i:])
-	}
-	return "", ""
+	return toolkit.ParseMinGasPrices(string(b))
 }
 
 // homeFromArgs extracts `--home /path` or `--home=/path` from a cmdline.

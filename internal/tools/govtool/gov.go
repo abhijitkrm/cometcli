@@ -142,7 +142,11 @@ func Build(c *toolkit.Context, a toolkit.Args, proposer string) (*Plan, error) {
 	}
 	p.Detail["voting_period"] = votingPeriod.String()
 
-	switch kind := a.String("kind", ""); kind {
+	kind := a.String("kind", "")
+	if kind == "" && a.String("height", "") == "" && a.String("in_blocks", "") == "" && a.String("messages", "") == "" {
+		kind = "text" // a title and summary alone are a text proposal
+	}
+	switch kind {
 	case "text":
 		if msg.Metadata == "" {
 			// the SDK rejects a proposal with neither messages nor metadata

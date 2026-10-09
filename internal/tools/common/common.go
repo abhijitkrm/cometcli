@@ -59,6 +59,7 @@ func identify(c *toolkit.Context) {
 	if c.Profile != nil && c.Profile.Metadata["valoper"] == "" {
 		_, _ = ValoperFromNode(c)
 	}
+	c.FeeDefaults()
 }
 
 // ValoperFromNode finds the validator this node signs for: the node's
