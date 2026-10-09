@@ -19,6 +19,8 @@
     - what height is the node at
     - node sync status
     - latest block height
+    - how far behind is my node
+    - is my node behind
   steps:
     - {as: st, tool: node.status}
   answer: |

@@ -79,6 +79,9 @@
     - "node.catching_up false, node.block_age_s < 30"
   playbook:
     - {do: wait.until, args: {condition: synced, timeout: 3600}, note: "nothing is broken — it is catching up; this shows progress and ETA"}
+    - {do: wait.until, args: {condition: unjailable, timeout: 1800}, when: "val.jailed == true", note: "wait out the jail period"}
+    - {do: val.unjail, when: "val.jailed == true", note: "unjail (signed by the operator key — asks you)"}
+    - {do: wait.until, args: {condition: in-consensus, timeout: 600}, when: "val.jailed == true", note: "check it signs again"}
   test:
     signals: {node.catching_up: true, node.block_age_s: 7200}
 
@@ -121,6 +124,9 @@
     - {do: net.add-peer, args: {peer: "{peers}"}, note: "peer with the chain's other nodes you run"}
     - {do: node.service, args: {action: restart}, note: "restart so it takes effect"}
     - {do: wait.until, args: {condition: synced, timeout: 1800}, note: "wait until it has caught up"}
+    - {do: wait.until, args: {condition: unjailable, timeout: 1800}, when: "val.jailed == true", note: "wait out the jail period"}
+    - {do: val.unjail, when: "val.jailed == true", note: "unjail (signed by the operator key — asks you)"}
+    - {do: wait.until, args: {condition: in-consensus, timeout: 600}, when: "val.jailed == true", note: "check it signs again"}
   test:
     signals: {node.peers: 0}
 
@@ -229,6 +235,9 @@
   playbook:
     - {do: node.recreate, note: "recreate the container from its compose file — reattaches its network"}
     - {do: wait.until, args: {condition: synced, timeout: 1800}, note: "wait until it has caught up"}
+    - {do: wait.until, args: {condition: unjailable, timeout: 1800}, when: "val.jailed == true", note: "wait out the jail period"}
+    - {do: val.unjail, when: "val.jailed == true", note: "unjail (signed by the operator key — asks you)"}
+    - {do: wait.until, args: {condition: in-consensus, timeout: 600}, when: "val.jailed == true", note: "check it signs again"}
   test:
     signals: {proc.networks: 0, proc.running: true, node.reachable: false}
 

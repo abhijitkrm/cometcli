@@ -80,3 +80,21 @@ Error: failed to initialize database: EOF
 		t.Errorf("a docker socket error isn't the node home: %v", r.Counts)
 	}
 }
+
+func TestLevels(t *testing.T) {
+	for line, want := range map[string]bool{
+		"5:00PM INF received proposal module=consensus": false,
+		"5:00PM ERR Stopping peer for error err=EOF":    true,
+		"panic: could not create directory":             true,
+		"Error: failed to initialize database: EOF":     true,
+		`{"level":"error","msg":"x"}`:                   true,
+		"\x1b[90m5:00PM\x1b[0m \x1b[31mERR\x1b[0m boom": true,
+	} {
+		if IsError(line) != want {
+			t.Errorf("IsError(%q) = %v", line, !want)
+		}
+	}
+	if !IsDebug("5:00PM DBG gossip") || IsDebug("5:00PM INF x") {
+		t.Error("IsDebug")
+	}
+}

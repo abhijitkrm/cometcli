@@ -1,0 +1,85 @@
+- id: node-health
+  title: is the node healthy
+  patterns:
+    - '^(is )?(my )?(node|validator)( healthy| ok| okay| fine| alright| good| working)$'
+    - '^(health ?check|healthcheck|any problems)$'
+  examples:
+    - is my node healthy
+    - is my validator healthy
+    - how is my validator doing
+    - are there any problems with my node
+    - health check
+  steps:
+    - {as: t, tool: node.triage}
+  answer: |
+    {{$r := get .t.Data "roots"}}{{if count $r}}**{{.node}} has a problem:** {{join $r}} — `/incident` works it (known cases run locally).{{else}}**{{.node}} looks healthy** — triage found no known problem.{{end}}
+    {{head 2 .t.Text}}
+
+- id: fleet-status
+  title: every node at a glance
+  scope: chain
+  patterns:
+    - '^(fleet( status)?|(are )?all (my )?(nodes|validators)( ok| okay| healthy| fine| up)?)$'
+  examples:
+    - are all my validators ok
+    - how are my nodes doing
+    - fleet status
+    - status of all nodes
+  steps:
+    - {as: f, tool: fleet.status}
+  answer: |
+    **{{get .f.Data "count"}} node(s):**
+    {{trim .f.Text}}
+
+- id: node-version
+  title: what version the node runs
+  patterns:
+    - '^(node |binary |evmd |app )?versions?$'
+    - '^what version( is (my )?(node|validator) running| am i (on|running))?$'
+  examples:
+    - what version is my node running
+    - which version am I on
+    - binary version
+  steps:
+    - {as: u, tool: upgrade.check}
+  answer: |
+    {{trim .u.Text}}
+
+- id: upgrade-ready
+  title: ready for the upgrade
+  patterns:
+    - '^(am i |is (my )?(node|validator) )?ready for (the )?upgrade$'
+  examples:
+    - am I ready for the upgrade
+    - is my node ready for the upgrade
+  steps:
+    - {as: u, tool: upgrade.check}
+  answer: |
+    {{trim .u.Text}}
+    To check the image you'll switch to: `upgrade ready --name <plan> --image <image>`.
+
+- id: log-errors
+  title: recent errors in the logs
+  patterns:
+    - '^(any |recent |show )?(errors|error lines)( in (the )?logs)?$'
+  examples:
+    - any errors in the logs
+    - show recent errors
+    - are there errors in the node logs
+  steps:
+    - {as: l, tool: node.logs, args: {lines: 300, level: error}}
+  answer: |
+    {{$t := trim .l.Text}}{{if or (eq $t "") (eq $t "(no matches)")}}**No errors** in the last 300 log lines of {{.node}}.{{else}}**Errors in the last 300 log lines of {{.node}}:**
+    {{$t}}{{end}}
+
+- id: spec-match
+  title: does the node match the network spec
+  patterns:
+    - '^(does )?(my )?(config|node|network) match (the )?spec$'
+  examples:
+    - does my config match the spec
+    - is my node configured like the spec
+  steps:
+    - {as: n, tool: network.check}
+  answer: |
+    {{trim .n.Text}}

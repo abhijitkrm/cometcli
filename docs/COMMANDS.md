@@ -658,18 +658,39 @@ saved after each turn to `~/.cometcli/sessions/` (0600, already redacted).
 
 ### Local answers and the model
 
-Every prompt is classified on your machine first.
+Every prompt is classified on your machine first. The model is used only when cometcli
+can't work out what to do.
 
-| What you ask | Who answers |
+| What you type | Who handles it |
 |---|---|
-| A known question: "is anyone jailed?", "validator count", "how many peers", "is my node synced", "missed blocks", "open proposals", "do I need to vote", "rewards", "balance", "upgrade plan", "slashing params" | cometcli runs the read-only tools and answers from a fixed template. No model call, no tokens. Repeats within 30s come from a cache. |
-| `/incident` where triage finds one clear root case that has a playbook | cometcli runs the playbook itself; changes and transactions still ask you. Today that's node down, jailed for downtime, halt-height left set, and container memory limit. A failed step hands over to the model with everything done so far. |
-| Anything else: why/how questions, actions, unknown problems | The model. For `/incident` it starts from the triage cometcli already ran. |
+| **A direct command:** "restart val3", "stop the node", "unjail", "vote yes on 6", "send 100adex to cosmos1…", "delegate 1000adex to cosmosvaloper1…", "withdraw rewards", "show last 200 logs of val4", "add peer id@host:26656", "set app mempool.max-txs 0", "build v0.7.3", "switch to primium-v0.7.3", "check the network", "triage" | cometcli runs the tool with the words as its arguments. Changes and transactions still ask, and key use always does. A name that isn't one of your nodes ("stop worrying") goes to the model. |
+| **A known question:** jailed validators, validator count, peers, sync and lag, health (from triage), fleet status, version, upgrade readiness, recent log errors, spec conformance, uptime, consensus, proposals, votes, rewards, balance, upgrade plan, slashing params | Read-only tools and a fixed answer. Repeats within 30s come from a cache. |
+| **`/incident` where triage finds one clear root case with a playbook** (32 of 68 cases) | cometcli runs the playbook (see below). |
+| **Anything else:** why/how questions, ambiguous requests, judgement calls (config parse errors, app hash, double sign, corruption) | The model. For `/incident` it starts from cometcli's triage. |
 
-`/llm <question>` asks the model anyway, `/route` explains the last decision, and
-`/cost` counts local answers next to tokens. To turn routing off, set
-`agent.router: off`. Add your own questions in `~/.cometcli/intents/*.yaml` (see
-[EXTENDING.md](EXTENDING.md#known-questions)).
+The playbooks behind `/incident`:
+- **Fixes:**
+  - mempool type for the node's version
+  - DB backend set from the data on disk
+  - gRPC disabled
+  - network detached (recreate the container)
+  - no or low peers (your other nodes of the chain)
+  - home permissions, NTP
+  - EVM drift or indexer behind
+  - catching up, jail periods, signer state ahead, recent restarts
+  - nodes that are down, killed, jailed, halted or OOM-limited
+- **Reports:** for votes, fees, the active set, self-delegation, disk, load and upgrades,
+  cometcli gathers the facts and tells you what to decide. It never votes or spends for you.
+
+**It learns.** When the model fixes a known case that has no playbook yet, cometcli shows the
+steps it took and offers to save them as that case's playbook in `~/.cometcli/kb/`. The next
+identical incident then runs without the model.
+
+`cometcli route stats [--since 7d]` shows the share answered locally and what the model was
+asked most, which is the list of what to teach cometcli next. Drills report a
+"without the model" score. `/llm <question>` asks the model anyway, `/route` explains the
+last decision, and `agent.router: off` turns routing off. With no model configured, known
+questions, commands and playbooks still work.
 
 **What the model sees.** On validator profiles, `agent.egress: strict` is the default:
 - Output of `bash`, `read`, `grep`, `node.logs` and `fleet.exec` reaches the model only

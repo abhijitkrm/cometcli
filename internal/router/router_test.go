@@ -45,9 +45,7 @@ func TestClassify(t *testing.T) {
 	for _, q := range []string{
 		"why is my validator jailed?",
 		"unjail my validator",
-		"restart the node",
 		"how do I add a peer",
-		"vote yes on proposal 3",
 		"is my validator jailed and why did it happen",
 		"explain the slashing params",
 		"the node keeps restarting every few seconds, nothing in the logs",
@@ -105,3 +103,49 @@ func TestUserIntentsOverride(t *testing.T) {
 }
 
 func writeFile(p, s string) error { return os.WriteFile(p, []byte(s), 0o644) }
+
+func TestCommands(t *testing.T) {
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		prompt, id string
+		args       map[string]string
+	}{
+		{"restart the node", "service", map[string]string{"action": "restart"}},
+		{"Restart val3.", "service", map[string]string{"action": "restart", "node": "val3"}},
+		{"stop sohan1", "service", map[string]string{"action": "stop", "node": "sohan1"}},
+		{"unjail", "unjail", map[string]string{}},
+		{"vote yes on proposal #6", "vote", map[string]string{"option": "yes", "proposal": "6"}},
+		{"vote no_with_veto on 7 from val2", "vote", map[string]string{"option": "no_with_veto", "proposal": "7", "node": "val2"}},
+		{"send 100adex to cosmos1mkns78vtva88s3mxclthvur56qssh22c3735cu", "send", map[string]string{"amount": "100adex", "to": "cosmos1mkns78vtva88s3mxclthvur56qssh22c3735cu"}},
+		{"withdraw rewards and commission", "withdraw", map[string]string{"commission": " and commission"}},
+		{"show last 200 logs of val4", "logs", map[string]string{"lines": "200", "node": "val4"}},
+		{"set app mempool.max-txs 0", "set-config", map[string]string{"file": "app", "key": "mempool.max-txs", "value": "0"}},
+		{"build v0.7.3 on val2", "build", map[string]string{"tag": "v0.7.3", "node": "val2"}},
+		{"switch to primium-evm:v0.7.3", "switch", map[string]string{"image": "primium-evm:v0.7.3"}},
+		{"check the network for production", "network-check", map[string]string{"prod": "for production"}},
+	}
+	for _, x := range cases {
+		m := c.Classify(x.prompt)
+		if m.Intent == nil || m.Intent.ID != x.id {
+			t.Errorf("%q → %v (%s), want %s", x.prompt, m.Intent, m.Why, x.id)
+			continue
+		}
+		for k, v := range x.args {
+			if m.Args[k] != v {
+				t.Errorf("%q: %s = %q, want %q", x.prompt, k, m.Args[k], v)
+			}
+		}
+	}
+	// near-misses go to the model: it works out what was meant
+	for _, q := range []string{"restart it if it's stuck", "vote the way the others did", "send some tokens to the treasury", "why did it stop"} {
+		if m := c.Classify(q); m.Intent != nil && m.Intent.Kind == "command" {
+			t.Errorf("%q must not be a command (matched %s)", q, m.Intent.ID)
+		}
+	}
+	if got := Fill(map[string]any{"proposal": "{proposal}", "memo": "{memo}", "n": 3}, map[string]string{"proposal": "6"}); got["proposal"] != "6" || got["memo"] != nil || got["n"] != 3 {
+		t.Errorf("Fill = %v", got)
+	}
+}

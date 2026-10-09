@@ -108,6 +108,9 @@
     - {do: node.set-config, args: {file: app.toml, key: grpc.enable, value: "true"}, note: "turn gRPC back on"}
     - {do: node.service, args: {action: restart}, note: "restart so it takes effect"}
     - {do: wait.until, args: {condition: synced, timeout: 1800}, note: "wait until it has caught up"}
+    - {do: wait.until, args: {condition: unjailable, timeout: 1800}, when: "val.jailed == true", note: "wait out the jail period"}
+    - {do: val.unjail, when: "val.jailed == true", note: "unjail (signed by the operator key — asks you)"}
+    - {do: wait.until, args: {condition: in-consensus, timeout: 600}, when: "val.jailed == true", note: "check it signs again"}
   test:
     signals: {app.grpc_enable: false}
 
@@ -153,6 +156,9 @@
     - {do: node.service, args: {action: restart}, note: "restart so it takes effect"}
     - {do: wait.until, args: {condition: synced, timeout: 1800}, note: "wait until it has caught up"}
     - {do: wait.until, args: {condition: signal, value: "evm.syncing == false", timeout: 900}, note: "the EVM JSON-RPC catches up"}
+    - {do: wait.until, args: {condition: unjailable, timeout: 1800}, when: "val.jailed == true", note: "wait out the jail period"}
+    - {do: val.unjail, when: "val.jailed == true", note: "unjail (signed by the operator key — asks you)"}
+    - {do: wait.until, args: {condition: in-consensus, timeout: 600}, when: "val.jailed == true", note: "check it signs again"}
   test:
     signals: {evm.syncing: true, node.catching_up: false}
 

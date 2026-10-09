@@ -2,17 +2,22 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/abhijitkrm/cometcli/internal/audit"
+	"github.com/abhijitkrm/cometcli/internal/config"
 	"github.com/abhijitkrm/cometcli/internal/egress"
 	"github.com/abhijitkrm/cometcli/internal/kb"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
 	"github.com/abhijitkrm/cometcli/internal/tools/networktool"
 	"github.com/abhijitkrm/cometcli/internal/tools/triage"
+	"gopkg.in/yaml.v3"
 )
 
 // incidentMarker prefixes an /incident that cometcli works itself first.
@@ -25,12 +30,18 @@ const incidentMarker = "\x1fincident\x1f"
 // so it starts from the evidence instead of collecting it again.
 func (a *Agent) runIncident(ctx context.Context, what string) (string, error) {
 	procedure := builtinCommands["incident"].Expand(what, nil, nil)
+	var learnFor *kb.Case // a known case without a playbook: learn one from the model's fix
 	handoff := func(context string) (string, error) {
 		prompt := procedure
 		if context != "" {
 			prompt += "\n\n" + context
 		}
-		return a.run(ctx, forceModel+prompt)
+		start := len(a.history)
+		out, err := a.run(ctx, forceModel+prompt)
+		if err == nil && learnFor != nil {
+			a.offerPlaybook(learnFor, start)
+		}
+		return out, err
 	}
 	t, ok := a.Reg.Get("node.triage")
 	if !ok {
@@ -50,7 +61,10 @@ func (a *Agent) runIncident(ctx context.Context, what string) (string, error) {
 	}
 	c := base.Cases[roots[0]]
 	switch {
-	case c == nil || len(c.Playbook) == 0:
+	case c == nil:
+		return handoff(triageNote)
+	case len(c.Playbook) == 0:
+		learnFor = c
 		return handoff(triageNote)
 	case len(roots) > 1 && base.Cases[roots[1]] != nil && base.Cases[roots[1]].Severity == c.Severity:
 		// two equally serious root causes: that's a judgement call
@@ -218,10 +232,15 @@ func shellWord(s string) string {
 // the same gates as the model's calls: permission rules, approvals for
 // changes and key use, the audit log and the operator's UI.
 func (a *Agent) runTool(ctx context.Context, t toolkit.Tool, args toolkit.Args, purpose string) (*toolkit.Result, error) {
+	return a.runToolOn(ctx, t, args, purpose, a.Ctx.Profile)
+}
+
+// runToolOn is runTool on a given node.
+func (a *Agent) runToolOn(ctx context.Context, t toolkit.Tool, args toolkit.Args, purpose string, p *config.Profile) (*toolkit.Result, error) {
 	name := t.Name()
 	shown := a.Redact.Args(args)
 	a.emit(Event{Kind: EvToolStart, Tool: name, Tier: t.Tier().String(), Args: shown})
-	runCtx, cancel := a.toolCtx(ctx, t, args)
+	runCtx, cancel := a.toolCtxFor(ctx, t, args, p)
 	defer cancel()
 	defer runCtx.Close()
 	runCtx.Purpose = purpose
@@ -277,4 +296,89 @@ func (a *Agent) refreshSignals(ctx context.Context, sig kb.Signals, cond string)
 	for k, v := range triage.CollectFor(c, 5*time.Minute, []string{family + "."}).Signals {
 		sig[k] = v
 	}
+}
+
+// metaTools are how the model looks around, not steps of a fix.
+var metaTools = map[string]bool{"node.triage": true, "tool_search": true, "todo_write": true, "use_node": true, "task": true}
+
+// learnedSteps are the tool calls the model made since history[from]
+// that worked, as playbook steps (lookups and bookkeeping left out).
+func (a *Agent) learnedSteps(from int) []kb.PlayStep {
+	failed := map[string]bool{}
+	for _, m := range a.history[from:] {
+		if m.Role == "tool" && m.IsError {
+			failed[m.CallID] = true
+		}
+	}
+	var steps []kb.PlayStep
+	for _, m := range a.history[from:] {
+		if m.Role != "assistant" {
+			continue
+		}
+		for _, call := range m.Calls {
+			name := toolkit.ResolveName(call.Name)
+			if failed[call.ID] || metaTools[name] || strings.HasPrefix(name, "kb.") || strings.HasPrefix(name, "incident.") {
+				continue
+			}
+			if _, ok := a.Reg.Get(name); !ok {
+				continue
+			}
+			var args map[string]any
+			_ = json.Unmarshal(call.Args, &args)
+			st := kb.PlayStep{Do: name, Args: args, Note: "learned from the model's fix"}
+			if n := len(steps); n > 0 && steps[n-1].Do == st.Do && fmt.Sprint(steps[n-1].Args) == fmt.Sprint(st.Args) {
+				continue
+			}
+			steps = append(steps, st)
+		}
+	}
+	if len(steps) > 15 {
+		steps = steps[:15]
+	}
+	return steps
+}
+
+// offerPlaybook asks the operator whether the steps the model just took
+// should become the case's playbook, so the next identical incident runs
+// without the model. Saved to the operator's own KB (it overrides the
+// built-in case); nothing is saved without a yes.
+func (a *Agent) offerPlaybook(c *kb.Case, from int) {
+	steps := a.learnedSteps(from)
+	if len(steps) == 0 {
+		return
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "The model worked case %s (%s) with these steps:\n", c.ID, c.Title)
+	for i, st := range steps {
+		args, _ := json.Marshal(st.Args)
+		fmt.Fprintf(&b, "  %d. %s %s\n", i+1, st.Do, a.Redact.Text(string(args)))
+	}
+	b.WriteString("Save them as this case's playbook? Next time cometcli runs them itself (changes and transactions still ask).")
+	if a.Ctx.Chooser == nil {
+		a.emit(Event{Kind: EvNotice, Text: "the model's steps for " + c.ID + " could become its playbook — run /incident interactively to review and save them"})
+		return
+	}
+	i, err := a.Ctx.Chooser(a.Ctx, b.String(), []string{"Save as the playbook", "Don't save"})
+	if err != nil || i != 0 {
+		return
+	}
+	learned := *c
+	learned.Playbook = steps
+	learned.PlaybookKind = ""
+	raw, err := yaml.Marshal([]*kb.Case{&learned})
+	if err != nil {
+		return
+	}
+	p, err := config.Path("kb", c.ID+".yaml")
+	if err == nil {
+		err = os.MkdirAll(filepath.Dir(p), 0o700)
+	}
+	if err == nil {
+		err = os.WriteFile(p, raw, 0o600)
+	}
+	if err != nil {
+		a.emit(Event{Kind: EvNotice, Text: "couldn't save the playbook: " + err.Error()})
+		return
+	}
+	a.emit(Event{Kind: EvNotice, Text: fmt.Sprintf("saved %d steps as the playbook for %s → %s (edit or delete it there)", len(steps), c.ID, p)})
 }

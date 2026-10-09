@@ -50,12 +50,6 @@ func emptyList(got any) bool {
 
 func isFalse(got any) bool { return got == false }
 
-func intAtLeast(n int64) func(any) bool {
-	return func(got any) bool {
-		v, ok := got.(int64)
-		return ok && v >= n
-	}
-}
 
 var durRe = regexp.MustCompile(`^(\d+)(ms|s)$`)
 
@@ -110,8 +104,8 @@ func (s *Spec) Expectations(role Role, version string, prod bool) []Expect {
 	if AppMempool(version) {
 		add(Expect{File: "config.toml", Key: []string{"mempool", "type"}, Sev: Fail, Check: eq("app"), Want: `"app"`,
 			Why: version + " runs the EVM app-side mempool; evmd's cross-config check panics otherwise"})
-		add(Expect{File: "app.toml", Key: []string{"mempool", "max-txs"}, Sev: Fail, Check: intAtLeast(0), Want: ">= 0",
-			Why: "the app-side mempool needs max-txs >= 0 (0 = unbounded)"})
+		// max-txs >= 0 turns the app-side mempool on, which needs "app"
+		// above; -1 (off) is valid with "app" too, so it isn't checked
 	} else {
 		add(Expect{File: "config.toml", Key: []string{"mempool", "type"}, Sev: Fail,
 			Check: func(g any) bool { return fmt.Sprint(g) != "app" }, Want: "flood (not app)",

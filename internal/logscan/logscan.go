@@ -175,3 +175,17 @@ func Clip(s string) string {
 	}
 	return s
 }
+
+// IsError reports whether a log line is error level (or a panic / a
+// startup "Error:"), in CometBFT plain, json or logfmt form.
+func IsError(line string) bool {
+	return errRe.MatchString(strings.TrimSpace(ansiRe.ReplaceAllString(line, "")))
+}
+
+// IsDebug reports whether a log line is debug or trace level.
+func IsDebug(line string) bool {
+	l := strings.TrimSpace(ansiRe.ReplaceAllString(line, ""))
+	return debugRe.MatchString(l)
+}
+
+var debugRe = regexp.MustCompile(`^(\S+\s+)?(DBG|TRC)\s|^D\[\d{4}-|"level":"(debug|trace)"|\blevel=(debug|trace)\b`)

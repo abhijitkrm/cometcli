@@ -941,8 +941,9 @@ func derive(r *Report) {
 		case t == "app" && strings.HasPrefix(ver, "0.38"):
 			// CometBFT 0.38 (cosmos/evm v0.6) doesn't know "app" at all
 			s["config.mempool_mismatch"] = true
-		case t == "app" && hasMax && maxTxs < 0:
-			// the app-side mempool needs max-txs >= 0
+		case (t == "flood" || t == "nop") && hasMax && maxTxs >= 0:
+			// an app-side mempool (max-txs >= 0) needs CometBFT's "app"
+			// mempool; "app" with max-txs -1 is fine
 			s["config.mempool_mismatch"] = true
 		case t == "flood" || t == "nop":
 			// recent evmd refuses to start unless the type is "app"; older

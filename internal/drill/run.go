@@ -25,6 +25,7 @@ type Result struct {
 	FixDetail  string        `json:"fix_detail"`
 	Steps      int           `json:"steps"`
 	Tokens     int           `json:"tokens"`
+	Local      bool          `json:"local"` // worked without a model call
 	Duration   time.Duration `json:"duration_ns"`
 	Report     string        `json:"report"`
 	Err        string        `json:"error,omitempty"`
@@ -104,6 +105,7 @@ func RunScenario(ctx context.Context, e *Env, s Scenario, newAgent AgentFactory,
 	res.Steps = a.Rounds()
 	u, _ := a.Usage()
 	res.Tokens = u.Input + u.Output
+	res.Local = res.Tokens == 0 && a.Routes().Local > 0
 	if err != nil {
 		res.Err = "agent run: " + err.Error()
 	}
@@ -143,8 +145,8 @@ func Save(results []Result) (string, error) {
 // Scoreboard renders results as a table with totals.
 func Scoreboard(results []Result) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%-14s %-26s %-7s %-6s %6s %8s %7s\n", "scenario", "triage case", "triage", "fixed", "steps", "tokens", "time")
-	triageOK, fixed := 0, 0
+	fmt.Fprintf(&b, "%-14s %-26s %-7s %-6s %-6s %6s %8s %7s\n", "scenario", "triage case", "triage", "fixed", "local", "steps", "tokens", "time")
+	triageOK, fixed, local := 0, 0, 0
 	for _, r := range results {
 		mark := func(v bool) string {
 			if v {
@@ -152,8 +154,11 @@ func Scoreboard(results []Result) string {
 			}
 			return "✗"
 		}
-		fmt.Fprintf(&b, "%-14s %-26s %-7s %-6s %6d %8d %7s\n", r.Scenario, orDash(r.TriageCase), mark(r.TriageOK), mark(r.Fixed),
-			r.Steps, r.Tokens, r.Duration.Round(time.Second))
+		fmt.Fprintf(&b, "%-14s %-26s %-7s %-6s %-6s %6d %8d %7s\n", r.Scenario, orDash(r.TriageCase), mark(r.TriageOK), mark(r.Fixed),
+			mark(r.Local), r.Steps, r.Tokens, r.Duration.Round(time.Second))
+		if r.Local {
+			local++
+		}
 		if r.TriageOK {
 			triageOK++
 		}
@@ -167,7 +172,7 @@ func Scoreboard(results []Result) string {
 			fmt.Fprintf(&b, "  ↳ %s\n", r.FixDetail)
 		}
 	}
-	fmt.Fprintf(&b, "score: triage %d/%d · fixed %d/%d", triageOK, len(results), fixed, len(results))
+	fmt.Fprintf(&b, "score: triage %d/%d · fixed %d/%d · without the model %d/%d", triageOK, len(results), fixed, len(results), local, len(results))
 	return b.String()
 }
 

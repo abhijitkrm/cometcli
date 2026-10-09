@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/abhijitkrm/cometcli/internal/client/host"
+	"github.com/abhijitkrm/cometcli/internal/logscan"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
 	"github.com/abhijitkrm/cometcli/internal/tools/common"
 )
@@ -124,7 +125,26 @@ func (logsTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error)
 		}
 		return nil, err
 	}
+	switch a.String("level", "") {
+	case "error":
+		out = filterLines(out, logscan.IsError)
+	case "info":
+		out = filterLines(out, func(l string) bool { return !logscan.IsDebug(l) })
+	}
+	if a.String("level", "") != "" && strings.TrimSpace(out) == "" {
+		return &toolkit.Result{Text: "(no matches)", Data: map[string]any{"lines": ""}}, nil
+	}
 	return &toolkit.Result{Text: out, Data: map[string]any{"lines": out}}, nil
+}
+
+func filterLines(s string, keep func(string) bool) string {
+	var out []string
+	for _, l := range strings.Split(s, "\n") {
+		if strings.TrimSpace(l) != "" && keep(l) {
+			out = append(out, l)
+		}
+	}
+	return strings.Join(out, "\n")
 }
 
 func logCmd(c *toolkit.Context, lines int) string {

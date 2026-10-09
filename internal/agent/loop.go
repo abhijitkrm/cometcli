@@ -379,7 +379,7 @@ func (a *Agent) run(ctx context.Context, input string) (string, error) {
 	}
 	a.routes.Model++
 	if lg := a.Audit(); lg != nil {
-		_ = lg.Log(audit.KindPrompt, a.profileName(), map[string]any{"text": input})
+		_ = lg.Log(audit.KindPrompt, a.profileName(), map[string]any{"text": input, "route": "model", "why": a.lastRoute.Why})
 	}
 	a.history = append(a.history, Msg{Role: "user", Text: a.turnPrefix() + input})
 
@@ -680,8 +680,13 @@ func (a *Agent) execCall(ctx context.Context, call Call) Msg {
 // approval threshold. Read-only sessions hard-deny any approval request
 // that slips past filtering.
 func (a *Agent) toolCtx(ctx context.Context, t toolkit.Tool, args toolkit.Args) (*toolkit.Context, context.CancelFunc) {
+	return a.toolCtxFor(ctx, t, args, a.Ctx.Profile)
+}
+
+// toolCtxFor is toolCtx for a given node (a direct command can name one).
+func (a *Agent) toolCtxFor(ctx context.Context, t toolkit.Tool, args toolkit.Args, p *config.Profile) (*toolkit.Context, context.CancelFunc) {
 	parent := &toolkit.Context{
-		Context: ctx, Profile: a.Ctx.Profile, Cfg: a.Ctx.Cfg, Out: a.Ctx.Out,
+		Context: ctx, Profile: p, Cfg: a.Ctx.Cfg, Out: a.Ctx.Out,
 		Audit: a.Audit(), Approver: a.Ctx.Approver, Chooser: a.Ctx.Chooser, Secret: a.Ctx.Secret,
 		Session: a.Tools, Rules: a.Rules, WorkRoot: a.WorkRoot,
 		ReadOnly: a.Policy.ReadOnly(), AcceptEdits: a.Policy.AcceptEdits(),

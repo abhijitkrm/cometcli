@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -172,5 +173,40 @@ func TestStepArgumentsComeFromSignals(t *testing.T) {
 	runIncidentCmd(t, b, "")
 	if prov2.calls == 0 || !strings.Contains(prov2.sent[0], "data.db_backend") {
 		t.Fatalf("handoff should name the missing signal (calls=%d)", prov2.calls)
+	}
+}
+
+// The model works a known case with no playbook; its working steps are
+// offered as the playbook, and the next identical incident runs locally.
+func TestLearnedPlaybook(t *testing.T) {
+	prov := &mockProvider{responses: []*Response{
+		{Calls: []Call{
+			{ID: "c1", Name: "node__logs", Args: json.RawMessage(`{"lines":40}`)},
+			{ID: "c2", Name: "node__set-config", Args: json.RawMessage(`{"file":"config.toml","key":"p2p.laddr","value":"tcp://0.0.0.0:26656"}`)},
+		}},
+		{Calls: []Call{{ID: "c3", Name: "node__service", Args: json.RawMessage(`{"action":"restart"}`)}}},
+		{Text: "fixed: the p2p laddr was malformed", Done: true},
+	}}
+	a, ran := incidentAgent(t, prov, []string{"cfg-parse-error"}, kb.Signals{"config.parse_error": true}, nil)
+	a.Reg.Register(stubTool{name: "node.set-config", tier: toolkit.TierLocalChange, run: func(_ *toolkit.Context, args toolkit.Args) (*toolkit.Result, error) {
+		*ran = append(*ran, "node.set-config "+args.String("key", ""))
+		return &toolkit.Result{Text: "set"}, nil
+	}})
+	var offered string
+	a.Ctx.Chooser = func(_ *toolkit.Context, prompt string, opts []string) (int, error) { offered = prompt; return 0, nil }
+	runIncidentCmd(t, a, "config broke")
+	if !strings.Contains(offered, "1. node.logs") || !strings.Contains(offered, "2. node.set-config") || !strings.Contains(offered, "3. node.service") {
+		t.Fatalf("offer:\n%s", offered)
+	}
+	// the next time: cometcli runs the learned steps, the model isn't called
+	calls := prov.calls
+	*ran = nil
+	runIncidentCmd(t, a, "config broke again")
+	if prov.calls != calls {
+		t.Fatalf("the learned playbook should run without the model (calls %d → %d)", calls, prov.calls)
+	}
+	want := "node.triage|node.logs|node.set-config p2p.laddr|node.service restart|incident.record"
+	if strings.Join(*ran, "|") != want {
+		t.Fatalf("ran %v\nwant %s", *ran, want)
 	}
 }

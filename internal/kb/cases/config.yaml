@@ -43,6 +43,9 @@
     - {do: node.set-config, args: {file: app.toml, key: app-db-backend, value: "{sig:data.db_backend}"}, note: "app.toml must agree"}
     - {do: node.service, args: {action: restart}, note: "restart so it takes effect"}
     - {do: wait.until, args: {condition: synced, timeout: 1800}, note: "wait until it has caught up"}
+    - {do: wait.until, args: {condition: unjailable, timeout: 1800}, when: "val.jailed == true", note: "wait out the jail period"}
+    - {do: val.unjail, when: "val.jailed == true", note: "unjail (signed by the operator key — asks you)"}
+    - {do: wait.until, args: {condition: in-consensus, timeout: 600}, when: "val.jailed == true", note: "check it signs again"}
   test:
     signals: {config.db_backend_mismatch: true, config.db_backend: goleveldb, app.app_db_backend: pebbledb}
 
@@ -62,9 +65,11 @@
     - "[change] set config.toml [mempool] type = \"app\"; restart"
   playbook:
     - {do: node.set-config, args: {file: config.toml, key: mempool.type, value: "{sig:config.mempool_want}"}, note: "the mempool type this version needs"}
-    - {do: node.set-config, args: {file: app.toml, key: mempool.max-txs, value: "0"}, when: "config.mempool_want == app && app.mempool_max_txs < 0", note: "the app-side mempool needs max-txs >= 0"}
     - {do: node.service, args: {action: restart}, note: "restart so it takes effect"}
     - {do: wait.until, args: {condition: synced, timeout: 1800}, note: "wait until it has caught up"}
+    - {do: wait.until, args: {condition: unjailable, timeout: 1800}, when: "val.jailed == true", note: "wait out the jail period"}
+    - {do: val.unjail, when: "val.jailed == true", note: "unjail (signed by the operator key — asks you)"}
+    - {do: wait.until, args: {condition: in-consensus, timeout: 600}, when: "val.jailed == true", note: "check it signs again"}
   test:
     signals: {config.mempool_mismatch: true, config.mempool_type: flood, logs.config_parse: 3}
 
