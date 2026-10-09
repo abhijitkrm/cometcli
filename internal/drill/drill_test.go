@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/abhijitkrm/cometcli/internal/config"
+	"github.com/abhijitkrm/cometcli/internal/netspec"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
 )
 
@@ -74,5 +75,42 @@ func TestScoreboard(t *testing.T) {
 	})
 	if !strings.Contains(s, "score: triage 1/2 · fixed 1/2") || !strings.Contains(s, "memory limit still 120 MB") {
 		t.Fatalf("scoreboard:\n%s", s)
+	}
+}
+
+func TestDrillSpecKeepsTheNetworkButShortensTheClock(t *testing.T) {
+	base := &netspec.Spec{
+		Chain:       netspec.Chain{ID: "primium-1", Denom: "aprm", EVMChainID: 9000},
+		Image:       netspec.Image{Name: "primium-evm", Tag: "v0.7.2", Naming: "primium-{tag}"},
+		MinGasPrice: "1000000000", DBBackend: "rocksdb",
+		Consensus: netspec.Consensus{TimeoutCommitMS: 200},
+		Services:  netspec.Services{API: true, WS: true},
+		HostHome:  "/integral/primium",
+	}
+	base.Genesis.Slashing.SignedBlocksWindow = 10000
+	base.Genesis.Gov.VotingPeriodS = 172800
+	base.Genesis.EVM.Precompiles = []string{"staking", "bank"}
+	ds, err := DrillSpec(base, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ds.Chain.ID != "primium-1-drill" || ds.Chain.Denom != "aprm" || ds.Chain.EVMChainID != 9000 {
+		t.Errorf("chain = %+v", ds.Chain)
+	}
+	if ds.Image != base.Image || ds.DBBackend != "rocksdb" || ds.Consensus.TimeoutCommitMS != 200 || len(ds.Genesis.EVM.Precompiles) != 2 {
+		t.Errorf("the network's settings weren't kept: %+v", ds)
+	}
+	if ds.Genesis.Slashing.SignedBlocksWindow != 20 || ds.Genesis.Slashing.DowntimeJailDurationS != 60 || ds.Genesis.Gov.VotingPeriodS != 60 {
+		t.Errorf("drill timing not applied: %+v %+v", ds.Genesis.Slashing, ds.Genesis.Gov)
+	}
+	if !ds.Services.GRPC || !ds.Services.JSONRPC || !ds.Services.WS || ds.HostHome != "" || ds.Genesis.Validators != 4 {
+		t.Errorf("services/home: %+v %q", ds.Services, ds.HostHome)
+	}
+	if base.Chain.ID != "primium-1" || base.Genesis.Slashing.SignedBlocksWindow != 10000 {
+		t.Error("the base spec was modified")
+	}
+	again, _ := DrillSpec(ds, 4)
+	if again.Chain.ID != "primium-1-drill" {
+		t.Errorf("suffix applied twice: %s", again.Chain.ID)
 	}
 }

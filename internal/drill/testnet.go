@@ -18,7 +18,12 @@ import (
 	"strings"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/abhijitkrm/cometcli/internal/config"
+	"github.com/abhijitkrm/cometcli/internal/netspec"
+	"github.com/abhijitkrm/cometcli/internal/toolkit"
+	"github.com/abhijitkrm/cometcli/internal/tools/networktool"
 )
 
 // Net describes the drill network.
@@ -29,6 +34,9 @@ type Net struct {
 	ChainID    string
 	PortBase   int // comet RPC of node i = PortBase + 10*i (gRPC +2033, EVM +1488)
 	Subnet     string
+	// Spec, when set, is the network the drill network copies: built with
+	// genesis create's own steps from DrillSpec(Spec).
+	Spec *netspec.Spec
 }
 
 // Defaults fills unset fields.
@@ -92,11 +100,14 @@ func lastLine(s string) string {
 // profile per node in cfg.
 func (n *Net) Up(ctx context.Context, cfg *config.Config, log func(string)) error {
 	n.Defaults()
-	if n.Image == "" {
-		return fmt.Errorf("an evmd image is required (--image)")
+	if n.Image == "" && n.Spec == nil {
+		return fmt.Errorf("an evmd image (--image) or a network spec (--spec) is required")
 	}
-	if out, _ := docker(ctx, "ps", "-a", "--filter", "label=com.docker.compose.project="+project, "-q"); out != "" {
+	if out, _ := docker(ctx, "ps", "-a", "--filter", "name=^"+project+"-", "-q"); out != "" {
 		return fmt.Errorf("a drill network already exists — `cometcli drill testnet down` first")
+	}
+	if n.Spec != nil {
+		return n.upFromSpec(ctx, cfg, log)
 	}
 	_ = os.RemoveAll(filepath.Join(n.Dir, "net"))
 	work, out := filepath.Join(n.Dir, "work"), filepath.Join(n.Dir, "net")
@@ -316,7 +327,8 @@ func (n *Net) addProfiles(ctx context.Context, cfg *config.Config, denom string)
 	return cfg.Save()
 }
 
-// Down removes the containers, network, node data and drill profiles.
+// Down removes the containers, network, node data and drill profiles —
+// and, for a network built from a spec, the drill's own spec and genesis.
 func (n *Net) Down(ctx context.Context, cfg *config.Config) error {
 	n.Defaults()
 	if _, err := os.Stat(n.compose()); err == nil {
@@ -324,15 +336,150 @@ func (n *Net) Down(ctx context.Context, cfg *config.Config) error {
 			return err
 		}
 	}
+	// a spec-built network has one compose file per node home
+	files, _ := filepath.Glob(filepath.Join(n.Dir, "net", "*", "docker-compose.yml"))
+	for _, f := range files {
+		if _, err := docker(ctx, "compose", "-f", f, "down", "-v"); err != nil {
+			return err
+		}
+	}
+	_, _ = docker(ctx, "network", "rm", project)
 	_ = os.RemoveAll(filepath.Join(n.Dir, "net"))
 	_ = os.RemoveAll(filepath.Join(n.Dir, "work"))
 	for name, p := range cfg.Profiles {
 		if IsDrill(p) {
+			removeDrillSpec(p.ChainID)
 			delete(cfg.Profiles, name)
 		}
 	}
 	return cfg.Save()
 }
 
+// removeDrillSpec deletes a drill network's spec, genesis and genesis
+// workspace — only ever a "-drill" chain's, never a real network's.
+func removeDrillSpec(chainID string) {
+	if !strings.HasSuffix(chainID, drillSuffix) {
+		return
+	}
+	if p, err := netspec.Path(chainID); err == nil {
+		_ = os.Remove(p)
+	}
+	if p, err := networktool.GenesisPath(chainID); err == nil {
+		_ = os.Remove(p)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		_ = os.RemoveAll(filepath.Join(home, ".cometcli-build", "genesis-"+chainID))
+	}
+}
+
 // IsDrill reports whether a profile belongs to the drill network.
 func IsDrill(p *config.Profile) bool { return p != nil && p.Metadata["drill"] == "true" }
+
+const drillSuffix = "-drill"
+
+// DrillSpec is the drill copy of a network's spec: the same image,
+// genesis, consensus timing, services and node settings, under its own
+// chain id (<id>-drill), with what drills need to finish in minutes —
+// a 20-block signing window, 60s jail, 60s votes — and gRPC and JSON-RPC
+// on (cometcli reads the nodes through them).
+func DrillSpec(base *netspec.Spec, validators int) (*netspec.Spec, error) {
+	raw, err := yaml.Marshal(base)
+	if err != nil {
+		return nil, err
+	}
+	var s netspec.Spec
+	if err := yaml.Unmarshal(raw, &s); err != nil {
+		return nil, err
+	}
+	if s.Chain.ID == "" || s.Chain.Denom == "" {
+		return nil, fmt.Errorf("the spec has no chain id or denom")
+	}
+	if !strings.HasSuffix(s.Chain.ID, drillSuffix) {
+		s.Chain.ID += drillSuffix
+	}
+	s.Genesis.Validators = validators
+	s.Genesis.Slashing.SignedBlocksWindow = 20
+	s.Genesis.Slashing.DowntimeJailDurationS = 60 // SDK v0.54 refuses less (gentx, validate-genesis)
+	s.Genesis.Gov.VotingPeriodS = 60
+	s.Genesis.Gov.ExpeditedVotingPeriod = 30
+	s.Genesis.Gov.MaxDepositPeriodS = 60
+	if s.Genesis.InitialBalance == "" {
+		s.Genesis.InitialBalance = "100000000000000000000000000"
+	}
+	if s.Genesis.InitialStake == "" {
+		s.Genesis.InitialStake = "10000000000000000000000000"
+	}
+	s.Services.GRPC, s.Services.JSONRPC = true, true
+	s.HostHome = "" // drill homes live under ~/.cometcli/drill
+	return &s, nil
+}
+
+// upFromSpec builds the drill network the way genesis create builds a
+// real one, from the drill copy of n.Spec.
+func (n *Net) upFromSpec(ctx context.Context, cfg *config.Config, log func(string)) error {
+	ds, err := DrillSpec(n.Spec, n.Validators)
+	if err != nil {
+		return err
+	}
+	if n.Image != "" {
+		ds.Image.Naming = n.Image // run this image instead of the spec's
+	}
+	n.ChainID, n.Image = ds.Chain.ID, networktool.ImageFor(ds)
+	for _, f := range ds.Review(false) {
+		if f.Sev == netspec.Fail {
+			return fmt.Errorf("the spec has a problem: %s", f.What)
+		}
+	}
+	if _, err := ds.Save(); err != nil {
+		return err
+	}
+	_ = os.RemoveAll(filepath.Join(n.Dir, "net"))
+	prefix := ds.Chain.Bech32Prefix
+	if prefix == "" {
+		prefix = "cosmos"
+	}
+	offset := func(i int) int { return n.PortBase - 26657 + 10*i }
+	grpcPort := ds.Services.GRPCPort
+	if grpcPort == 0 {
+		grpcPort = 9090
+	}
+	if cfg.Profiles == nil {
+		cfg.Profiles = map[string]*config.Profile{}
+	}
+	var profiles []*config.Profile
+	for i := 0; i < n.Validators; i++ {
+		p := &config.Profile{
+			Name: Profile(i), ChainID: ds.Chain.ID, EVMChainID: ds.Chain.EVMChainID, Bech32Prefix: prefix, Role: "validator", Binary: "evmd",
+			Endpoints: config.Endpoints{FallbackGRPC: fmt.Sprintf("127.0.0.1:%d", grpcPort+offset((i+1)%n.Validators))},
+			Transport: config.Transport{Type: "local"},
+			Service:   config.Service{Type: "docker", Unit: Container(i)},
+			Signer:    config.Signer{Mode: "container", ContainerKeyring: "test", ContainerBinary: "evmd"},
+			Metadata:  map[string]string{"drill": "true", "fee_denom": ds.GasDenom(), "gas_price": ds.MinGasPrice},
+		}
+		cfg.Profiles[p.Name] = p
+		profiles = append(profiles, p)
+	}
+	ctxFor := func(p *config.Profile) *toolkit.Context {
+		c := &toolkit.Context{Context: ctx, Profile: p, Cfg: cfg,
+			Approver: func(*toolkit.Context, string, toolkit.Tier, map[string]any) (bool, error) { return true, nil }}
+		c.AutoApproveBelow = toolkit.TierOnChain // a throwaway local network
+		return c
+	}
+	log(fmt.Sprintf("building %s from the spec of %s (image %s) — genesis create's own steps", ds.Chain.ID, n.Spec.Chain.ID, n.Image))
+	_, err = networktool.CreateNetwork(ctxFor, ds, profiles, networktool.CreateOpts{
+		HomeFor: func(p *config.Profile) string {
+			return filepath.Join(n.Dir, "net", "node"+strings.TrimPrefix(p.Name, "drill"))
+		},
+		Keyring:   networktool.KeyringOpts{Backend: "test"},
+		DockerNet: project, PortBase: n.PortBase - 26657, PortStep: 10,
+		Progress: log,
+	})
+	if err != nil {
+		return err
+	}
+	log("waiting for blocks")
+	if err := n.waitBlocks(ctx, 3, 3*time.Minute); err != nil {
+		return err
+	}
+	return cfg.Save()
+}

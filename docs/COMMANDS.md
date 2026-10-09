@@ -538,11 +538,21 @@ approvals.
 Check how well cometcli handles real faults, on a throwaway network:
 
 ```bash
-cometcli drill testnet up --image <evmd image>     # 4 local validators in docker, fast slashing
+cometcli drill testnet up --spec primium-1         # 4 local validators built like your network
+cometcli drill testnet up --image <evmd image>     # or a plain evmd network
 cometcli drill list                                # the scenarios
 cometcli drill run                                 # all of them (--scenario oom,partition to pick)
 cometcli drill testnet down                        # remove containers, data and drill profiles
 ```
+
+With `--spec`, the drill network is a copy of your network: the same image, genesis
+parameters, consensus timing, services, mempool and database settings, under its own
+chain id (`<id>-drill`). It is built with `genesis create`'s own steps (keys on each node,
+gentxs, collect, strict validation, configs rendered from the spec), so every drill run
+also tests the setup path. Only the clock changes so drills finish in minutes: a 20-block
+signing window, 60s jail, 60s votes. gRPC and JSON-RPC are always on. Check it like the
+real thing with `cometcli network check --network <id>-drill`; `down` also removes the
+drill's spec and genesis.
 
 Each scenario breaks a drill node for real:
 

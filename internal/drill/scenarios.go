@@ -23,6 +23,20 @@ type Env struct {
 	Node    int
 	Profile *config.Profile
 	backup  map[string][]byte
+	// restarts0 is the container's restart count at injection: docker
+	// keeps counting across scenarios
+	restarts0 float64
+}
+
+// markRestarts remembers the restart count before a fault.
+func (e *Env) markRestarts(ctx context.Context) {
+	e.restarts0, _ = e.Signals(ctx, "proc.")["proc.restarts"].(float64)
+}
+
+// newRestarts is how often the container restarted since markRestarts.
+func (e *Env) newRestarts(s kb.Signals) float64 {
+	r, _ := s["proc.restarts"].(float64)
+	return r - e.restarts0
 }
 
 // Signals collects the named signal families for the scenario's node.
@@ -48,7 +62,14 @@ func waitFor(ctx context.Context, timeout time.Duration, cond func() bool) bool 
 	return cond()
 }
 
-func (e *Env) file(rel string) string { return filepath.Join(e.Net.home(e.Node), rel) }
+// file is a path in the node's home (the profile's: a spec-built network
+// lays homes out differently).
+func (e *Env) file(rel string) string {
+	if e.Profile != nil && e.Profile.Home != "" {
+		return filepath.Join(e.Profile.Home, rel)
+	}
+	return filepath.Join(e.Net.home(e.Node), rel)
+}
 
 // save backs up a node file before a scenario changes it.
 func (e *Env) save(rel string) error {
@@ -135,8 +156,15 @@ var Scenarios = []Scenario{
 			if err := e.save("config/app.toml"); err != nil {
 				return err
 			}
+			e.markRestarts(ctx)
+			// about 20s of blocks ahead: the node must still be below the
+			// halt height when its restart completes (fast chains)
+			margin := int64(8)
+			if bt, _ := e.Signals(ctx, "node.")["node.block_time_s"].(float64); bt > 0 && int64(20/bt) > margin {
+				margin = int64(20 / bt)
+			}
 			h := e.Net.Height(ctx, e.Node)
-			raw := haltRe.ReplaceAll(e.backup["config/app.toml"], []byte(fmt.Sprintf("halt-height = %d", h+8)))
+			raw := haltRe.ReplaceAll(e.backup["config/app.toml"], []byte(fmt.Sprintf("halt-height = %d", h+margin)))
 			if err := os.WriteFile(e.file("config/app.toml"), raw, 0o644); err != nil {
 				return err
 			}
@@ -145,9 +173,14 @@ var Scenarios = []Scenario{
 		},
 		Ready: func(ctx context.Context, e *Env) bool {
 			return waitFor(ctx, 2*time.Minute, func() bool {
-				s := e.Signals(ctx, "node.", "app.")
+				s := e.Signals(ctx, "node.", "app.", "proc.")
+				if s["app.halt_height"] == nil {
+					return false
+				}
+				// halted: stalled while running, or (past the height on
+				// restart) exiting in a loop
 				age, _ := s["node.block_age_s"].(float64)
-				return age > 30 && s["app.halt_height"] != nil
+				return age > 30 || e.newRestarts(s) >= 2 || s["proc.running"] == false
 			})
 		},
 		Verify: func(ctx context.Context, e *Env) (bool, string) {
@@ -161,6 +194,7 @@ var Scenarios = []Scenario{
 		Name: "oom", Desc: "the container's memory limit is too low and evmd is OOM-killed",
 		Prompt: "%s restarts every few seconds, nothing in the logs", Expect: []string{"container-memory-limit", "host-oom-killed"},
 		Inject: func(ctx context.Context, e *Env) error {
+			e.markRestarts(ctx)
 			if _, err := docker(ctx, "update", "--memory", "120m", "--memory-swap", "120m", e.container()); err != nil {
 				return err
 			}
@@ -168,10 +202,7 @@ var Scenarios = []Scenario{
 			return err
 		},
 		Ready: func(ctx context.Context, e *Env) bool {
-			return waitFor(ctx, 2*time.Minute, func() bool {
-				r, _ := e.Signals(ctx, "proc.")["proc.restarts"].(float64)
-				return r >= 2
-			})
+			return waitFor(ctx, 2*time.Minute, func() bool { return e.newRestarts(e.Signals(ctx, "proc.")) >= 2 })
 		},
 		Verify: func(ctx context.Context, e *Env) (bool, string) {
 			if lim, ok := e.Signals(ctx, "proc.")["proc.mem_limit_mb"].(float64); ok && lim < 1024 {
@@ -206,7 +237,10 @@ func (e *Env) Recover(ctx context.Context, unjail func(ctx context.Context) erro
 	e.restoreFiles()
 	_, _ = docker(ctx, "update", "--memory", "4g", "--memory-swap", "4g", e.container())
 	if out, _ := docker(ctx, "inspect", "-f", "{{len .NetworkSettings.Networks}}", e.container()); strings.TrimSpace(out) == "0" {
-		_, _ = docker(ctx, "network", "connect", "--ip", fmt.Sprintf("%s.%d", e.Net.Subnet, e.Node+2), project, e.container())
+		// the original network has fixed IPs; a spec-built one dials names
+		if _, err := docker(ctx, "network", "connect", "--ip", fmt.Sprintf("%s.%d", e.Net.Subnet, e.Node+2), project, e.container()); err != nil {
+			_, _ = docker(ctx, "network", "connect", project, e.container())
+		}
 	}
 	if _, err := docker(ctx, "restart", e.container()); err != nil {
 		return err

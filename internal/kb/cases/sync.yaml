@@ -21,7 +21,7 @@
 
 - id: node-process-down
   title: Node process/container not running
-  explains: [node-rpc-down, evm-rpc-down, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
+  explains: [node-rpc-down, evm-rpc-down, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, node-no-peers, node-low-peers]
   severity: critical
   match:
     all: ["proc.running == false"]
@@ -48,7 +48,7 @@
 
 - id: node-crash-loop
   title: Node crash-looping (restarting repeatedly)
-  explains: [node-process-down, node-rpc-down, evm-rpc-down, node-restarted-recently, node-killed-sigkill, node-catching-up, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, val-in-set-while-syncing]
+  explains: [node-process-down, node-rpc-down, evm-rpc-down, node-restarted-recently, node-killed-sigkill, node-catching-up, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, val-in-set-while-syncing, node-no-peers, node-low-peers]
   severity: critical
   match:
     all: ["proc.restarts >= 3", "proc.uptime_s < 600"]
