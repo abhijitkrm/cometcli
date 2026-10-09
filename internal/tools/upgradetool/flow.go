@@ -348,8 +348,20 @@ if ! grep -q '"%[1]s"' "$f"; then
 fi
 `, handler)
 	}
-	fmt.Fprintf(&script, "docker build -q -f %s -t %s --label name=primium --label org.opencontainers.image.version=%s --label org.opencontainers.image.source=https://github.com/%s . >/dev/null\n",
-		common.ShellQ(dockerfile), common.ShellQ(image), common.ShellQ(tag), repo)
+	// preflight: the node's Dockerfile was written for the running release;
+	// a newer release may need a newer Go than its builder image has —
+	// build from a copy with the Go image raised (the original stays as is)
+	fmt.Fprintf(&script, `df=%s
+need=$(awk '/^toolchain go/{sub("go","",$2); print $2; exit} /^go [0-9]/{print $2; exit}' go.mod)
+have=$(sed -n 's/^FROM golang:\([0-9][0-9.]*\).*/\1/p' "$df" | head -1)
+if [ -n "$need" ] && [ -n "$have" ] && [ "$(printf '%%s\n%%s\n' "$have" "$need" | sort -V | head -1)" != "$need" ]; then
+  sed "s/^FROM golang:$have/FROM golang:$need/" "$df" > .cometcli.Dockerfile
+  df=.cometcli.Dockerfile
+  echo "note: $(basename %s) builds with Go $have; $(git describe --tags 2>/dev/null) needs Go $need — built with golang:$need (your Dockerfile is unchanged)"
+fi
+`, common.ShellQ(dockerfile), common.ShellQ(dockerfile))
+	fmt.Fprintf(&script, "docker build -q -f \"$df\" -t %s --label name=primium --label org.opencontainers.image.version=%s --label org.opencontainers.image.source=https://github.com/%s . >/dev/null\n",
+		common.ShellQ(image), common.ShellQ(tag), repo)
 	fmt.Fprintf(&script, "echo \"version: $(docker run --rm --entrypoint %s %s version 2>&1 | head -1)\"\n", r.Binary, common.ShellQ(image))
 	detail := map[string]any{"image": image, "tag": tag, "repo": repo, "dockerfile": dockerfile, "source": src}
 	if handler != "" {
