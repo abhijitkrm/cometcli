@@ -152,7 +152,11 @@ func (releasesTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, er
 	handlers := map[string][]string{}
 	for _, t := range newer {
 		handlers[t] = upgradeNames(c, repo, t)
-		fmt.Fprintf(&b, "  %-10s registers %s\n", t, orNone(strings.Join(handlers[t], ", ")))
+		mark := ""
+		if why := breaking(c, repo, t); why != "" {
+			mark = "  [" + why + "]"
+		}
+		fmt.Fprintf(&b, "  %-10s registers %s%s\n", t, orNone(strings.Join(handlers[t], ", ")), mark)
 	}
 	curHandlers := upgradeNames(c, repo, cur)
 	if len(curHandlers) > 0 {
@@ -367,7 +371,18 @@ fi
 	if handler != "" {
 		detail["adds handler"] = handler
 	}
-	if err := c.Approve(fmt.Sprintf("build %s on %s from %s@%s (takes several minutes; the node keeps running)", image, c.Profile.Name, repo, tag), toolkit.TierLocalChange, detail); err != nil {
+	// what the operator should know before saying yes
+	if need, have := goNeeded(c, repo, tag), dockerfileGo(c, dockerfile); need != "" && have != "" && semverLess("v"+have, "v"+need) {
+		detail["builder"] = fmt.Sprintf("Go %s → %s (%s needs it; the build uses a copy, your Dockerfile is unchanged)", have, need, tag)
+	}
+	prompt := fmt.Sprintf("build %s on %s from %s@%s (takes several minutes; the node keeps running)", image, c.Profile.Name, repo, tag)
+	if why := breaking(c, repo, tag); why != "" {
+		// consensus-breaking: always asked, whatever the auto-approval
+		detail["consensus"] = why + " — every validator must switch together at an upgrade height (gov proposal or halt-height); never restart a node onto it early"
+		if err := toolkit.RequireApproval(c, "CONSENSUS-BREAKING release — "+prompt, toolkit.TierLocalChange, detail); err != nil {
+			return nil, err
+		}
+	} else if err := c.Approve(prompt, toolkit.TierLocalChange, detail); err != nil {
 		return nil, err
 	}
 	if c.Progress != nil {
@@ -558,4 +573,69 @@ func ImageFor(c *toolkit.Context, template, runningImage, tag string) string {
 		return name + ":" + tag
 	}
 	return strings.NewReplacer("{tag}", tag, "{version}", strings.TrimPrefix(tag, "v")).Replace(template)
+}
+
+var (
+	breakingRe    = regexp.MustCompile(`(?i)\b(state|consensus)[ -]breaking\b`)
+	notBreakingRe = regexp.MustCompile(`(?i)\bnon[ -](state|consensus)[ -]breaking\b|\bnot (state|consensus)[ -]breaking\b`)
+	goLineRe      = regexp.MustCompile(`(?m)^toolchain go([0-9.]+)|^go ([0-9][0-9.]*)`)
+	fromGoRe      = regexp.MustCompile(`(?m)^FROM golang:([0-9][0-9.]*)`)
+)
+
+// breaking says whether a release's notes call it state- or
+// consensus-breaking ("" when they don't, or can't be read).
+func breaking(c *toolkit.Context, repo, tag string) string {
+	body := fetch(c, "https://api.github.com/repos/"+repo+"/releases/tags/"+tag)
+	var rel struct {
+		Body string `json:"body"`
+	}
+	if json.Unmarshal([]byte(body), &rel) != nil || notBreakingRe.MatchString(rel.Body) {
+		return ""
+	}
+	if m := breakingRe.FindString(rel.Body); m != "" {
+		return strings.ToLower(m) + " per the release notes"
+	}
+	return ""
+}
+
+// goNeeded is the Go version a release's go.mod asks for.
+func goNeeded(c *toolkit.Context, repo, tag string) string {
+	m := goLineRe.FindStringSubmatch(fetch(c, "https://raw.githubusercontent.com/"+repo+"/"+tag+"/go.mod"))
+	switch {
+	case m == nil:
+		return ""
+	case m[1] != "":
+		return m[1]
+	}
+	return m[2]
+}
+
+// dockerfileGo is the Go version of the node Dockerfile's builder image.
+func dockerfileGo(c *toolkit.Context, dockerfile string) string {
+	out, _, err := sh(c, "cat "+common.ShellQ(dockerfile), time.Minute)
+	if err != nil {
+		return ""
+	}
+	if m := fromGoRe.FindStringSubmatch(out); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+func fetch(c *toolkit.Context, url string) string {
+	req, err := http.NewRequestWithContext(c, "GET", url, nil)
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return ""
+	}
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	return string(raw)
 }

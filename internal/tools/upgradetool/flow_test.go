@@ -61,3 +61,23 @@ func TestImageNames(t *testing.T) {
 		t.Errorf("default = %q", got)
 	}
 }
+
+func TestBreakingNotes(t *testing.T) {
+	for note, want := range map[string]bool{
+		"__This release is state breaking.__":         true,
+		"Consensus-breaking change to the fee market": true,
+		"This is a non-state-breaking patch release":  false,
+		"Bug fixes only.":                             false,
+	} {
+		got := breakingRe.MatchString(note) && !notBreakingRe.MatchString(note)
+		if got != want {
+			t.Errorf("%q: breaking=%v, want %v", note, got, want)
+		}
+	}
+	if m := goLineRe.FindStringSubmatch("module x\n\ngo 1.25.9\n"); m == nil || m[2] != "1.25.9" {
+		t.Fatalf("go line: %v", m)
+	}
+	if m := fromGoRe.FindStringSubmatch("ARG X\nFROM golang:1.25.8-alpine AS b\n"); m == nil || m[1] != "1.25.8" {
+		t.Fatalf("from line: %v", m)
+	}
+}
