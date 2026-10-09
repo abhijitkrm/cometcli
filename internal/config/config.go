@@ -114,6 +114,8 @@ func MergeAgent(base, o AgentConf) AgentConf {
 	str(&r.BaseURL, o.BaseURL)
 	str(&r.APIKeyEnv, o.APIKeyEnv)
 	str(&r.Mode, o.Mode)
+	str(&r.Router, o.Router)
+	str(&r.Egress, o.Egress)
 	str(&r.Effort, o.Effort)
 	str(&r.Tools, o.Tools)
 	num(&r.MaxTokens, o.MaxTokens)

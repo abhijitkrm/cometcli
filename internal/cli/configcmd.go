@@ -43,6 +43,20 @@ var agentKeys = map[string]func(*config.AgentConf, string) error{
 		a.Tools = v
 		return nil
 	},
+	"router": func(a *config.AgentConf, v string) error {
+		if v != "" && v != "on" && v != "off" {
+			return fmt.Errorf("router: want on or off")
+		}
+		a.Router = v
+		return nil
+	},
+	"egress": func(a *config.AgentConf, v string) error {
+		if v != "" && v != "strict" && v != "filtered" {
+			return fmt.Errorf("egress: want strict or filtered")
+		}
+		a.Egress = v
+		return nil
+	},
 	"max_tokens":     intKey(func(a *config.AgentConf) *int { return &a.MaxTokens }),
 	"max_turns":      intKey(func(a *config.AgentConf) *int { return &a.MaxTurns }),
 	"context_window": intKey(func(a *config.AgentConf) *int { return &a.ContextWindow }),

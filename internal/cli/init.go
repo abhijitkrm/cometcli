@@ -672,8 +672,7 @@ func setupSigner(tc *toolkit.Context, d discovered, r *bufio.Reader, out io.Writ
 		say("  · skipped — import later: cometcli keys add --name operator --recover, then cometcli profile add %s --signer operator", p.Name)
 		return
 	}
-	note("file = password-encrypted file · os = OS keychain · test = plaintext, testnets only")
-	p.Signer.Backend = ask(r, out, "keyring backend (file|os|test)", "file")
+	p.Signer.Backend = askBackend(r, out, note)
 	mnemonic, err := readHidden(r, out, "operator mnemonic: ")
 	if err != nil || strings.TrimSpace(mnemonic) == "" {
 		say("  ! no mnemonic read — skipped")
@@ -702,8 +701,7 @@ func setupSigner(tc *toolkit.Context, d discovered, r *bufio.Reader, out io.Writ
 // newOpsKey generates a fresh key (non-validator profiles only).
 func newOpsKey(p *config.Profile, r *bufio.Reader, out io.Writer, say func(string, ...any), note func(string)) {
 	keyName := ask(r, out, "key name", "ops")
-	note("file = password-encrypted file · os = OS keychain · test = plaintext, testnets only")
-	p.Signer.Backend = ask(r, out, "keyring backend (file|os|test)", "file")
+	p.Signer.Backend = askBackend(r, out, note)
 	ring, err := keys.Open(p)
 	if err != nil {
 		say("  ! keyring: %v", err)
@@ -736,3 +734,17 @@ func readHidden(r *bufio.Reader, out io.Writer, prompt string) (string, error) {
 }
 
 func shq(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+// askBackend asks where cometcli keeps a key. Only persistent backends
+// are offered: "test" is in-memory and would lose the key on exit.
+func askBackend(r *bufio.Reader, out io.Writer, note func(string)) string {
+	note("file = password-encrypted file (COMETCLI_KEYRING_PASSWORD) · os = the OS keychain")
+	for {
+		switch b := ask(r, out, "keyring backend (file|os)", "file"); b {
+		case "file", "os":
+			return b
+		default:
+			note("want file or os")
+		}
+	}
+}

@@ -82,7 +82,7 @@ func (t *target) inRoot(c *toolkit.Context) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, "../")
 }
 
-var protectedRe = regexp.MustCompile(`priv_validator_key\.json$|node_key\.json$|(^|/)\.?mnemonics?(\.txt)?(/|$)|mnemonic|(^|/)keyring-(file|test|os)(/|$)|/\.ssh/id_|/\.cometcli/keys(/|$)|/\.gnupg/|(^|/)keystore(/|$)|(^|/)utc--[0-9]`)
+var protectedRe = regexp.MustCompile(`priv_validator_key\.json$|node_key\.json$|(^|/)\.?mnemonics?(\.txt)?(/|$)|mnemonic|(^|/)keyring-(file|test|os)(/|$)|/\.ssh/id_|/\.cometcli/keys(/|$)|/\.gnupg/|(^|/)keystore(/|$)|(^|/)utc--[0-9]|(^|/)key_seed\.json$`)
 
 // forbidden explains why a path may never pass through the agent.
 func forbidden(p string, write bool) string {

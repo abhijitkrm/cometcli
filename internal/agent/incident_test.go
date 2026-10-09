@@ -15,8 +15,11 @@ func incidentAgent(t *testing.T, prov *mockProvider, roots []string, sig kb.Sign
 	t.Helper()
 	var ran []string
 	stub := func(name string, tier toolkit.Tier, data map[string]any) stubTool {
-		return stubTool{name: name, tier: tier, run: func(_ *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
+		return stubTool{name: name, tier: tier, run: func(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
 			ran = append(ran, strings.TrimSpace(name+" "+a.String("action", "")+a.String("condition", "")))
+			if name == "val.unjail" && !strings.Contains(c.Purpose, "known case node-process-down") {
+				t.Errorf("the key use should say why: purpose %q", c.Purpose)
+			}
 			if err := fail[name]; err != nil {
 				return nil, err
 			}

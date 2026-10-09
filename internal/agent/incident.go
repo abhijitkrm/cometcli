@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/abhijitkrm/cometcli/internal/audit"
 	"github.com/abhijitkrm/cometcli/internal/config"
@@ -34,7 +35,7 @@ func (a *Agent) runIncident(ctx context.Context, what string) (string, error) {
 	if !ok {
 		return handoff("")
 	}
-	res, err := a.runTool(ctx, t, toolkit.Args{})
+	res, err := a.runTool(ctx, t, toolkit.Args{}, "/incident: triage")
 	if err != nil {
 		return handoff("")
 	}
@@ -62,6 +63,11 @@ func (a *Agent) runIncident(ctx context.Context, what string) (string, error) {
 		if st.Note != "" {
 			label += " — " + st.Note
 		}
+		if st.When != "" {
+			// conditions are about now, not about the triage minutes ago:
+			// a halted node gets jailed while the playbook runs
+			a.refreshSignals(ctx, sig, st.When)
+		}
 		if !st.Applies(sig) {
 			done = append(done, fmt.Sprintf("skipped %s (%s doesn't hold)", st.Do, st.When))
 			continue
@@ -70,7 +76,8 @@ func (a *Agent) runIncident(ctx context.Context, what string) (string, error) {
 		if !ok {
 			return handoff(triageNote + "\n\n" + playbookNote(c, done, fmt.Sprintf("step %d: no tool %s", i+1, st.Do)))
 		}
-		r, err := a.runTool(ctx, tool, playArgs(st.Args, a.Ctx.Profile))
+		why := fmt.Sprintf("/incident %s — known case %s (%s), playbook step %d: %s", what, c.ID, c.Title, i+1, st.Note)
+		r, err := a.runTool(ctx, tool, playArgs(st.Args, a.Ctx.Profile), why)
 		if err != nil {
 			if strings.Contains(err.Error(), "denied") || ctx.Err() != nil {
 				// the operator said no: stop here, don't let a model push on
@@ -79,7 +86,7 @@ func (a *Agent) runIncident(ctx context.Context, what string) (string, error) {
 			}
 			return handoff(triageNote + "\n\n" + playbookNote(c, done, fmt.Sprintf("step %d (%s) failed: %v", i+1, label, err)))
 		}
-		done = append(done, fmt.Sprintf("%s: %s", label, firstLine(a.Redact.Text(r.Text))))
+		done = append(done, fmt.Sprintf("%s: %s", label, stepOutcome(st.Do, r.Text)))
 	}
 
 	_, matched := c.Matches(sig)
@@ -89,7 +96,7 @@ func (a *Agent) runIncident(ctx context.Context, what string) (string, error) {
 		rr, err := a.runTool(ctx, rt, toolkit.Args{
 			"title": c.Title, "case": c.ID, "root_cause": c.Title + " (matched " + strings.Join(matched, ", ") + ")",
 			"evidence": strings.Join(matched, "\n"), "actions": strings.Join(done, "\n"), "outcome": outcome,
-		})
+		}, "/incident: record")
 		if err == nil {
 			recorded = "\n\n" + firstLine(rr.Text)
 		}
@@ -161,13 +168,14 @@ func shellWord(s string) string {
 // runTool runs one registry tool for cometcli's own procedures, through
 // the same gates as the model's calls: permission rules, approvals for
 // changes and key use, the audit log and the operator's UI.
-func (a *Agent) runTool(ctx context.Context, t toolkit.Tool, args toolkit.Args) (*toolkit.Result, error) {
+func (a *Agent) runTool(ctx context.Context, t toolkit.Tool, args toolkit.Args, purpose string) (*toolkit.Result, error) {
 	name := t.Name()
 	shown := a.Redact.Args(args)
 	a.emit(Event{Kind: EvToolStart, Tool: name, Tier: t.Tier().String(), Args: shown})
 	runCtx, cancel := a.toolCtx(ctx, t, args)
 	defer cancel()
 	defer runCtx.Close()
+	runCtx.Purpose = purpose
 	err := a.ruleGate(runCtx, t, shown)
 	var res *toolkit.Result
 	if err == nil {
@@ -188,4 +196,36 @@ func (a *Agent) runTool(ctx context.Context, t toolkit.Tool, args toolkit.Args) 
 	res.Text = text
 	a.emit(Event{Kind: EvToolResult, Tool: name, Tier: t.Tier().String(), Text: firstLine(text), Output: preview(text)})
 	return res, nil
+}
+
+// stepOutcome is a step's result in one line for the report: the first
+// line for most tools, a line count for raw output (a log's first line
+// says nothing about the incident).
+func stepOutcome(tool, text string) string {
+	text = strings.TrimSpace(text)
+	switch tool {
+	case "node.logs", "bash", "read", "grep":
+		return fmt.Sprintf("%d lines of output", len(strings.Split(text, "\n")))
+	}
+	return firstLine(text)
+}
+
+// refreshSignals re-collects the signal families a condition names
+// ("val.jailed == true" → val.*) into sig. Collection failures keep the
+// old values.
+func (a *Agent) refreshSignals(ctx context.Context, sig kb.Signals, cond string) {
+	if sig == nil || a.Ctx.Profile == nil {
+		return
+	}
+	name, _, _ := strings.Cut(strings.TrimSpace(cond), " ")
+	family, _, ok := strings.Cut(name, ".")
+	if !ok {
+		return
+	}
+	c, cancel := toolkit.WithDeadline(a.Ctx.Derive(ctx), time.Minute)
+	defer cancel()
+	defer c.Close()
+	for k, v := range triage.CollectFor(c, 5*time.Minute, []string{family + "."}).Signals {
+		sig[k] = v
+	}
 }

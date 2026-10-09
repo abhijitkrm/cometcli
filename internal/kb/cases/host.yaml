@@ -133,7 +133,7 @@
 
 - id: container-memory-limit
   title: Container memory limit too low for the node (OOM kills inside the container)
-  explains: [node-crash-loop, node-process-down, node-rpc-down, node-restarted-recently, node-killed-sigkill, host-oom-killed, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, node-catching-up, evm-rpc-down]
+  explains: [node-crash-loop, node-process-down, node-rpc-down, node-restarted-recently, node-killed-sigkill, host-oom-killed, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, node-catching-up, evm-rpc-down, val-in-set-while-syncing]
   severity: critical
   symptoms: restarts with no error in the logs; docker OOMKilled may be false because the node runs under a wrapper shell
   match:

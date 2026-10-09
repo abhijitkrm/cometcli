@@ -31,10 +31,18 @@ type Opts struct {
 }
 
 type acc struct {
-	opts  Opts
-	v     Verdict
-	depth int
+	opts    Opts
+	v       Verdict
+	depth   int
+	cmdText string // the whole command line, heredocs included
 }
+
+var (
+	copiers      = map[string]bool{"cp": true, "install": true, "ln": true, "rsync": true, "scp": true}
+	interpreters = map[string]bool{"python": true, "python3": true, "python2": true, "perl": true, "node": true, "ruby": true, "php": true, "jq": false}
+	// a node's data dir (or what's in it), by name or by the stores it holds
+	nodeDataRe = regexp.MustCompile(`(^|/)data/?(\*)?$|(^|/)data/(\*|application\.db|blockstore\.db|state\.db|tx_index\.db|evidence\.db|cs\.wal|snapshots)(/|$)|(application|blockstore|state|evidence)\.db/?$|(^|/)cs\.wal(/|$)`)
+)
 
 func (a *acc) raise(t toolkit.Tier, reason string) {
 	if t > a.v.Tier || a.v.Reason == "" && t == a.v.Tier && t >= toolkit.TierLocalChange {
@@ -62,7 +70,7 @@ func (a *acc) note(n string) {
 // wrappers (sudo, env, xargs, docker exec, bash -c) and invoked scripts
 // all taken into account. Unknown commands are local-change (ask).
 func Classify(cmd string, o Opts) Verdict {
-	a := &acc{opts: o, v: Verdict{Tier: toolkit.TierDiagnose}}
+	a := &acc{opts: o, v: Verdict{Tier: toolkit.TierDiagnose}, cmdText: cmd}
 	a.line(cmd)
 	return a.v
 }
@@ -379,7 +387,7 @@ func isDigits(s string) bool {
 
 // --- sensitive material --------------------------------------------------
 
-var protectedRe = regexp.MustCompile(`priv_validator_key\.json|node_key\.json|(^|/)\.?mnemonics?(\.txt)?(/|$)|mnemonic|keyring-(file|test|os)|/\.ssh/id_|\.cometcli/keys|\.gnupg/|(^|/)keystore(/|$)|(^|/)utc--[0-9]`)
+var protectedRe = regexp.MustCompile(`priv_validator_key\.json|node_key\.json|(^|/)\.?mnemonics?(\.txt)?(/|$)|mnemonic|keyring-(file|test|os)|/\.ssh/id_|\.cometcli/keys|\.gnupg/|(^|/)keystore(/|$)|(^|/)utc--[0-9]|key_seed\.json`)
 
 func protectedPath(word string) (bool, string) {
 	if m := protectedRe.FindString(strings.ToLower(word)); m != "" {
@@ -463,6 +471,28 @@ func (a *acc) simple(words []string) {
 	}
 	if (name == "rm" || name == "mv" || name == "truncate" || name == "shred") && containsWord(args, "priv_validator_state.json") {
 		a.forbid("removing priv_validator_state.json risks double-signing")
+	}
+	// copying over the double-sign guard: cp/install/ln/rsync to it, dd of=
+	if copiers[name] {
+		if dst := lastNonFlag(args); strings.Contains(dst, "priv_validator_state.json") || (strings.HasSuffix(dst, "/data") || strings.HasSuffix(dst, "/data/")) && containsWord(args, "priv_validator_state") {
+			a.forbid("overwriting priv_validator_state.json risks double-signing")
+		}
+	}
+	if name == "dd" && containsWord(args, "of=") && containsWord(args, "priv_validator_state.json") {
+		a.forbid("overwriting priv_validator_state.json risks double-signing")
+	}
+	// deleting a node's data directory is a state reset, and takes the
+	// double-sign guard (priv_validator_state.json) with it
+	if name == "rm" || name == "shred" || (name == "find" && containsWord(args, "-delete")) {
+		for _, x := range nonFlags(args) {
+			if nodeDataRe.MatchString(x) {
+				a.forbid("deleting " + x + " wipes the node's chain data and priv_validator_state.json (a state reset, double-sign risk) — the operator must do it")
+				break
+			}
+		}
+	}
+	if interpreters[name] && a.cmdText != "" && strings.Contains(a.cmdText, "priv_validator_state") {
+		a.forbid("a script that touches priv_validator_state.json risks double-signing — the operator handles that file")
 	}
 
 	switch name {
@@ -609,6 +639,21 @@ func (a *acc) chainCmd(name string, args []string) {
 		}
 	case "unsafe-reset-all":
 		a.forbid(name + " unsafe-reset-all wipes chain state — the operator must run it")
+		return
+	case "start":
+		if hasFlag(args, "--help", "-h") {
+			return
+		}
+		a.forbid("starting " + name + " by hand runs a second signer next to the node's service (double-sign risk) — start it with node.service")
+		return
+	case "init":
+		if hasFlag(args, "--help", "-h") {
+			return
+		}
+		a.forbid(name + " init writes new node and validator keys — the operator does it")
+		return
+	case "rollback":
+		a.forbid(name + " rollback rewrites chain state — the operator must run it")
 		return
 	case "config":
 		if len(args) > 1 && (args[1] == "get" || args[1] == "view") {
@@ -1065,4 +1110,14 @@ func stripComments(b []byte) []byte {
 		}
 	}
 	return []byte(strings.Join(lines, "\n"))
+}
+
+// lastNonFlag is the last argument that isn't a flag (a copy's target).
+func lastNonFlag(a []string) string {
+	for i := len(a) - 1; i >= 0; i-- {
+		if !strings.HasPrefix(a[i], "-") {
+			return a[i]
+		}
+	}
+	return ""
 }

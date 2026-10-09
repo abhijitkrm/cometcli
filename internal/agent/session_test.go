@@ -16,7 +16,6 @@ import (
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
 )
 
-
 // streamProvider wraps mockProvider with a Streamer that emits each
 // response's text in two chunks.
 type streamProvider struct{ *mockProvider }

@@ -43,6 +43,8 @@ var rawTools = map[string]bool{
 // lines are masked but the structure is kept.
 var maskedTools = map[string]bool{
 	"node.triage": true, "fleet.triage": true, "val.jail-check": true, "node.config": true,
+	// peer topology: node ids and IPs of sentries and peers
+	"node.peers": true, "sec.exposure": true, "fleet.status": true,
 }
 
 // ForModel turns a tool's output into what the model may see in mode.

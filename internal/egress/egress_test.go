@@ -120,3 +120,10 @@ func TestForModel(t *testing.T) {
 func itoa(i int) string {
 	return strings.TrimLeft(strings.Repeat("0", 3)+string(rune('0'+i/100))+string(rune('0'+i/10%10))+string(rune('0'+i%10)), "0")
 }
+
+func TestStrictMasksPeerTopology(t *testing.T) {
+	out := ForModel(Strict, "node.peers", "peers: 1\n  ef87b12f751d59d232d51b3230f9398b71a9066e@172.30.9.3  node1\n")
+	if strings.Contains(out, "172.30.9.3") || strings.Contains(out, "ef87b12f751d") || !strings.Contains(out, "peers: 1") {
+		t.Errorf("peers in strict mode: %q", out)
+	}
+}
