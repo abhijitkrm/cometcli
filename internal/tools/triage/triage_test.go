@@ -157,13 +157,13 @@ func TestTriagePlainSDKConfigProblems(t *testing.T) {
 	if _, ran := r.Sources["evm"]; ran {
 		t.Error("evm collector ran on a plain cosmos-sdk chain")
 	}
-	for k, v := range map[string]any{"config.db_backend_mismatch": true, "config.mempool_mismatch": true, "app.min_gas_prices_empty": true} {
+	for k, v := range map[string]any{"config.db_backend_mismatch": true, "app.min_gas_prices_empty": true} {
 		if r.Signals[k] != v {
 			t.Errorf("%s = %v", k, r.Signals[k])
 		}
 	}
 	got := ids(LoadKB(c).Match(r.Signals, r.Chain))
-	for _, id := range []string{"cfg-db-backend-mismatch", "cfg-mempool-mismatch", "cfg-min-gas-prices-empty"} {
+	for _, id := range []string{"cfg-db-backend-mismatch", "cfg-min-gas-prices-empty"} {
 		if !has(got, id) {
 			t.Errorf("missing %s in %v", id, got)
 		}
@@ -215,5 +215,56 @@ func TestKBTools(t *testing.T) {
 	}
 	if _, err := (Add{}).Run(c, toolkit.Args{"yaml": strings.Replace(yaml, "custom-sentry-lost", "../evil", 1)}); err == nil {
 		t.Fatal("path-traversal id accepted")
+	}
+}
+
+func TestTriageRemembersChangesIncidentsAndHistory(t *testing.T) {
+	c, chain := setup(t, "evmd", "db_backend = \"goleveldb\"\n", "minimum-gas-prices = \"1adex\"\n")
+	if _, err := (Triage{}).Run(c, toolkit.Args{}); err != nil {
+		t.Fatal(err)
+	}
+	chain.Set(func(c *fakenode.Comet) { c.Peers = 0 }) // something breaks between sweeps
+	res, err := (Triage{}).Run(c, toolkit.Args{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Text, "changed since the last check") || !strings.Contains(res.Text, "node.peers 3→0") {
+		t.Fatalf("no deltas:\n%s", res.Text)
+	}
+	// the agent records the incident when it's done
+	rec, err := (RecordIncident{}).Run(c, toolkit.Args{"title": "Peers lost after firewall change", "case": "node-no-peers",
+		"root_cause": "ufw blocked 26656", "actions": "- reopened 26656\n- restarted", "outcome": "resolved"})
+	if err != nil || !strings.Contains(rec.Text, "recorded incident") {
+		t.Fatalf("%v %v", rec, err)
+	}
+	res, _ = (Triage{}).Run(c, toolkit.Args{})
+	if !strings.Contains(res.Text, "past incidents on this node (30d): 1") || !strings.Contains(res.Text, "recurring: node-no-peers ×1") {
+		t.Fatalf("past incident not surfaced:\n%s", res.Text)
+	}
+	list, _ := (ListIncidents{}).Run(c, toolkit.Args{})
+	id := list.Data["incidents"].([]string)[0]
+	show, _ := (ShowIncident{}).Run(c, toolkit.Args{"id": id})
+	if !strings.Contains(show.Text, "ufw blocked 26656") || !strings.Contains(show.Text, "- reopened 26656") {
+		t.Fatalf("show:\n%s", show.Text)
+	}
+	h, err := (History{}).Run(c, toolkit.Args{"signals": "node.peers,val.", "since": "1h"})
+	if err != nil || !strings.Contains(h.Text, "node.peers: 3 → 0") || !strings.Contains(h.Text, "val.jailed") || !strings.Contains(h.Text, "3 samples") {
+		t.Fatalf("history:\n%s %v", h.Text, err)
+	}
+}
+
+func TestEVMMempoolMismatch(t *testing.T) {
+	c, _ := setup(t, "evmd", "[mempool]\ntype = \"flood\"\n", "[mempool]\nmax-txs = -1\n")
+	// running fine on flood (an older evm version): not flagged
+	if r := Collect(c, 30*time.Minute); r.Signals["config.mempool_mismatch"] == true {
+		t.Fatal("flagged a healthy node")
+	}
+	fakenode.SetNodeLogs(t, "Error: EVM mempool enabled, but comet-bft has invalid config.toml:mempool.type (want 'app', got 'flood'): configs mismatch\n", "status=restarting restarts=6 oom_killed=false exit=1")
+	r := Collect(c, 30*time.Minute)
+	if r.Signals["config.mempool_mismatch"] != true {
+		t.Fatalf("flood + EVM mempool not flagged: %v / %v", r.Signals["config.mempool_type"], r.Signals["app.mempool_max_txs"])
+	}
+	if !has(ids(LoadKB(c).Match(r.Signals, r.Chain)), "cfg-mempool-mismatch") {
+		t.Fatal("case not matched")
 	}
 }

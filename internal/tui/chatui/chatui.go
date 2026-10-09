@@ -1236,7 +1236,7 @@ func (m *model) banner() string {
 	}
 	tips := []string{
 		`Ask about this machine, e.g. "why is the disk filling up?"`,
-		"Work on a validator: " + bold.Render("/one <profile>") + " (or start with cometcli one <profile>)",
+		`Ask about a node by name, e.g. "is val01 healthy?" · ` + bold.Render("/incident <what's wrong>") + " works a problem end to end",
 		bold.Render("!") + " runs a command in your terminal · " + bold.Render("#") + " saves to memory · " + bold.Render("@") + " attaches a file",
 	}
 	if m.a.Node() {

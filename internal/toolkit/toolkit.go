@@ -334,3 +334,15 @@ func CallTimeout(t Tool, args Args) time.Duration {
 	}
 	return 90 * time.Second
 }
+
+// FleetWide is implemented by tools that work across all profiles and
+// need no active node — they're offered in general mode too.
+type FleetWide interface {
+	FleetWide() bool
+}
+
+// IsFleetWide reports whether t is fleet-wide.
+func IsFleetWide(t Tool) bool {
+	f, ok := t.(FleetWide)
+	return ok && f.FleetWide()
+}

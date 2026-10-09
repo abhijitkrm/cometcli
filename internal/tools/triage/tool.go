@@ -19,6 +19,12 @@ func Register(r *toolkit.Registry) {
 	r.Register(Search{})
 	r.Register(Show{})
 	r.Register(Add{})
+	r.Register(History{})
+	r.Register(FleetTriage{})
+	r.Register(Record{})
+	r.Register(RecordIncident{})
+	r.Register(ListIncidents{})
+	r.Register(ShowIncident{})
 }
 
 // LoadKB loads the built-in cases plus the user's and the project's.
@@ -58,6 +64,7 @@ func (Triage) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
 		since = d
 	}
 	r := Collect(c, since)
+	remember(c, r)
 	base := LoadKB(c)
 	hits := base.Match(r.Signals, r.Chain)
 	return &toolkit.Result{Text: Render(r, hits, a.String("signals", "")), Data: map[string]any{
@@ -123,6 +130,14 @@ func Render(r *Report, hits []kb.Hit, prefix string) string {
 		}
 		groups[g] = append(groups[g], name+"="+fmtVal(v))
 	}
+	if len(r.Deltas) > 0 {
+		ago := time.Since(r.DeltaSince).Round(time.Minute)
+		d := r.Deltas
+		if len(d) > 12 {
+			d = append(d[:12:12], fmt.Sprintf("… %d more", len(r.Deltas)-12))
+		}
+		fmt.Fprintf(&b, "changed since the last check (%s ago): %s\n", ago, strings.Join(d, ", "))
+	}
 	b.WriteString("signals:\n")
 	for _, g := range order {
 		fmt.Fprintf(&b, "  %s: %s\n", g, strings.Join(groups[g], " "))
@@ -151,6 +166,13 @@ func Render(r *Report, hits []kb.Hit, prefix string) string {
 		default:
 			incidents = append(incidents, h)
 		}
+	}
+	matched := map[string]bool{}
+	for _, h := range hits {
+		matched[h.Case.ID] = true
+	}
+	if pl := pastLine(r.Past, matched); pl != "" {
+		b.WriteString(pl + "\n")
 	}
 	if len(incidents) == 0 && len(symptoms) == 0 {
 		b.WriteString("matched cases: none — no known failure pattern. If something is still wrong, investigate from the signals, then record what you learn with kb.add.")

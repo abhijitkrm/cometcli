@@ -44,6 +44,29 @@ type Config struct {
 	// (no node) and as the base a profile's agent section overrides.
 	Agent    AgentConf           `yaml:"agent,omitempty"`
 	Profiles map[string]*Profile `yaml:"profiles"`
+	// Watch configures `cometcli watch`, the autonomous fleet watcher.
+	Watch WatchConf `yaml:"watch,omitempty"`
+}
+
+// WatchConf configures the autonomous watcher.
+type WatchConf struct {
+	Interval string   `yaml:"interval,omitempty"` // between sweeps (default 5m)
+	Mode     string   `yaml:"mode,omitempty"`     // notify | diagnose (default) | fix
+	Profiles []string `yaml:"profiles,omitempty"` // default: all
+	Cooldown string   `yaml:"cooldown,omitempty"` // before the same issue is worked again (default 1h)
+	// ApprovalTimeout is how long a remote approval waits before it's a
+	// "no" (default 15m).
+	ApprovalTimeout string `yaml:"approval_timeout,omitempty"`
+	// AllowTx lets fix mode request transaction approvals remotely;
+	// without it, transactions are always refused in watch mode.
+	AllowTx bool `yaml:"allow_tx,omitempty"`
+	// Alerts are where findings, reports and approvals go. Telegram is
+	// the approval channel (token: here or the TELEGRAM_BOT_TOKEN
+	// credential); Slack and Discord are notify-only.
+	Alerts Alerts `yaml:"alerts,omitempty"`
+	// TelegramUsers, when set, are the only Telegram user ids whose
+	// button presses count.
+	TelegramUsers []int64 `yaml:"telegram_users,omitempty"`
 }
 
 // AgentFor resolves the agent settings for a profile (nil = general
@@ -127,6 +150,9 @@ type Profile struct {
 	Agent        AgentConf         `yaml:"agent"`
 	Alerts       Alerts            `yaml:"alerts"`
 	Metadata     map[string]string `yaml:"metadata,omitempty"`
+	// Sentries names the profiles of the sentry nodes this validator
+	// peers through (fleet triage checks it isn't cut off).
+	Sentries []string `yaml:"sentries,omitempty"`
 }
 
 // IsValidator reports whether this profile is a consensus-signing validator.

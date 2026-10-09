@@ -22,6 +22,7 @@ var coreTools = map[string]bool{
 	"val.status": true, "val.signing": true,
 	"val.jail-check": true, "val.consensus": true, "wait.until": true, "chain.validators": true,
 	"node.triage": true, "kb.show": true, "kb.search": true,
+	"node.history": true, "incident.record": true, "fleet.triage": true,
 }
 
 var toolSearchDef = ToolDef{
@@ -66,7 +67,7 @@ func (a *Agent) advertised(t toolkit.Tool) bool {
 		return true
 	}
 	if !a.Node() {
-		return false // node tools need a node: /one <profile>
+		return toolkit.IsFleetWide(t) // other node tools need a node (use_node)
 	}
 	if !a.deferred() || coreTools[t.Name()] {
 		return true

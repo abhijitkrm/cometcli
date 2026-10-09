@@ -10,13 +10,14 @@ var builtinCommands = map[string]*settings.Command{
 		Description: "Work an incident to resolution: triage, match a known case, fix the root cause, wait, verify, report",
 		Body: `Work this incident on the node to resolution. Keep the operator's checklist current with todo_write; don't stop between steps unless something needs their decision.
 
-1. node.triage (since=2h if the problem started earlier). Note which sources were unavailable.
+1. node.triage (since=2h if the problem started earlier). Note which sources were unavailable, what changed since the last check, and past incidents on this node — a repeat means the last fix missed something (incident.show it). For "since when?", use node.history.
 2. Take the top matched case: kb.show it, run its confirm steps. If confirmation fails, move to the next case or kb.search the symptoms/log lines. No case at all → investigate from the signals and logs (node.logs, bash read-only).
 3. If several cases match, fix the one that CAUSES the others first (disk full → crash → behind → jailed: disk first).
 4. Apply the fix steps by CALLING the tools. [change] and [tx] steps are approved at the tool's own prompt: state in one line what you're doing and why, then make the call in the same step — never stop to ask for approval in text. Never do anything a case lists under NEVER.
 5. Wait for the effect with wait.until (synced, signing, in-consensus, or condition=signal value="<expr>"). If progress stalls, re-triage instead of waiting longer.
 6. Verify with the case's verify steps, then node.triage again: the case must no longer match.
-7. Report: root cause with evidence, actions taken (tx hashes), final state. If you found a cause no case described, propose a kb.add case (with a test fixture) for the operator to approve.
+7. Record it with incident.record (title, root cause, case id, evidence, actions, outcome) — the timeline and tx hashes are filled in for you.
+8. Report: root cause with evidence, actions taken (tx hashes), final state. If you found a cause no case described, propose a kb.add case (with a test fixture) for the operator to approve.
 
 What the operator sees: $ARGUMENTS`,
 	},

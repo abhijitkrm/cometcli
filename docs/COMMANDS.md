@@ -99,7 +99,8 @@ down is reported, never fatal. Signals are flat names (`val.jailed`,
 `host.disk_used_pct`, `logs.apphash`, `node.key_mismatch`…).
 
 Each **case** says which signals point to it, how to confirm it, causes, fix steps tagged
-`[read]` / `[change]` / `[tx]`, how to verify, and what never to do. In node mode,
+`[read]` / `[change]` / `[tx]`, how to verify, and what never to do. In any session
+(name the node — `/incident val01 is down` — and cometcli switches to it),
 **`/incident [what you see]`** runs the method: triage → confirm the top case → fix the
 root cause first (approvals as usual) → wait with `wait.until` → verify → re-triage →
 report. When the agent finds a cause no case covered, it offers to record one with
@@ -114,6 +115,31 @@ format in [EXTENDING.md](EXTENDING.md#knowledge-base-cases).
 
 ```bash
 cometcli wait until --condition signal --value "host.disk_used_pct < 85 && proc.running == true"
+```
+
+### History and incident records
+
+Every `node.triage` run is saved to the node's signal history
+(`~/.cometcli/history/<profile>/`, kept 30 days), and triage starts by saying what
+changed since the previous run (`node.peers 8→1, val.jailed false→true`). For trends:
+
+```bash
+cometcli node history                              # key health signals, last 24h
+cometcli node history --signals val.,node.peers --since 7d
+cometcli mon record --interval 5m                  # sample regularly, not only when someone triages
+```
+
+Each answer gives first → last, min/max, a trend line and when the value changed.
+
+When an incident is finished, the agent saves it with `incident.record`: title, root
+cause, matching case, evidence, actions and outcome. The timeline (prompts, tool calls,
+approvals) and transaction hashes are filled in from the audit log. Records live in
+`~/.cometcli/incidents/<profile>/` as JSON plus a Markdown postmortem. Triage
+mentions a node's past incidents and flags a case that keeps coming back.
+
+```bash
+cometcli incident list                             # last 30 days (--since 90d)
+cometcli incident show --id 20261007-0533-val-jailed-downtime
 ```
 
 ### Incident tools
@@ -287,12 +313,96 @@ cometcli evm txpool                    # pending/queued EVM tx counts
 ## Fleet (all profiles at once)
 
 ```bash
+cometcli fleet triage                              # every node triaged at once, then compared
+cometcli fleet triage --chain mychain-1            # one chain only
 cometcli fleet status                              # health matrix: height, peers, signing, disk
 cometcli fleet exec --tool node.status             # run a read-only tool everywhere
 cometcli fleet exec --tool node.logs --args '{"lines":20}'
 cometcli fleet exec --tool val.signing --profiles val01,val02
 cometcli fleet shell "uptime"                      # shell on every host (one approval)
 ```
+
+`fleet triage` gives one row per node (height, peers, signing, jailed, top case), then
+what only a comparison shows:
+
+- a node behind the others on its chain
+- a chain-wide halt: every node stalled, so the problem is the chain, not one node
+- version mismatches between nodes
+- two nodes running the same consensus key (double-sign risk)
+- validators sharing a host
+- a validator whose sentries are down
+
+Tell cometcli which sentries a validator peers through so it can check them:
+`cometcli profile add val01 --sentries sentry1,sentry2`. In a session, questions about
+several nodes ("how is my network?") start with `fleet.triage`, in general mode too.
+
+## Watching on your behalf
+
+```bash
+cometcli watch                                     # every node, every 5m, diagnose mode
+cometcli watch --mode fix --interval 2m            # may act — approvals go to Telegram
+cometcli watch --once --mode notify                # one sweep, report only (cron-friendly)
+```
+
+Each sweep is a fleet triage. A problem that newly appears (a critical or high case on
+a node, or a chain halt, double-sign risk or cut-off validator) becomes an incident:
+
+| mode | what happens |
+|---|---|
+| `notify` | the finding is reported |
+| `diagnose` (default) | the agent works the incident read-only and reports its findings |
+| `fix` | the agent may act; **each approval is sent to Telegram with Approve / Deny buttons** |
+
+The watcher reports findings, agent reports and recoveries. It doesn't work the same
+problem again within the cooldown (default 1h), and remembers what it saw across
+restarts.
+
+```yaml
+# ~/.cometcli/config.yaml
+watch:
+  interval: 5m
+  mode: diagnose            # notify | diagnose | fix
+  profiles: [val01, val02]  # default: all
+  cooldown: 1h
+  approval_timeout: 15m     # an unanswered approval is a "no"
+  allow_tx: false           # transactions are refused in watch mode unless true
+  telegram_users: [123456]  # only these Telegram users' presses count
+  alerts:
+    slack_webhook: https://hooks.slack.com/…     # reports only
+    discord_webhook: https://discord.com/api/webhooks/…
+    telegram_chat_id: "-100123456"               # reports and approvals
+```
+
+Save the Telegram bot token with `cometcli config set-key TELEGRAM_BOT_TOKEN`, or put it
+in `watch.alerts.telegram_token`. Only presses from that chat, and from
+`telegram_users` if set, count. Slack and Discord get reports but can't answer
+approvals.
+
+## Incident drills
+
+Check how well cometcli handles real faults, on a throwaway network:
+
+```bash
+cometcli drill testnet up --image <evmd image>     # 4 local validators in docker, fast slashing
+cometcli drill list                                # the scenarios
+cometcli drill run                                 # all of them (--scenario oom,partition to pick)
+cometcli drill testnet down                        # remove containers, data and drill profiles
+```
+
+Each scenario breaks a drill node for real:
+
+- stopped until it's jailed for downtime
+- `config.toml` broken (crash loop)
+- `halt-height` set
+- container memory limit too low (OOM)
+- network detached
+
+For each one, the drill checks whether triage named the right root cause, then lets the
+agent work it with `/incident`, verifies the fix on the node itself, and puts the node
+back to health. The scoreboard shows triage x/y and fixed x/y, with steps, tokens and
+time per scenario. Results are saved in `~/.cometcli/drills/`, so model or prompt
+changes can be compared run to run. Approvals are granted automatically, **but only on
+drill profiles** (`metadata.drill: "true"`); anything else is refused.
 
 ## Monitoring
 
@@ -409,8 +519,8 @@ saved after each turn to `~/.cometcli/sessions/` (0600, already redacted).
 | `/memory`, `/remember [--user\|--node] <text>` | memory files loaded; add a line to COMET.md |
 | `/mcp`, `/agents` | connected MCP servers; subagents for the task tool |
 | `/<custom>` | commands from `.cometcli/commands/*.md` — see [EXTENDING.md](EXTENDING.md) |
-| `/incident [what you see]` | node mode: triage → known case → fix root cause → wait → verify → report |
-| `/recover-jail [notes]` | node mode: run the full jail-recovery procedure |
+| `/incident [what you see]` | triage → known case → fix root cause → wait → verify → record → report; name the node to switch to it |
+| `/recover-jail [notes]` | the full jail-recovery procedure (name the node, or the agent picks it) |
 | `/one [profile\|off]` | switch the session to node mode for a profile, or back to general (conversation kept) |
 
 ### General tools and permissions
