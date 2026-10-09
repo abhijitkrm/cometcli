@@ -218,6 +218,50 @@ cometcli keys convert cosmos1abc...                    # bech32 ↔ 0x hex
 cometcli keys rm ops
 ```
 
+## Remote nodes over SSH
+
+Run cometcli on your laptop and manage a node on another machine. Every host
+operation (service control, logs, files, `docker exec`, the agent's `bash`) runs over
+one SSH connection, and endpoints that listen on the node's own localhost — RPC
+`127.0.0.1:26657`, gRPC `127.0.0.1:9090`, JSON-RPC `127.0.0.1:8545` — are reached
+through that connection. Nothing has to be opened in the firewall.
+
+```bash
+cometcli init                                          # pick "ssh": connects, trusts the host key, discovers on the node
+cometcli profile add val01 --ssh-host val01            # a ~/.ssh/config alias: HostName, User, Port, IdentityFile, ProxyJump
+cometcli profile add val01 --ssh-host 203.0.113.7 --ssh-user ec2-user --ssh-key ~/keys/val.pem
+cometcli profile add val01 --ssh-jump ops@bastion:22   # through a bastion (ssh -J)
+cometcli ssh test val01                                # connect, trust the host key, check docker/systemd/logs/home/ports
+```
+
+- **Host and settings**: `--ssh-host` takes an address or an alias from
+  `~/.ssh/config`. User, port, key and ProxyJump come from there unless the profile sets
+  them. If nothing names a user, `$USER` is used.
+- **Keys**: tried in this order:
+  1. the profile's `--ssh-key`
+  2. `IdentityFile` from `~/.ssh/config`
+  3. `~/.ssh/id_ed25519`, `id_ecdsa` and `id_rsa`
+  4. ssh-agent
+
+  A passphrase-protected key is asked for in `init` and `ssh test`. Everywhere else
+  (the terminal UI, `watch`), load it with `ssh-add`.
+- **Host keys**: checked against `~/.ssh/known_hosts`, or `UserKnownHostsFile` when
+  `~/.ssh/config` sets it.
+  - A new host must be trusted once, with `cometcli init`, `cometcli ssh test` or plain
+    `ssh`.
+  - A changed key is refused. Remove the old entry with `ssh-keygen -R <host>` only
+    after checking the new key.
+- **Connection**: kept alive, and redialed once if it drops (reboot, NAT timeout).
+- **Endpoints**: an endpoint naming the SSH host itself (e.g. its public IP) is also
+  reached as the node's localhost.
+
+The SSH user needs:
+- **docker nodes**: membership in the `docker` group.
+- **systemd nodes**: membership in `systemd-journal` (or `adm`) for logs, and
+  passwordless sudo for `systemctl`.
+
+`cometcli ssh test` checks each of these.
+
 ## Node (host + CometBFT)
 
 ```bash

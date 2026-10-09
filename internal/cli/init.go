@@ -8,7 +8,7 @@ import (
 	"io"
 	"net"
 	"os"
-	"os/exec"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -21,6 +21,7 @@ import (
 	"github.com/abhijitkrm/cometcli/internal/client/comet"
 	"github.com/abhijitkrm/cometcli/internal/client/evm"
 	"github.com/abhijitkrm/cometcli/internal/client/grpc"
+	"github.com/abhijitkrm/cometcli/internal/client/host"
 	"github.com/abhijitkrm/cometcli/internal/config"
 	"github.com/abhijitkrm/cometcli/internal/keys"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
@@ -97,26 +98,34 @@ func runInit(ctx context.Context, in io.Reader, out io.Writer) error {
 	note("local = node runs on this machine; ssh = manage a remote host")
 	p.Transport.Type = ask(r, out, "host transport (local|ssh)", "local")
 	if p.Transport.Type == "ssh" {
-		p.Transport.Host = ask(r, out, "ssh host", "")
-		p.Transport.User = ask(r, out, "ssh user", "ops")
-		if port := ask(r, out, "ssh port", "22"); port != "" {
-			fmt.Sscanf(port, "%d", &p.Transport.Port)
+		askSSH(&p, r, out, note)
+	}
+	h, err := connectHost(ctx, &p, r, out, say)
+	if err != nil {
+		return err
+	}
+	if c, ok := h.(io.Closer); ok {
+		defer c.Close()
+	}
+	// endpoints on the node machine are reached through the ssh connection
+	via := func(ep string) host.DialFunc {
+		if host.OnNode(p.Transport, ep) {
+			return host.NodeDialer(h, p.Transport)
 		}
-		note("private key for ssh auth — password-protected keys need ssh-agent")
-		p.Transport.KeyFile = ask(r, out, "ssh key file", filepath.Join("~", ".ssh", "id_ed25519"))
+		return nil
 	}
 
 	note("how the node process is supervised — picks the backend for start/stop/restart/logs")
-	p.Service.Type = ask(r, out, "service manager (systemd|docker|launchd|none)", detectService(&p))
+	p.Service.Type = ask(r, out, "service manager (systemd|docker|launchd|none)", detectService(ctx, h, &p))
 
 	// --- auto-discovery: read port bindings, mounts, binary, running process ---
 	var d discovered
 	switch p.Service.Type {
 	case "docker":
-		pickDocker(&p, r, out, say, note)
+		pickDocker(ctx, h, &p, r, out, say, note)
 		if p.Service.Unit != "" {
-			d = inspectDocker(p.Service.Unit)
-			d.binary = containerBinary(p.Service.Unit)
+			d = inspectDocker(ctx, h, p.Service.Unit)
+			d.binary = containerBinary(ctx, h, p.Service.Unit)
 			if d.comet != "" || d.home != "" {
 				say("  ✓ discovered from container: comet %s, home %s",
 					orDash(d.comet), orDash(d.home))
@@ -132,9 +141,9 @@ func runInit(ctx context.Context, in io.Reader, out io.Writer) error {
 		}[p.Service.Type])
 		fallthrough
 	default:
-		if dd := inspectLocal(); dd.binary != "" || dd.home != "" {
+		if dd := inspectLocal(ctx, h, via("127.0.0.1:1")); dd.binary != "" || dd.home != "" {
 			d = dd
-			say("  ✓ found local node: binary %s, home %s", orDash(d.binary), orDash(d.home))
+			say("  ✓ found node: binary %s, home %s", orDash(d.binary), orDash(d.home))
 		}
 	}
 
@@ -150,7 +159,7 @@ func runInit(ctx context.Context, in io.Reader, out io.Writer) error {
 	cometEP := ask(r, out, "CometBFT RPC endpoint", def(d.comet, "tcp://127.0.0.1:26657"))
 	p.Endpoints.Comet = cometEP
 	host := endpointHost(cometEP)
-	if cc, err := comet.New(cometEP); err == nil {
+	if cc, err := comet.NewVia(cometEP, via(cometEP)); err == nil {
 		if st, err := cc.Status(ctx); err == nil {
 			p.ChainID = st.NodeInfo.Network
 			mon := string(st.NodeInfo.Moniker)
@@ -179,7 +188,7 @@ func runInit(ctx context.Context, in io.Reader, out io.Writer) error {
 	if grpcEP != "" {
 		p.Endpoints.GRPC = grpcEP
 		dctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		gc, err := grpc.Dial(dctx, grpcEP)
+		gc, err := grpc.DialVia(dctx, grpcEP, via(grpcEP))
 		cancel()
 		if err == nil {
 			defer gc.Close()
@@ -220,12 +229,15 @@ func runInit(ctx context.Context, in io.Reader, out io.Writer) error {
 	}
 
 	// --- evm json-rpc: probe chain id ---
-	note("Ethereum JSON-RPC port (default 8545) — enables evm commands; blank disables them")
-	evmEP := ask(r, out, "EVM JSON-RPC endpoint (blank to skip)", def(d.evm, fmt.Sprintf("http://%s:8545", host)))
+	note("Ethereum JSON-RPC port (default 8545) — enables evm commands; \"none\" for a plain Cosmos SDK chain")
+	evmEP := ask(r, out, "EVM JSON-RPC endpoint (none to skip)", def(d.evm, fmt.Sprintf("http://%s:8545", host)))
+	if strings.EqualFold(evmEP, "none") || evmEP == "-" {
+		evmEP = ""
+	}
 	if evmEP != "" {
 		p.Endpoints.EVM = evmEP
 		ectx, ec := context.WithTimeout(ctx, 5*time.Second)
-		if id, err := evm.New(evmEP).ChainID(ectx); err == nil {
+		if id, err := evm.NewVia(evmEP, via(evmEP)).ChainID(ectx); err == nil {
 			p.EVMChainID = id
 			say("  ✓ evm chain-id: %d", id)
 		} else {
@@ -237,27 +249,32 @@ func runInit(ctx context.Context, in io.Reader, out io.Writer) error {
 	// --- binary + home: defaults come from discovery ---
 	note("the node daemon binary — usually evmd; for docker, the binary inside the container")
 	p.Binary = ask(r, out, "node binary name", def(d.binary, "evmd"))
-	note("the node's data dir as seen from THIS host — for docker, the mounted host path")
+	if p.Transport.Type == "ssh" {
+		note("the node's data dir on " + p.Transport.Host + " — for docker, the mounted host path")
+	} else {
+		note("the node's data dir as seen from THIS host — for docker, the mounted host path")
+	}
 	p.Home = ask(r, out, "node home dir", def(d.home, filepath.Join("~", "."+p.Binary)))
 
 	// the node's own app.toml tells us what fee the mempool will accept
-	if p.Transport.Type != "ssh" {
-		if gp, denom := minGasPriceDenom(expandHome(p.Home)); gp != "" {
-			if p.Metadata == nil {
-				p.Metadata = map[string]string{}
-			}
-			p.Metadata["gas_price"] = gp
-			if denom != "" {
-				// fees are paid in what the node accepts — on EVM chains
-				// that's usually not the bonding denom
-				p.Metadata["fee_denom"] = denom
-			}
-			say("  ✓ fees from app.toml: %s%s per gas", gp, denom)
+	if gp, denom := minGasPriceDenom(ctx, h, p.Home); gp != "" {
+		if p.Metadata == nil {
+			p.Metadata = map[string]string{}
 		}
+		p.Metadata["gas_price"] = gp
+		if denom != "" {
+			// fees are paid in what the node accepts — on EVM chains
+			// that's usually not the bonding denom
+			p.Metadata["fee_denom"] = denom
+		}
+		say("  ✓ fees from app.toml: %s%s per gas", gp, denom)
 	}
 
 	// --- which validator is this node, and what can sign for it ---
-	setupSigner(&p, d, r, out, say, note)
+	tc := &toolkit.Context{Context: ctx, Profile: &p}
+	tc.SetHost(h)
+	setupSigner(tc, d, r, out, say, note)
+	tc.Close() // also closes h; SSH.Close is idempotent
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -281,23 +298,86 @@ func runInit(ctx context.Context, in io.Reader, out io.Writer) error {
 
 // detectService makes a best-effort guess at how the node is supervised.
 // If docker has running containers that look like chain nodes, prefer docker.
-func detectService(p *config.Profile) string {
-	if p.Transport.Type == "ssh" {
-		return "systemd"
-	}
-	if _, err := exec.LookPath("docker"); err == nil && len(dockerContainers(p)) > 0 {
+func detectService(ctx context.Context, h host.Host, p *config.Profile) string {
+	has := func(bin string) bool { _, code, err := run(ctx, h, "command -v "+bin); return err == nil && code == 0 }
+	if has("docker") && len(dockerContainers(ctx, h, p)) > 0 {
 		return "docker"
 	}
-	if _, err := exec.LookPath("systemctl"); err == nil {
-		return "systemd"
-	}
-	if _, err := exec.LookPath("docker"); err == nil {
-		return "docker"
-	}
-	if _, err := exec.LookPath("launchctl"); err == nil {
-		return "launchd"
+	for _, s := range []string{"systemctl:systemd", "docker:docker", "launchctl:launchd"} {
+		bin, svc, _ := strings.Cut(s, ":")
+		if has(bin) {
+			return svc
+		}
 	}
 	return "none"
+}
+
+// run is a short discovery command on the node machine.
+func run(ctx context.Context, h host.Host, cmd string) (string, int, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return h.Run(ctx, cmd)
+}
+
+// askSSH fills the ssh transport; defaults come from ~/.ssh/config, and
+// only what differs from it is saved in the profile.
+func askSSH(p *config.Profile, r *bufio.Reader, out io.Writer, note func(string)) {
+	note("an address or a ~/.ssh/config alias — user, port, key and ProxyJump are read from there")
+	p.Transport.Host = ask(r, out, "ssh host", "")
+	tg := host.Resolve(p.Transport)
+	if tg.HostName != tg.Alias {
+		note("~/.ssh/config: " + tg.Alias + " → " + tg.String())
+	}
+	if u := ask(r, out, "ssh user", tg.User); u != tg.User {
+		p.Transport.User = u
+	}
+	if port := ask(r, out, "ssh port", strconv.Itoa(tg.Port)); port != strconv.Itoa(tg.Port) {
+		fmt.Sscanf(port, "%d", &p.Transport.Port)
+	}
+	def := ""
+	if len(tg.Keys) > 0 {
+		def = tg.Keys[0]
+	}
+	note("private key — blank uses ssh-agent and ~/.ssh/id_*; passphrase-protected keys are asked for or taken from ssh-agent")
+	if k := ask(r, out, "ssh key file", def); k != def {
+		p.Transport.KeyFile = k
+	}
+	if len(tg.Jumps) == 0 {
+		note("a bastion to go through, like ssh -J (blank for a direct connection)")
+		p.Transport.Jump = ask(r, out, "jump host", "")
+	}
+}
+
+// connectHost opens the profile's transport, asking to trust a new host
+// key and for key passphrases as ssh would.
+func connectHost(ctx context.Context, p *config.Profile, r *bufio.Reader, out io.Writer, say func(string, ...any)) (host.Host, error) {
+	if p.Transport.Type != "ssh" {
+		return host.Connect(ctx, p)
+	}
+	restore := interactiveSSH(r, out)
+	defer restore()
+	h, err := host.Connect(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("%w\nfix the ssh settings and run cometcli init again", err)
+	}
+	who, _, _ := run(ctx, h, "echo \"$(id -un)@$(hostname)\"")
+	say("  ✓ connected over ssh: %s", strings.TrimSpace(who))
+	return h, nil
+}
+
+// interactiveSSH lets the ssh transport ask on this terminal: trust a new
+// host key, unlock a key file. It returns a func that undoes it.
+func interactiveSSH(r *bufio.Reader, out io.Writer) func() {
+	trust, pass := host.TrustHost, host.Passphrase
+	host.TrustHost = func(h, fp string) bool {
+		fmt.Fprintf(out, "  the authenticity of host %s can't be established.\n  its key fingerprint is %s.\n", h, fp)
+		return askYN(r, out, "  trust it and add it to known_hosts?", false)
+	}
+	host.Passphrase = func(keyFile string) ([]byte, error) {
+		pw, err := readHidden(r, out, "  passphrase for "+keyFile+": ")
+		return []byte(strings.TrimRight(pw, "\r\n")), err
+	}
+	return func() { host.TrustHost, host.Passphrase = trust, pass }
 }
 
 // discovered holds what the wizard figured out on its own before asking.
@@ -315,8 +395,8 @@ func orDash(s string) string {
 }
 
 // pickDocker lists running containers and sets p.Service.Unit to the choice.
-func pickDocker(p *config.Profile, r *bufio.Reader, out io.Writer, say func(string, ...any), note func(string)) {
-	names := dockerContainers(p)
+func pickDocker(ctx context.Context, h host.Host, p *config.Profile, r *bufio.Reader, out io.Writer, say func(string, ...any), note func(string)) {
+	names := dockerContainers(ctx, h, p)
 	if len(names) == 0 {
 		note("no running containers found — enter the container name manually")
 		p.Service.Unit = ask(r, out, "container name", "evmd")
@@ -338,10 +418,8 @@ func pickDocker(p *config.Profile, r *bufio.Reader, out io.Writer, say func(stri
 // inspectDocker reads a container's published ports and bind mounts so the
 // user doesn't have to type them — port mappings remap on restart, and the
 // mounted home dir is what file checks need.
-func inspectDocker(container string) (d discovered) {
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, "docker", "inspect", container).Output()
+func inspectDocker(ctx context.Context, h host.Host, container string) (d discovered) {
+	out, _, err := run(ctx, h, "docker inspect "+shq(container))
 	if err != nil {
 		return d
 	}
@@ -356,7 +434,7 @@ func inspectDocker(container string) (d discovered) {
 			Destination string `json:"Destination"`
 		} `json:"Mounts"`
 	}
-	if err := json.Unmarshal(out, &meta); err != nil || len(meta) == 0 {
+	if err := json.Unmarshal([]byte(out), &meta); err != nil || len(meta) == 0 {
 		return d
 	}
 	hostPort := func(containerPort string) string {
@@ -382,7 +460,7 @@ func inspectDocker(container string) (d discovered) {
 	// /var/run/docker.sock is worse than asking the user.
 	// best: a mount that actually holds a node home (config/genesis.json)
 	for _, m := range meta[0].Mounts {
-		if _, err := os.Stat(filepath.Join(m.Source, "config", "genesis.json")); err == nil {
+		if _, code, err := run(ctx, h, "test -f "+shq(path.Join(m.Source, "config", "genesis.json"))); err == nil && code == 0 {
 			d.home, d.containerHome = m.Source, m.Destination
 			break
 		}
@@ -402,30 +480,28 @@ func inspectDocker(container string) (d discovered) {
 // containerBinary probes which daemon binary exists inside the container.
 var binCandidates = []string{"evmd", "simd", "cosmosd", "gaiad", "wasmd"}
 
-func containerBinary(container string) string {
+func containerBinary(ctx context.Context, h host.Host, container string) string {
 	for _, b := range binCandidates {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		err := exec.CommandContext(ctx, "docker", "exec", container, b, "version").Run()
-		cancel()
-		if err == nil {
+		if _, code, err := run(ctx, h, "docker exec "+shq(container)+" "+b+" version"); err == nil && code == 0 {
 			return b
 		}
 	}
 	return ""
 }
 
-// inspectLocal finds a locally-running node: binary on PATH, `--home` from
-// the process args, and which default ports are actually listening.
-func inspectLocal() (d discovered) {
+// inspectLocal finds a node running on the host: binary on PATH, `--home`
+// from the process args, and which default ports are actually listening
+// (dialed through dial on a remote host).
+func inspectLocal(ctx context.Context, h host.Host, dial host.DialFunc) (d discovered) {
 	for _, b := range binCandidates {
-		if _, err := exec.LookPath(b); err == nil {
+		if _, code, err := run(ctx, h, "command -v "+b); err == nil && code == 0 {
 			d.binary = b
 			break
 		}
 	}
 	if d.binary != "" {
-		if out, err := exec.Command("ps", "-eo", "args").Output(); err == nil {
-			for _, line := range strings.Split(string(out), "\n") {
+		if out, _, err := run(ctx, h, "ps -eo args"); err == nil {
+			for _, line := range strings.Split(out, "\n") {
 				if !strings.Contains(line, d.binary) || strings.Contains(line, "cometcli") {
 					continue
 				}
@@ -436,8 +512,13 @@ func inspectLocal() (d discovered) {
 			}
 		}
 	}
+	if dial == nil {
+		dial = (&net.Dialer{}).DialContext
+	}
 	open := func(port string) bool {
-		c, err := net.DialTimeout("tcp", "127.0.0.1:"+port, 400*time.Millisecond)
+		dctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		c, err := dial(dctx, "tcp", "127.0.0.1:"+port)
 		if err != nil {
 			return false
 		}
@@ -468,12 +549,13 @@ func expandHome(path string) string {
 	return path
 }
 
-// minGasPrice reads app.toml's minimum-gas-prices ("1000000000adex") and
-// returns the numeric price, so txs default to what the mempool accepts.
 // minGasPriceDenom reads app.toml's minimum-gas-prices ("1000000000atest")
 // as amount and denom — the denom is what the node accepts fees in.
-func minGasPriceDenom(home string) (string, string) {
-	b, err := os.ReadFile(filepath.Join(home, "config", "app.toml"))
+func minGasPriceDenom(ctx context.Context, h host.Host, home string) (string, string) {
+	if _, local := h.(*host.Local); local {
+		home = expandHome(home)
+	}
+	b, err := h.ReadFile(ctx, path.Join(home, "config", "app.toml"))
 	if err != nil {
 		return "", ""
 	}
@@ -511,19 +593,14 @@ func homeFromArgs(args string) string {
 	return ""
 }
 
-// dockerContainers lists running container names (local transport only).
-func dockerContainers(p *config.Profile) []string {
-	if p.Transport.Type == "ssh" {
-		return nil
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, "docker", "ps", "--format", "{{.Names}}").Output()
+// dockerContainers lists running container names on the node's host.
+func dockerContainers(ctx context.Context, h host.Host, p *config.Profile) []string {
+	out, _, err := run(ctx, h, "docker ps --format '{{.Names}}'")
 	if err != nil {
 		return nil
 	}
 	var names []string
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 		if line = strings.TrimSpace(line); line != "" {
 			names = append(names, line)
 		}
@@ -550,13 +627,12 @@ func dockerContainers(p *config.Profile) []string {
 // and finds a way to sign as its operator account — the node's keyring
 // first, then importing the operator key. It never makes up a new key for
 // a validator: only the operator account can unjail, vote or edit it.
-func setupSigner(p *config.Profile, d discovered, r *bufio.Reader, out io.Writer, say func(string, ...any), note func(string)) {
+func setupSigner(tc *toolkit.Context, d discovered, r *bufio.Reader, out io.Writer, say func(string, ...any), note func(string)) {
+	p := tc.Profile
 	if p.Metadata == nil {
 		p.Metadata = map[string]string{}
 	}
-	vctx := &toolkit.Context{Context: context.Background(), Profile: p}
-	valoper, verr := common.ValoperFromNode(vctx)
-	vctx.Close()
+	valoper, verr := common.ValoperFromNode(tc)
 	if verr != nil {
 		say("  · not a validator on chain (yet): %v", verr)
 		note("an ops key can send funds or create a validator later — skip for read-only monitoring")
@@ -576,15 +652,15 @@ func setupSigner(p *config.Profile, d discovered, r *bufio.Reader, out io.Writer
 		if bin == "" {
 			bin = "evmd"
 		}
-		show := exec.Command("docker", "exec", p.Service.Unit, bin, "keys", "show", acc, "-a",
-			"--keyring-backend", "test", "--home", d.containerHome)
-		if outb, err := show.CombinedOutput(); err == nil && strings.Contains(string(outb), acc) {
+		h, _ := tc.Host()
+		show := fmt.Sprintf("docker exec %s %s keys show %s -a --keyring-backend test --home %s 2>&1",
+			shq(p.Service.Unit), shq(bin), shq(acc), shq(d.containerHome))
+		if outs, _, err := run(tc, h, show); err == nil && strings.Contains(outs, acc) {
 			p.Signer.Mode, p.Signer.ContainerHome, p.Signer.ContainerKeyring = "container", d.containerHome, "test"
 			say("  ✓ the node's keyring has the operator key — transactions are signed inside %s", p.Service.Unit)
 			return
 		}
-		ls := exec.Command("docker", "exec", p.Service.Unit, "ls", d.containerHome+"/keyring-file")
-		if err := ls.Run(); err == nil {
+		if _, code, err := run(tc, h, "docker exec "+shq(p.Service.Unit)+" ls "+shq(d.containerHome+"/keyring-file")); err == nil && code == 0 {
 			p.Signer.Mode, p.Signer.ContainerHome = "container", d.containerHome
 			say("  ✓ the node has an encrypted (file) keyring — cometcli signs inside %s and asks for its password when needed", p.Service.Unit)
 			return
@@ -658,3 +734,5 @@ func readHidden(r *bufio.Reader, out io.Writer, prompt string) (string, error) {
 	}
 	return line, nil
 }
+
+func shq(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }

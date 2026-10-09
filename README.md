@@ -110,6 +110,17 @@ cometcli profile add myval \
 
 `--evm` is optional: leave it out for a plain Cosmos SDK chain.
 
+**Remote nodes**: run cometcli on your laptop and reach the node over SSH. Give it an
+address or a `~/.ssh/config` alias; the user, key and ProxyJump are read from there.
+Host keys are checked against `known_hosts`. The node's localhost-only RPC and gRPC
+ports are reached through the SSH connection, so nothing needs opening in the firewall.
+
+```bash
+cometcli profile add val01 --ssh-host val01 --service docker --unit validator \
+  --comet tcp://127.0.0.1:26657 --grpc 127.0.0.1:9090
+cometcli ssh test val01        # trust the host key, check docker/systemd/logs/ports
+```
+
 ## The terminal
 
 An inline chat: answers land in your normal scrollback, and only
@@ -370,7 +381,8 @@ COMETCLI_E2E_COMET=tcp://127.0.0.1:26657 go test ./test/e2e/...
 # container signing against a real evmd image:
 go test -tags realdocker ./internal/tools/common/
 
-# SSH transport e2e (needs a reachable sshd):
+# SSH transport: in-process sshd tests run with go test; against a real sshd
+# (its host key must be in ~/.ssh/known_hosts):
 COMETCLI_SSH_TEST_HOST=127.0.0.1 COMETCLI_SSH_TEST_PORT=2222 \
 COMETCLI_SSH_TEST_USER=ops COMETCLI_SSH_TEST_KEY=~/.ssh/id_ed25519 \
 go test ./internal/client/host -run SSHLive -v

@@ -142,6 +142,9 @@ func profileAddCmd() *cobra.Command {
 				if fl.Changed("ssh-key") {
 					np.Transport.KeyFile = p.Transport.KeyFile
 				}
+				if fl.Changed("ssh-jump") {
+					np.Transport.Jump = p.Transport.Jump
+				}
 				if fl.Changed("service") {
 					np.Service.Type = p.Service.Type
 				}
@@ -168,6 +171,9 @@ func profileAddCmd() *cobra.Command {
 			}
 			if p.Transport.Type == "" {
 				p.Transport.Type = "local"
+				if p.Transport.Host != "" {
+					p.Transport.Type = "ssh"
+				}
 			}
 			if signerKey != "" {
 				p.Signer.Key = signerKey
@@ -202,10 +208,11 @@ func profileAddCmd() *cobra.Command {
 	f.StringVar(&p.Endpoints.LCD, "lcd", "", "LCD/REST endpoint")
 	f.StringVar(&p.Endpoints.EVM, "evm", "", "eth JSON-RPC endpoint (RPC/sentry nodes only)")
 	f.StringVar(&p.Transport.Type, "transport", "", "local | ssh")
-	f.StringVar(&p.Transport.Host, "ssh-host", "", "ssh host (transport=ssh)")
-	f.StringVar(&p.Transport.User, "ssh-user", "", "ssh user")
-	f.IntVar(&p.Transport.Port, "ssh-port", 22, "ssh port")
-	f.StringVar(&p.Transport.KeyFile, "ssh-key", "", "ssh private key path")
+	f.StringVar(&p.Transport.Host, "ssh-host", "", "ssh host: an address or a ~/.ssh/config alias (transport=ssh)")
+	f.StringVar(&p.Transport.User, "ssh-user", "", "ssh user (default: ~/.ssh/config, then $USER)")
+	f.IntVar(&p.Transport.Port, "ssh-port", 0, "ssh port (default: ~/.ssh/config, then 22)")
+	f.StringVar(&p.Transport.KeyFile, "ssh-key", "", "ssh private key (default: ~/.ssh/config IdentityFile, ssh-agent, ~/.ssh/id_*)")
+	f.StringVar(&p.Transport.Jump, "ssh-jump", "", "bastion to go through, like ssh -J (user@host:port)")
 	f.StringVar(&p.Service.Type, "service", "", "systemd | docker | launchd | none")
 	f.StringVar(&p.Service.Unit, "unit", "", "service unit/container name")
 	f.StringSliceVar(&p.Sentries, "sentries", nil, "profiles of the sentry nodes this validator peers through (comma-separated)")

@@ -163,7 +163,7 @@ func (s *SSH) Exec(ctx context.Context, script string, maxOut int) (ExecResult, 
 
 // ExecIn is Exec with stdin.
 func (s *SSH) ExecIn(ctx context.Context, script string, stdin []byte, maxOut int) (ExecResult, error) {
-	sess, err := s.client.NewSession()
+	sess, err := s.session(ctx)
 	if err != nil {
 		return ExecResult{}, err
 	}

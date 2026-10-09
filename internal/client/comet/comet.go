@@ -4,6 +4,8 @@ package comet
 
 import (
 	"context"
+	"net"
+	"net/http"
 	"strings"
 
 	rpchttp "github.com/cometbft/cometbft/rpc/client/http"
@@ -18,8 +20,20 @@ type Client struct {
 
 // New connects to a CometBFT RPC endpoint (tcp:// or http:// URL).
 func New(endpoint string) (*Client, error) {
+	return NewVia(endpoint, nil)
+}
+
+// NewVia connects through dial (e.g. an SSH tunnel); nil dials directly.
+func NewVia(endpoint string, dial func(ctx context.Context, network, addr string) (net.Conn, error)) (*Client, error) {
 	if !strings.Contains(endpoint, "://") {
 		endpoint = "tcp://" + endpoint
+	}
+	if dial != nil {
+		c, err := rpchttp.NewWithClient(endpoint, "/websocket", &http.Client{Transport: &http.Transport{DialContext: dial}})
+		if err != nil {
+			return nil, err
+		}
+		return &Client{RPC: c}, nil
 	}
 	c, err := rpchttp.New(endpoint, "/websocket")
 	if err != nil {

@@ -81,9 +81,27 @@ func (c *Context) Comet() (*comet.Client, error) {
 		if ep == "" {
 			ep = "tcp://127.0.0.1:26657"
 		}
-		c.comet, c.cometEr = comet.New(ep)
+		dial, err := c.nodeDialLocked(ep)
+		if err != nil {
+			return nil, err // not cached: the ssh connection may come back
+		}
+		c.comet, c.cometEr = comet.NewVia(ep, dial)
 	}
 	return c.comet, c.cometEr
+}
+
+// nodeDialLocked returns a dialer through the node's SSH connection when
+// endpoint is on the node itself (its localhost or the SSH host) — nil
+// when it's reached directly. Called with c.mu held.
+func (c *Context) nodeDialLocked(endpoint string) (host.DialFunc, error) {
+	if c.Profile == nil || !host.OnNode(c.Profile.Transport, endpoint) {
+		return nil, nil
+	}
+	h, err := c.hostLocked()
+	if err != nil {
+		return nil, fmt.Errorf("%s is on the node, reached through ssh: %w", endpoint, err)
+	}
+	return host.NodeDialer(h, c.Profile.Transport), nil
 }
 
 // GRPC lazily dials the Cosmos gRPC endpoint. When the node's own
@@ -104,9 +122,13 @@ func (c *Context) GRPC() (*grpcclient.Conn, error) {
 	if ep == "" {
 		return nil, fmt.Errorf("profile %q has no grpc endpoint configured", c.Profile.Name)
 	}
-	conn, err := grpcclient.Dial(c.Context, ep)
+	dial, err := c.nodeDialLocked(ep)
+	var conn *grpcclient.Conn
+	if err == nil {
+		conn, err = grpcclient.DialVia(c.Context, ep, dial)
+	}
 	if err != nil && c.Profile.Endpoints.FallbackGRPC != "" {
-		if fb, ferr := grpcclient.Dial(c.Context, c.Profile.Endpoints.FallbackGRPC); ferr == nil {
+		if fb, ferr := c.dialGRPCLocked(c.Profile.Endpoints.FallbackGRPC); ferr == nil {
 			conn, err, c.GRPCFallback = fb, nil, true
 		}
 	}
@@ -126,12 +148,20 @@ func (c *Context) FallbackGRPC() (*grpcclient.Conn, bool) {
 	if c.GRPCFallback && c.grpc != nil {
 		return c.grpc, true
 	}
-	fb, err := grpcclient.Dial(c.Context, c.Profile.Endpoints.FallbackGRPC)
+	fb, err := c.dialGRPCLocked(c.Profile.Endpoints.FallbackGRPC)
 	if err != nil {
 		return nil, false
 	}
 	c.grpc, c.GRPCFallback = fb, true // the node's own conn is closed with the context's
 	return fb, true
+}
+
+func (c *Context) dialGRPCLocked(ep string) (*grpcclient.Conn, error) {
+	dial, err := c.nodeDialLocked(ep)
+	if err != nil {
+		return nil, err
+	}
+	return grpcclient.DialVia(c.Context, ep, dial)
 }
 
 // EVM lazily connects the Ethereum JSON-RPC endpoint.
@@ -146,7 +176,11 @@ func (c *Context) EVM() (*evmclient.Client, error) {
 		if ep == "" {
 			c.evmErr = fmt.Errorf("profile %q has no evm (JSON-RPC) endpoint — expected on validator nodes", c.Profile.Name)
 		} else {
-			c.evm = evmclient.New(ep)
+			dial, err := c.nodeDialLocked(ep)
+			if err != nil {
+				return nil, err
+			}
+			c.evm = evmclient.NewVia(ep, dial)
 		}
 	}
 	return c.evm, c.evmErr
@@ -156,6 +190,10 @@ func (c *Context) EVM() (*evmclient.Client, error) {
 func (c *Context) Host() (host.Host, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.hostLocked()
+}
+
+func (c *Context) hostLocked() (host.Host, error) {
 	if c.host == nil && c.hostErr == nil {
 		if c.Profile == nil {
 			// no node profile (general mode): the operator's own machine
