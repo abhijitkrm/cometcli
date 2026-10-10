@@ -1,6 +1,6 @@
 - id: host-disk-full
   title: Disk full or nearly full on the node data volume
-  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, state-db-corrupt, host-disk-high, host-disk-free-low]
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, state-db-corrupt, host-disk-high, host-disk-free-low, node-no-peers, node-low-peers]
   severity: critical
   match:
     any: ["host.disk_used_pct >= 95", "logs.disk_io > 0"]
@@ -18,6 +18,10 @@
   warnings:
     - never delete data/priv_validator_state.json or anything under config/
     - never delete application.db/blockstore.db on a validator to free space
+  playbook_kind: report
+  playbook:
+    - {do: bash, args: {command: "df -h / {sig:node.host_home}; du -sh {sig:node.host_home}/data/* 2>/dev/null | sort -h | tail -8", description: "what fills the disk"}, note: "where the space goes"}
+    - {do: snap.prune, note: "pruning advice"}
   test:
     signals: {host.disk_used_pct: 98}
 
@@ -29,12 +33,16 @@
   fix:
     - "[read] snap.prune; du of data dirs"
     - "[change] plan pruning / cleanup / resize before it fills"
+  playbook_kind: report
+  playbook:
+    - {do: bash, args: {command: "df -h / {sig:node.host_home}; du -sh {sig:node.host_home}/data/* 2>/dev/null | sort -h | tail -8", description: "what fills the disk"}, note: "where the space goes"}
+    - {do: snap.prune, note: "pruning advice"}
   test:
     signals: {host.disk_used_pct: 88}
 
 - id: host-inodes-exhausted
   title: Inodes exhausted
-  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, node-no-peers, node-low-peers]
   severity: critical
   match:
     all: ["host.inode_used_pct >= 95"]
@@ -47,7 +55,7 @@
 
 - id: host-oom-killed
   title: Node killed for out-of-memory
-  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, host-memory-pressure]
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, host-memory-pressure, node-no-peers, node-low-peers]
   severity: critical
   match:
     any: ["proc.oom_killed == true", "logs.oom > 0", "proc.oom_kills > 0"]
@@ -71,6 +79,9 @@
   fix:
     - "[read] bash: ps aux --sort=-rss | head"
     - "[change] reduce caches / other processes; add RAM"
+  playbook_kind: report
+  playbook:
+    - {do: bash, args: {command: "uptime; free -m; ps aux --sort=-%cpu | head -8; ps aux --sort=-rss | head -6", description: "what uses the host"}, note: "who uses the CPU and memory"}
   test:
     signals: {host.mem_used_pct: 94}
 
@@ -83,6 +94,9 @@
   fix:
     - "[read] bash: top -bn1 | head -20"
     - "[change] move other workloads off the validator host"
+  playbook_kind: report
+  playbook:
+    - {do: bash, args: {command: "uptime; free -m; ps aux --sort=-%cpu | head -8; ps aux --sort=-rss | head -6", description: "what uses the host"}, note: "who uses the CPU and memory"}
   test:
     signals: {host.load_per_cpu: 3.5}
 
@@ -98,6 +112,9 @@
     - "[change] enable chrony/systemd-timesyncd: timedatectl set-ntp true"
   verify:
     - "clock.ntp_synced true"
+  playbook:
+    - {do: bash, args: {command: "sudo -n timedatectl set-ntp true && timedatectl show -p NTPSynchronized", description: "turn on NTP time sync"}, note: "needs passwordless sudo"}
+    - {do: wait.until, args: {condition: signal, value: "clock.ntp_synced == true", timeout: 300}, note: "wait for the clock to sync"}
   test:
     signals: {clock.ntp_synced: false}
 
@@ -116,7 +133,7 @@
 
 - id: host-port-in-use
   title: Node can't bind a port (address already in use)
-  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, node-no-peers, node-low-peers]
   severity: high
   match:
     all: ["logs.port_in_use > 0"]
@@ -133,7 +150,7 @@
 
 - id: container-memory-limit
   title: Container memory limit too low for the node (OOM kills inside the container)
-  explains: [node-crash-loop, node-process-down, node-rpc-down, node-restarted-recently, node-killed-sigkill, host-oom-killed, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, node-catching-up, evm-rpc-down, val-in-set-while-syncing]
+  explains: [node-crash-loop, node-process-down, node-rpc-down, node-restarted-recently, node-killed-sigkill, host-oom-killed, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, node-catching-up, evm-rpc-down, val-in-set-while-syncing, node-no-peers, node-low-peers]
   severity: critical
   symptoms: restarts with no error in the logs; docker OOMKilled may be false because the node runs under a wrapper shell
   match:
@@ -160,7 +177,7 @@
 
 - id: node-home-permission-denied
   title: The node can't write its home (permission denied)
-  explains: [node-process-down, node-crash-loop, node-rpc-down, evm-rpc-down, node-restarted-recently, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
+  explains: [node-process-down, node-crash-loop, node-rpc-down, evm-rpc-down, node-restarted-recently, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, node-no-peers, node-low-peers]
   severity: critical
   symptoms: 'exits at start with "mkdir data: permission denied" or "could not create directory"'
   match:
@@ -180,5 +197,12 @@
     - "proc.running true and stays up; wait.until synced"
   warnings:
     - don't run the node or the setup as root to get past it — files it writes become unwritable for the real user next time
+  playbook:
+    - {do: bash, args: {command: "sudo -n chown -R \"$(id -u):$(id -g)\" {sig:node.host_home}", description: "give the node home back to its user"}, note: "needs passwordless sudo; otherwise the operator runs it"}
+    - {do: node.service, args: {action: start}, note: "start it again"}
+    - {do: wait.until, args: {condition: synced, timeout: 1800}, note: "wait until it has caught up"}
+    - {do: wait.until, args: {condition: unjailable, timeout: 1800}, when: "val.jailed == true", note: "wait out the jail period"}
+    - {do: val.unjail, when: "val.jailed == true", note: "unjail (signed by the operator key — asks you)"}
+    - {do: wait.until, args: {condition: in-consensus, timeout: 600}, when: "val.jailed == true", note: "check it signs again"}
   test:
     signals: {logs.permission_denied: 2, proc.running: false, logs.panic: 1}

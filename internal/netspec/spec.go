@@ -393,6 +393,9 @@ func (s *Spec) Review(prod bool) []Finding {
 			add(Warn, "unknown precompile "+p, "check the name against the cosmos/evm release")
 		}
 	}
+	if j := g.Slashing.DowntimeJailDurationS; j > 0 && j < 60 {
+		add(Warn, fmt.Sprintf("downtime_jail_duration_s %d is under a minute: Cosmos SDK v0.54 (cosmos/evm v0.7+) rejects the genesis", j), "60 or more")
+	}
 	if g.Slashing.SignedBlocksWindow > 0 && g.Slashing.SignedBlocksWindow < 100 {
 		add(Warn, fmt.Sprintf("signed_blocks_window %d is very short: a brief restart jails a validator", g.Slashing.SignedBlocksWindow), "")
 	}

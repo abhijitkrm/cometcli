@@ -38,6 +38,9 @@
     - "node.logs from before the restart (since=15m) — crash or manual?"
   fix:
     - "[read] find who/what restarted it; watch for a crash loop (re-triage in 10 min)"
+  playbook:
+    - {do: node.logs, args: {lines: 60}, note: "what it logged around the restart"}
+    - {do: wait.until, args: {condition: signal, value: "proc.uptime_s > 300", timeout: 420}, note: "make sure it stays up (a crash loop fails this and goes to the model)"}
   test:
     signals: {proc.uptime_s: 120, proc.restarts: 1}
 
@@ -67,7 +70,7 @@
 
 - id: node-exit-config-error
   title: Node exits at startup with a config / flag error
-  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, node-no-peers, node-low-peers]
   severity: critical
   match:
     all: ["proc.running == false", "logs.config_parse > 0"]
@@ -87,6 +90,10 @@
     - "[change] prune / clean / grow the volume before the next state growth or upgrade migration"
   warnings:
     - upgrades often run store migrations that need extra free space
+  playbook_kind: report
+  playbook:
+    - {do: bash, args: {command: "df -h / {sig:node.host_home}; du -sh {sig:node.host_home}/data/* 2>/dev/null | sort -h | tail -8", description: "what fills the disk"}, note: "where the space goes"}
+    - {do: snap.prune, note: "pruning advice"}
   test:
     signals: {host.disk_free_gb: 8}
 
@@ -97,6 +104,13 @@
     all: ["app.grpc_enable == false"]
   fix:
     - "[change] [grpc] enable = true, address 127.0.0.1:9090 on validators; restart"
+  playbook:
+    - {do: node.set-config, args: {file: app.toml, key: grpc.enable, value: "true"}, note: "turn gRPC back on"}
+    - {do: node.service, args: {action: restart}, note: "restart so it takes effect"}
+    - {do: wait.until, args: {condition: synced, timeout: 1800}, note: "wait until it has caught up"}
+    - {do: wait.until, args: {condition: unjailable, timeout: 1800}, when: "val.jailed == true", note: "wait out the jail period"}
+    - {do: val.unjail, when: "val.jailed == true", note: "unjail (signed by the operator key — asks you)"}
+    - {do: wait.until, args: {condition: in-consensus, timeout: 600}, when: "val.jailed == true", note: "check it signs again"}
   test:
     signals: {app.grpc_enable: false}
 
@@ -138,6 +152,13 @@
   fix:
     - "[read] evm.syncing details; logs.evm_rpc samples"
     - "[change] restart the node; if persistent, rebuild the EVM indexer per the chain docs"
+  playbook:
+    - {do: node.service, args: {action: restart}, note: "restart so it takes effect"}
+    - {do: wait.until, args: {condition: synced, timeout: 1800}, note: "wait until it has caught up"}
+    - {do: wait.until, args: {condition: signal, value: "evm.syncing == false", timeout: 900}, note: "the EVM JSON-RPC catches up"}
+    - {do: wait.until, args: {condition: unjailable, timeout: 1800}, when: "val.jailed == true", note: "wait out the jail period"}
+    - {do: val.unjail, when: "val.jailed == true", note: "unjail (signed by the operator key — asks you)"}
+    - {do: wait.until, args: {condition: in-consensus, timeout: 600}, when: "val.jailed == true", note: "check it signs again"}
   test:
     signals: {evm.syncing: true, node.catching_up: false}
 

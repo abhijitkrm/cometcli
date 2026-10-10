@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -40,6 +41,9 @@ func (a *Agent) routeLocal(ctx context.Context, input string) (string, bool) {
 		return "", false
 	}
 	in := m.Intent
+	if in.Kind == "command" {
+		return a.runCommand(ctx, input, m)
+	}
 	p := a.routeProfile(input, in)
 	if p == nil {
 		a.lastRoute.Why += "; no single node to ask"
@@ -163,4 +167,79 @@ func (a *Agent) RouteWhy() string {
 		return "no prompt classified yet"
 	}
 	return "sent to the model: " + m.Why
+}
+
+// runCommand carries out a direct command ("restart val3", "vote yes on
+// 6"): the words are the tool's arguments, so no model is involved. The
+// node is the one named, else the session's, else the active profile.
+// Every change and transaction goes through the usual approvals; a
+// failure is shown as it is, not handed to a model.
+func (a *Agent) runCommand(ctx context.Context, input string, m router.Match) (string, bool) {
+	in := m.Intent
+	var p *config.Profile
+	if name := m.Args["node"]; name != "" {
+		cfg := a.Ctx.Cfg
+		pp, ok := (*config.Profile)(nil), false
+		if cfg != nil {
+			pp, ok = cfg.Profiles[name]
+		}
+		if !ok {
+			// "stop worrying" names no node: not a command after all
+			a.lastRoute = router.Match{Why: fmt.Sprintf("looked like the %s command, but %q isn't one of your nodes", in.ID, name)}
+			return "", false
+		}
+		pp.Name = name
+		p = pp
+	} else {
+		p = a.routeProfile(input, in)
+	}
+	if p == nil {
+		a.lastRoute.Why += "; no node to run it on"
+		return "", false
+	}
+	var out []string
+	for _, st := range in.Steps {
+		t, ok := a.Reg.Get(st.Tool)
+		if !ok {
+			a.lastRoute.Why += "; no tool " + st.Tool
+			return "", false
+		}
+		if a.Policy.ReadOnly() && t.Tier() > toolkit.TierDiagnose {
+			text := fmt.Sprintf("%s is a %s action and this session is read-only.", in.Title, t.Tier())
+			return a.answeredLocally(input, in, text), true
+		}
+		args := coerceArgs(t, router.Fill(st.Args, m.Args))
+		res, err := a.runToolOn(ctx, t, args, "direct command: "+input, p)
+		if err != nil {
+			text := fmt.Sprintf("**%s** on %s — %v\n\n_ran directly · /llm %s to have the model work it out_", in.Title, p.Name, a.Redact.Text(err.Error()), input)
+			a.routes.Local++
+			return a.answeredLocally(input, in, text), true
+		}
+		out = append(out, strings.TrimSpace(res.Text))
+	}
+	a.routes.Local++
+	text := fmt.Sprintf("**%s** on %s\n%s\n\n_ran directly · no model call_", in.Title, p.Name, strings.Join(out, "\n"))
+	return a.answeredLocally(input, in, text), true
+}
+
+// coerceArgs turns a command's captured words into the tool's types: a
+// boolean flag is true when its group matched, numbers are numbers.
+func coerceArgs(t toolkit.Tool, args map[string]any) toolkit.Args {
+	props, _ := t.Schema()["properties"].(map[string]any)
+	out := toolkit.Args{}
+	for k, v := range args {
+		s, isStr := v.(string)
+		spec, _ := props[k].(map[string]any)
+		switch {
+		case isStr && spec["type"] == "boolean":
+			out[k] = s != "" && s != "false"
+		case isStr && spec["type"] == "integer":
+			if n, err := strconv.ParseFloat(s, 64); err == nil {
+				out[k] = n
+			}
+		default:
+			out[k] = v
+		}
+	}
+	return out
 }

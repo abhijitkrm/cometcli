@@ -232,9 +232,15 @@ no model call:
 ```
 
 - `do` is any tool.
-- `when` is a condition on the triage signals; the step is skipped if it doesn't hold.
-- String arguments may use `{unit}`, `{home}`, `{binary}` and `{container_home}` from the
-  profile.
+- `when` is a condition on the triage signals (several joined with `&&`), checked
+  against fresh values when the step comes up; the step is skipped if it doesn't hold.
+- String arguments may use:
+  - `{unit}`, `{home}`, `{binary}` and `{container_home}` from the profile
+  - `{sig:<signal>}` for a triage signal's value; if the node didn't report it, the incident
+    goes to the model
+  - `{peers}` for your other running nodes of the chain
+- `playbook_kind: report` is for cases where the decision is yours. The steps only gather,
+  and the result lists what to decide.
 - Every step goes through the normal gates: shell commands are classified, changes ask,
   and transactions ask for key access.
 - A declined step stops the playbook. A failed step hands the incident to the model with
@@ -267,6 +273,19 @@ same `id` overrides a built-in.
     **{{.node}}** has {{get .p.Data "count"}} peers.
     {{trim .p.Text}}
   ttl: 30s                          # reuse the answer this long
+```
+
+**Commands** are intents with `kind: command`. They match only their `patterns`, which are
+regexes over the lowercased prompt. Named groups fill the steps' `{placeholders}`, and
+`(?P<node>…)` picks the profile. Commands may use any tool, through the normal approvals:
+
+```yaml
+- id: restart-sentries
+  kind: command
+  title: restart a sentry
+  patterns: ['^bounce (?P<node>sentry[0-9]+)$']
+  steps:
+    - {tool: node.service, args: {action: restart}}
 ```
 
 Some prompts always go to the model, whatever matches:

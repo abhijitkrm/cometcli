@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -26,6 +27,7 @@ import (
 	"github.com/abhijitkrm/cometcli/internal/kb"
 	"github.com/abhijitkrm/cometcli/internal/keys"
 	"github.com/abhijitkrm/cometcli/internal/logscan"
+	"github.com/abhijitkrm/cometcli/internal/netspec"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
 	"github.com/abhijitkrm/cometcli/internal/tools/common"
 	"github.com/abhijitkrm/cometcli/internal/tools/val"
@@ -448,6 +450,15 @@ func collectProcess(c *toolkit.Context, r *Report, set func(string, any)) error 
 		if cmd, ok := runOK(c, h, "docker inspect -f '{{json .Config.Cmd}}' "+common.ShellQ(svc.Unit)); ok {
 			set("proc.ws_origins_flag", strings.Contains(cmd, "--json-rpc.ws-origins"))
 		}
+		// the image version, known even when the node is down
+		if v, ok := runOK(c, h, "docker inspect -f '{{index .Config.Labels \"org.opencontainers.image.version\"}}|{{.Config.Image}}' "+common.ShellQ(svc.Unit)); ok {
+			label, img, _ := strings.Cut(strings.TrimSpace(v), "|")
+			if m := imageVersionRe.FindString(label); m != "" {
+				set("proc.image_version", m)
+			} else if m := imageVersionRe.FindString(img); m != "" {
+				set("proc.image_version", m)
+			}
+		}
 		if n, ok := runOK(c, h, "docker inspect -f '{{len .NetworkSettings.Networks}}' "+common.ShellQ(svc.Unit)); ok {
 			if v, err := strconv.Atoi(n); err == nil { // never turn unparsable output into 0
 				set("proc.networks", float64(v))
@@ -765,6 +776,15 @@ func collectConfig(c *toolkit.Context, r *Report, set func(string, any)) error {
 			}
 		}
 	}
+	if home := common.HostHome(c, h); home != "" {
+		set("node.host_home", home)
+	}
+	// which backend wrote the data (the config must name that one)
+	if names, err := common.ListNodeDir(c, h, "data/application.db"); err == nil {
+		if b := common.DataBackend(names); b != "" {
+			set("data.db_backend", b)
+		}
+	}
 	if raw, err := readNodeFile(c, h, "data/priv_validator_state.json"); err == nil {
 		var pvs struct {
 			Height string `json:"height"`
@@ -888,6 +908,32 @@ func derive(r *Report) {
 			s["config.db_backend_mismatch"] = a != b
 		}
 	}
+	if d, ok := s["data.db_backend"].(string); ok {
+		cfg, _ := s["config.db_backend"].(string)
+		app, _ := s["app.app_db_backend"].(string)
+		if app == "" {
+			app = cfg // empty app-db-backend uses config.toml's
+		}
+		s["data.db_backend_mismatch"] = (cfg != "" && cfg != d) || (app != "" && app != d)
+	}
+	// the mempool type this node's version needs: "app" from CometBFT 0.39
+	// (cosmos/evm v0.7), "flood" before — from the running node, else its image
+	if r.Chain == "cosmos-evm" {
+		ver, _ := s["node.version"].(string)
+		img, _ := s["proc.image_version"].(string)
+		switch {
+		case strings.HasPrefix(ver, "0.38"):
+			s["config.mempool_want"] = "flood"
+		case strings.HasPrefix(ver, "0.39"), strings.HasPrefix(ver, "1."):
+			s["config.mempool_want"] = "app"
+		case img != "":
+			if netspec.AppMempool(img) {
+				s["config.mempool_want"] = "app"
+			} else {
+				s["config.mempool_want"] = "flood"
+			}
+		}
+	}
 	if t, ok := s["config.mempool_type"].(string); ok && r.Chain == "cosmos-evm" {
 		ver, _ := s["node.version"].(string)
 		maxTxs, hasMax := f("app.mempool_max_txs")
@@ -895,8 +941,9 @@ func derive(r *Report) {
 		case t == "app" && strings.HasPrefix(ver, "0.38"):
 			// CometBFT 0.38 (cosmos/evm v0.6) doesn't know "app" at all
 			s["config.mempool_mismatch"] = true
-		case t == "app" && hasMax && maxTxs < 0:
-			// the app-side mempool needs max-txs >= 0
+		case (t == "flood" || t == "nop") && hasMax && maxTxs >= 0:
+			// an app-side mempool (max-txs >= 0) needs CometBFT's "app"
+			// mempool; "app" with max-txs -1 is fine
 			s["config.mempool_mismatch"] = true
 		case t == "flood" || t == "nop":
 			// recent evmd refuses to start unless the type is "app"; older
@@ -1000,3 +1047,5 @@ func sortedKeys(m map[string]any) []string {
 	sort.Strings(ks)
 	return ks
 }
+
+var imageVersionRe = regexp.MustCompile(`v\d+\.\d+\.\d+`)

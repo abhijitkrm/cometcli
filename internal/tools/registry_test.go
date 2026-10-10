@@ -66,7 +66,8 @@ func TestPlaybooksAndIntentsUseRealTools(t *testing.T) {
 			switch {
 			case !ok:
 				t.Errorf("intent %s: %q is not a tool", in.ID, st.Tool)
-			case tl.Tier() > toolkit.TierDiagnose:
+			case in.Kind != "command" && tl.Tier() > toolkit.TierDiagnose:
+				// questions only read; commands act, through the approvals
 				t.Errorf("intent %s: %s is a %s tool; local answers only read", in.ID, st.Tool, tl.Tier())
 			}
 		}

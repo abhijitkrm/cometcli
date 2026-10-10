@@ -1,0 +1,116 @@
+# Direct commands: the words are the tool's arguments, so no model is
+# needed to work out what to do. Patterns match the whole prompt
+# (lowercased); named groups fill {placeholders}; (?P<node>…) picks the
+# profile. Every change and transaction still goes through the approvals.
+
+- id: service
+  kind: command
+  title: start / stop / restart the node
+  patterns:
+    - '^(?P<action>restart|stop|start)( the)?( node| validator| container| service)?( (?P<node>[a-z0-9][a-z0-9._-]*))?$'
+  steps:
+    - {tool: node.service, args: {action: "{action}"}}
+
+- id: recreate
+  kind: command
+  title: recreate the container
+  patterns:
+    - '^recreate( the)?( node| container| validator)?( (?P<node>[a-z0-9][a-z0-9._-]*))?$'
+  steps:
+    - {tool: node.recreate}
+
+- id: unjail
+  kind: command
+  title: unjail
+  patterns:
+    - '^unjail( the)?( validator)?( (?P<node>[a-z0-9][a-z0-9._-]*))?$'
+  steps:
+    - {tool: val.unjail}
+
+- id: vote
+  kind: command
+  title: vote on a proposal
+  patterns:
+    - '^vote (?P<option>yes|no|abstain|no_with_veto) (on |for )?(proposal |prop )?#?(?P<proposal>\d+)( (from|as|with|on) (?P<node>[a-z0-9][a-z0-9._-]*))?$'
+  steps:
+    - {tool: val.vote, args: {proposal: "{proposal}", option: "{option}"}}
+
+- id: send
+  kind: command
+  title: send tokens
+  patterns:
+    - '^send (?P<amount>\d+[a-z][a-z0-9/]*) to (?P<to>[a-z]+1[a-z0-9]{38,}|0x[0-9a-f]{40})( from (?P<node>[a-z0-9][a-z0-9._-]*))?$'
+  steps:
+    - {tool: tx.send, args: {amount: "{amount}", to: "{to}"}}
+
+- id: delegate
+  kind: command
+  title: delegate
+  patterns:
+    - '^delegate (?P<amount>\d+[a-z][a-z0-9/]*)( to (?P<validator>[a-z]+valoper1[a-z0-9]{38,}))?( from (?P<node>[a-z0-9][a-z0-9._-]*))?$'
+  steps:
+    - {tool: tx.delegate, args: {amount: "{amount}", validator: "{validator}"}}
+
+- id: withdraw
+  kind: command
+  title: withdraw rewards
+  patterns:
+    - '^withdraw( my)? rewards(?P<commission> and commission)?( (from|on) (?P<node>[a-z0-9][a-z0-9._-]*))?$'
+  steps:
+    - {tool: val.withdraw, args: {commission: "{commission}"}}
+
+- id: logs
+  kind: command
+  title: node logs
+  patterns:
+    - '^(show |tail )?(me )?(the )?(last )?((?P<lines>\d+) )?(lines of )?(the )?(node )?logs?( of| on| for)?( (?P<node>[a-z0-9][a-z0-9._-]*))?$'
+  steps:
+    - {tool: node.logs, args: {lines: "{lines}"}}
+
+- id: add-peer
+  kind: command
+  title: add a persistent peer
+  patterns:
+    - '^add (persistent )?peers? (?P<peer>[0-9a-f]{40}@[^ ]+)( (to|on) (?P<node>[a-z0-9][a-z0-9._-]*))?$'
+  steps:
+    - {tool: net.add-peer, args: {peer: "{peer}"}}
+
+- id: set-config
+  kind: command
+  title: set a config value
+  patterns:
+    - '^set (?P<file>config|app|client)(\.toml)? (?P<key>[a-z0-9_.-]+)( to| =)? (?P<value>[^ ]+)( (on|for) (?P<node>[a-z0-9][a-z0-9._-]*))?$'
+  steps:
+    - {tool: node.set-config, args: {file: "{file}.toml", key: "{key}", value: "{value}"}}
+
+- id: build
+  kind: command
+  title: build a release image
+  patterns:
+    - '^build (the )?(image )?(for )?(?P<tag>v\d+\.\d+\.\d+)( (on|for) (?P<node>[a-z0-9][a-z0-9._-]*))?$'
+  steps:
+    - {tool: upgrade.build, args: {tag: "{tag}"}}
+
+- id: switch
+  kind: command
+  title: switch to an image after the upgrade halt
+  patterns:
+    - '^switch (to |image )?(?P<image>[a-z0-9][a-z0-9._/-]*:?[a-z0-9._-]*)( (on|for) (?P<node>[a-z0-9][a-z0-9._-]*))?$'
+  steps:
+    - {tool: upgrade.switch, args: {image: "{image}"}}
+
+- id: network-check
+  kind: command
+  title: check the network against its spec
+  patterns:
+    - '^(check|verify|audit) (the )?(network|configs?|node configs?)( (?P<prod>for production|prod))?$'
+  steps:
+    - {tool: network.check, args: {prod: "{prod}"}}
+
+- id: triage
+  kind: command
+  title: triage
+  patterns:
+    - '^(run )?triage( (on )?(?P<node>[a-z0-9][a-z0-9._-]*))?$'
+  steps:
+    - {tool: node.triage}

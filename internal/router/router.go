@@ -30,8 +30,14 @@ var builtin embed.FS
 
 // Intent is one known question and how to answer it locally.
 type Intent struct {
-	ID       string   `yaml:"id"`
-	Title    string   `yaml:"title"`
+	ID    string `yaml:"id"`
+	Title string `yaml:"title"`
+	// Kind is "question" (default: read-only tools, a fixed answer) or
+	// "command": a direct instruction whose words are the tool's
+	// arguments ("restart val3", "vote yes on 6"). Commands match only by
+	// pattern; their named groups fill the steps' {placeholders}; any
+	// tier runs, through the normal approvals.
+	Kind     string   `yaml:"kind,omitempty"`
 	Patterns []string `yaml:"patterns"` // regexes over the normalized prompt; a hit routes locally
 	Examples []string `yaml:"examples"` // phrasings; a close enough prompt routes locally
 	// Scope: "node" needs one node (the session's, the one named, or the
@@ -115,8 +121,14 @@ func Load(dirs ...string) (*Catalog, error) {
 }
 
 func (in *Intent) compile() error {
-	if in.ID == "" || len(in.Steps) == 0 || in.Answer == "" {
+	if in.ID == "" || len(in.Steps) == 0 || (in.Answer == "" && in.Kind != "command") {
 		return fmt.Errorf("needs id, steps and answer")
+	}
+	if in.Kind != "" && in.Kind != "question" && in.Kind != "command" {
+		return fmt.Errorf("kind %q: question or command", in.Kind)
+	}
+	if in.Answer == "" {
+		in.Answer = "{{.node}}" // commands show their tools' own output
 	}
 	if in.Scope == "" {
 		in.Scope = "node"
@@ -153,7 +165,8 @@ func (in *Intent) compile() error {
 type Match struct {
 	Intent *Intent // nil: the model handles it
 	Score  float64
-	Why    string // why it went where it went (for /why and tests)
+	Why    string            // why it went where it went (for /why and tests)
+	Args   map[string]string // a command's named groups
 }
 
 // Threshold is the example similarity needed to answer locally.
@@ -228,10 +241,38 @@ func dice(a, b []string) float64 {
 	return 2 * float64(n) / float64(len(a)+len(b))
 }
 
+// commandText is a prompt as commands see it: lowercased, spaces
+// collapsed, trailing punctuation dropped — but ':' '@' '#' kept (images,
+// peers, proposal numbers).
+func commandText(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	s = strings.TrimRight(s, ".!? ")
+	s = strings.TrimPrefix(s, "please ")
+	return strings.TrimSpace(spaceRe.ReplaceAllString(s, " "))
+}
+
 // Classify decides whether a prompt can be answered locally.
 func (c *Catalog) Classify(prompt string) Match {
 	if strings.Contains(strings.TrimSpace(prompt), "\n") {
 		return Match{Why: "multi-line prompt"}
+	}
+	// direct commands first: an action spelled out completely needs no model
+	ct := commandText(prompt)
+	for _, in := range c.Intents {
+		if in.Kind != "command" {
+			continue
+		}
+		for _, re := range in.res {
+			if m := re.FindStringSubmatch(ct); m != nil {
+				args := map[string]string{}
+				for i, name := range re.SubexpNames() {
+					if name != "" && m[i] != "" {
+						args[name] = m[i]
+					}
+				}
+				return Match{Intent: in, Score: 1, Why: "command " + in.ID, Args: args}
+			}
+		}
 	}
 	n := Normalize(prompt)
 	if n == "" {
@@ -244,6 +285,9 @@ func (c *Catalog) Classify(prompt string) Match {
 		return Match{Why: "open-ended or an action (" + m + ")"}
 	}
 	for _, in := range c.Intents {
+		if in.Kind == "command" {
+			continue
+		}
 		for _, re := range in.res {
 			if re.MatchString(n) {
 				return Match{Intent: in, Score: 1, Why: "pattern " + re.String()}
@@ -254,6 +298,9 @@ func (c *Catalog) Classify(prompt string) Match {
 	var best *Intent
 	bestScore := 0.0
 	for _, in := range c.Intents {
+		if in.Kind == "command" {
+			continue // commands match only by their exact patterns
+		}
 		for _, ex := range in.ex {
 			if s := dice(tk, ex); s > bestScore {
 				best, bestScore = in, s
@@ -274,6 +321,27 @@ func (c *Catalog) Classify(prompt string) Match {
 
 var funcs = template.FuncMap{
 	"trim": strings.TrimSpace,
+	// join renders a list ([]string or []any) as "a, b, c"
+	"join": func(list any) string {
+		var parts []string
+		switch l := list.(type) {
+		case []string:
+			parts = l
+		case []any:
+			for _, x := range l {
+				parts = append(parts, fmt.Sprint(x))
+			}
+		}
+		return strings.Join(parts, ", ")
+	},
+	// head keeps the first n lines
+	"head": func(n int, s string) string {
+		l := strings.Split(strings.TrimSpace(s), "\n")
+		if len(l) > n {
+			l = l[:n]
+		}
+		return strings.Join(l, "\n")
+	},
 	"lines": func(s string) []string {
 		return strings.Split(strings.TrimSpace(s), "\n")
 	},
@@ -367,3 +435,31 @@ func (c *Cache) Put(key, text string, ttl time.Duration, now time.Time) {
 	}
 	c.m[key] = cached{text: text, exp: now.Add(ttl)}
 }
+
+// Fill puts a command's named groups into a step's arguments: "{node}"
+// becomes the captured word. An argument whose group didn't match is
+// left out (the tool's default applies).
+func Fill(args map[string]any, groups map[string]string) map[string]any {
+	out := map[string]any{}
+	for k, v := range args {
+		s, ok := v.(string)
+		if !ok {
+			out[k] = v
+			continue
+		}
+		missing := false
+		s = placeholderRe.ReplaceAllStringFunc(s, func(m string) string {
+			g, ok := groups[m[1:len(m)-1]]
+			if !ok {
+				missing = true
+			}
+			return g
+		})
+		if !missing && s != "" {
+			out[k] = s
+		}
+	}
+	return out
+}
+
+var placeholderRe = regexp.MustCompile(`\{[a-z_]+\}`)

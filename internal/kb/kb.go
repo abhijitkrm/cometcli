@@ -50,7 +50,11 @@ type Case struct {
 	// when this case is the clear root cause. Changes and transactions in
 	// it still ask the operator.
 	Playbook []PlayStep `yaml:"playbook,omitempty"`
-	Test     struct {
+	// PlaybookKind is "fix" (default: the playbook resolves the case) or
+	// "report" (it gathers what the operator needs to decide; cometcli
+	// doesn't decide for them).
+	PlaybookKind string `yaml:"playbook_kind,omitempty"`
+	Test         struct {
 		Signals Signals `yaml:"signals"`
 	} `yaml:"test,omitempty"`
 
@@ -72,11 +76,19 @@ type PlayStep struct {
 	When string `yaml:"when,omitempty"`
 	Note string `yaml:"note,omitempty"` // what the step is for, shown to the operator
 
-	when *Cond
+	when []Cond
 }
 
-// Applies reports whether the step runs for these signals.
-func (s *PlayStep) Applies(sig Signals) bool { return s.when == nil || s.when.Eval(sig) }
+// Applies reports whether the step runs for these signals (every
+// condition of When, joined with &&).
+func (s *PlayStep) Applies(sig Signals) bool {
+	for _, c := range s.when {
+		if !c.Eval(sig) {
+			return false
+		}
+	}
+	return true
+}
 
 // compile parses and checks a case.
 func (c *Case) compile() error {
@@ -117,13 +129,19 @@ func (c *Case) compile() error {
 			return fmt.Errorf("case %s: playbook step %d has no tool (do)", c.ID, i+1)
 		}
 		st.when = nil
-		if st.When != "" {
-			cond, err := ParseCond(st.When)
+		for _, part := range strings.Split(st.When, "&&") {
+			if part = strings.TrimSpace(part); part == "" {
+				continue
+			}
+			cond, err := ParseCond(part)
 			if err != nil {
 				return fmt.Errorf("case %s: playbook step %d: %w", c.ID, i+1, err)
 			}
-			st.when = &cond
+			st.when = append(st.when, cond)
 		}
+	}
+	if c.PlaybookKind != "" && c.PlaybookKind != "fix" && c.PlaybookKind != "report" {
+		return fmt.Errorf("case %s: playbook_kind %q: want fix or report", c.ID, c.PlaybookKind)
 	}
 	for _, x := range c.Explains {
 		if x == c.ID {

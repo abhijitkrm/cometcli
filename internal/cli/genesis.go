@@ -110,85 +110,13 @@ peer, and every node started. Mnemonics are shown only here, or written to
 				c.AutoApproveBelow = toolkit.TierOnChain // confirmed once above; transactions still can't run here
 				return c
 			}
-			if dockerNet != "" {
-				c := ctxFor(profiles[0])
-				h, err := c.Host()
-				if err != nil {
-					return err
-				}
-				_, _, _ = h.Run(c, "docker network inspect "+dockerNet+" >/dev/null 2>&1 || docker network create "+dockerNet+" >/dev/null")
-				c.Close()
-			}
-
-			// 1. each validator, on its own host
-			var nodes []*networktool.GenesisNode
-			for _, p := range profiles {
-				c := ctxFor(p)
-				defer c.Close()
-				n, mnemonic, err := networktool.PrepareValidator(c, spec, homeFor(p), kr)
-				if err != nil {
-					return err
-				}
-				nodes = append(nodes, n)
-				fmt.Fprintf(out, "✓ %s: node %s, operator %s\n", p.Name, n.NodeID[:12], n.Account)
-				if err := showMnemonic(out, mnemonicsTo, p.Name, n.Account, mnemonic); err != nil {
-					return err
-				}
-			}
-			// 2. base genesis, on the first validator's host
-			base, err := networktool.BuildBase(nodes[0].Ctx, spec, nodes, extra)
-			if err != nil {
+			opts := networktool.CreateOpts{HomeFor: homeFor, Keyring: kr, Extra: extra, DockerNet: dockerNet, PortBase: portBase, PortStep: portStep,
+				Progress: func(s string) { fmt.Fprintln(out, s) },
+				Mnemonic: func(p *config.Profile, account, mnemonic string) error {
+					return showMnemonic(out, mnemonicsTo, p.Name, account, mnemonic)
+				}}
+			if _, err := networktool.CreateNetwork(ctxFor, spec, profiles, opts); err != nil {
 				return err
-			}
-			fmt.Fprintf(out, "✓ base genesis: %d validators funded, %d extra accounts\n", len(nodes), len(extra))
-			// 3. gentxs, each on its own host
-			gentxs := map[string][]byte{}
-			for _, n := range nodes {
-				g, err := networktool.Gentx(n, spec, base, kr)
-				if err != nil {
-					return err
-				}
-				gentxs[n.Moniker] = g
-			}
-			fmt.Fprintf(out, "✓ %d gentxs signed on their hosts\n", len(gentxs))
-			// 4. collect + strict validation
-			final, err := networktool.Collect(nodes[0].Ctx, spec, gentxs)
-			if err != nil {
-				return err
-			}
-			gp, _ := networktool.GenesisPath(spec.Chain.ID)
-			if err := os.WriteFile(gp, final, 0o600); err != nil {
-				return err
-			}
-			fmt.Fprintf(out, "✓ final genesis valid (%d bytes) → %s\n", len(final), gp)
-			// 5. every node: the final genesis, its configs, start
-			addrOf := func(i int) string {
-				if dockerNet != "" {
-					return unitOf(profiles[i])
-				}
-				return hostOf(profiles[i])
-			}
-			provision, _ := reg.Get("node.provision")
-			for i, n := range nodes {
-				h, _ := n.Ctx.Host()
-				if err := h.WriteFile(n.Ctx, filepath.Join(n.Home, "config", "genesis.json"), final, 0o644); err != nil {
-					return err
-				}
-				var peers []string
-				for j, m := range nodes {
-					if j != i {
-						peers = append(peers, fmt.Sprintf("%s@%s:%d", m.NodeID, addrOf(j), 26656+portBaseFor(dockerNet, portBase, portStep, j)))
-					}
-				}
-				pargs := toolkit.Args{"role": "validator", "network": spec.Chain.ID, "home": n.Home, "reconfigure": true,
-					"peers": strings.Join(peers, ","), "port_offset": float64(portBase + i*portStep)}
-				if dockerNet != "" {
-					pargs["docker_network"] = dockerNet
-				}
-				if _, err := provision.Run(n.Ctx, pargs); err != nil {
-					return fmt.Errorf("%s: %w", n.Moniker, err)
-				}
-				fmt.Fprintf(out, "✓ %s started\n", n.Moniker)
 			}
 			// 6. the chain produces blocks
 			if w, ok := reg.Get("wait.until"); ok {
@@ -218,22 +146,6 @@ peer, and every node started. Mnemonics are shown only here, or written to
 	f.BoolVar(&yes, "yes", false, "don't ask for confirmation")
 	cmd.AddCommand(create)
 	return cmd
-}
-
-// portBaseFor is the port a peer listens on as seen by other peers: on a
-// shared docker network the container port, otherwise the host port.
-func portBaseFor(dockerNet string, base, step, i int) int {
-	if dockerNet != "" {
-		return 0
-	}
-	return base + i*step
-}
-
-func unitOf(p *config.Profile) string {
-	if p.Service.Unit != "" {
-		return p.Service.Unit
-	}
-	return "primium-validator"
 }
 
 func hostOf(p *config.Profile) string {

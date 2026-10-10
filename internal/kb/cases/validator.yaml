@@ -146,6 +146,11 @@
     - "[tx] tx.delegate more stake (operator decision)"
   verify:
     - "val.status BONDED; val.in_set true on the next epoch/block"
+  playbook_kind: report
+  playbook:
+    - {do: val.status, note: "this validator's stake"}
+    - {do: chain.validators, args: {status: bonded}, note: "the active set it is competing with"}
+    - {do: chain.params, note: "max_validators"}
   test:
     signals: {val.jailed: false, val.bonded: false, val.status: UNBONDING}
 
@@ -164,6 +169,10 @@
     - "[tx] then val.unjail if jailed"
   verify:
     - "val.self_below_min == false"
+  playbook_kind: report
+  playbook:
+    - {do: val.status, note: "self-delegation vs min_self_delegation"}
+    - {do: chain.balance, note: "what the operator account can delegate"}
   test:
     signals: {val.self_below_min: true}
 
@@ -178,6 +187,9 @@
     - "[tx] fund the operator account (tx.send from another account the operator controls) or val.withdraw rewards first"
   verify:
     - "chain.balance > estimated fee"
+  playbook_kind: report
+  playbook:
+    - {do: chain.balance, note: "the operator account's balance"}
   test:
     signals: {val.fee_balance_zero: true}
 
@@ -197,6 +209,11 @@
     - "wait.until in-consensus"
   warnings:
     - an unjail tx before jailed_until fails with 'validator still jailed' and costs fees
+  playbook:
+    - {do: wait.until, args: {condition: synced, timeout: 1800}, note: "wait until it has caught up"}
+    - {do: wait.until, args: {condition: unjailable, timeout: 3600}, note: "wait out the jail period"}
+    - {do: val.unjail, note: "unjail (signed by the operator key — asks you)"}
+    - {do: wait.until, args: {condition: in-consensus, timeout: 600}, note: "check it signs again"}
   test:
     signals: {val.jailed: true, val.jail_remaining_s: 300, val.tombstoned: false}
 
@@ -212,6 +229,10 @@
     - "[tx] val.vote with the operator's choice (never choose for them)"
   verify:
     - "val.votes shows our vote"
+  playbook_kind: report
+  playbook:
+    - {do: chain.gov, args: {status: voting}, note: "what is in voting"}
+    - {do: val.votes, note: "which ones you have not voted on"}
   test:
     signals: {gov.unvoted: 2, gov.unvoted_ends_in_h: 30}
 
@@ -223,6 +244,11 @@
   fix:
     - "[read] chain.gov the proposal; upgrade proposals also need a binary ready"
     - "[tx] val.vote with the operator's decision"
+  playbook_kind: report
+  playbook:
+    - {do: chain.gov, args: {status: voting}, note: "what is in voting"}
+    - {do: val.votes, note: "which ones you have not voted on"}
+    - {do: chain.upgrade-plan, note: "an upgrade proposal also needs the binary staged"}
   test:
     signals: {gov.unvoted: 1, gov.unvoted_ends_in_h: 5}
 
@@ -266,6 +292,9 @@
     - "[change] only if the chain was rolled back/forked by coordinated governance, the operator may adjust state per the chain's instructions"
   warnings:
     - never reset priv_validator_state.json to 0 on a live validator — that is how double signs happen
+  playbook:
+    - {do: wait.until, args: {condition: signal, value: "pvs.ahead_by <= 1", timeout: 1800}, note: "the node signs again once the chain passes its last signed height — never edit priv_validator_state.json"}
+    - {do: wait.until, args: {condition: in-consensus, timeout: 600}, note: "check it signs again"}
   test:
     signals: {pvs.ahead_by: 5000, node.catching_up: false, logs.height_regression: 12}
 

@@ -1,6 +1,6 @@
 - id: cfg-parse-error
   title: Config file fails to parse / unknown field
-  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, node-exit-config-error]
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, node-exit-config-error, node-no-peers, node-low-peers]
   severity: critical
   match:
     # the files themselves are the evidence: config errors in the logs alone
@@ -28,7 +28,7 @@
 
 - id: cfg-db-backend-mismatch
   title: config.toml db_backend differs from app.toml app-db-backend
-  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, node-no-peers, node-low-peers]
   severity: high
   match:
     all: ["config.db_backend_mismatch == true"]
@@ -38,13 +38,21 @@
     - "[change] set both to the backend the data was created with; restart"
   warnings:
     - switching backend on existing data does not convert it — the node fails to open or starts empty
+  playbook:
+    - {do: node.set-config, args: {file: config.toml, key: db_backend, value: "{sig:data.db_backend}"}, note: "the backend the data was written with"}
+    - {do: node.set-config, args: {file: app.toml, key: app-db-backend, value: "{sig:data.db_backend}"}, note: "app.toml must agree"}
+    - {do: node.service, args: {action: restart}, note: "restart so it takes effect"}
+    - {do: wait.until, args: {condition: synced, timeout: 1800}, note: "wait until it has caught up"}
+    - {do: wait.until, args: {condition: unjailable, timeout: 1800}, when: "val.jailed == true", note: "wait out the jail period"}
+    - {do: val.unjail, when: "val.jailed == true", note: "unjail (signed by the operator key — asks you)"}
+    - {do: wait.until, args: {condition: in-consensus, timeout: 600}, when: "val.jailed == true", note: "check it signs again"}
   test:
     signals: {config.db_backend_mismatch: true, config.db_backend: goleveldb, app.app_db_backend: pebbledb}
 
 - id: cfg-mempool-mismatch
   title: config.toml mempool type isn't "app" on a Cosmos-EVM node
   chains: [cosmos-evm]
-  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, node-no-peers, node-low-peers]
   severity: high
   match:
     all: ["config.mempool_mismatch == true"]
@@ -55,6 +63,13 @@
     - "recent Cosmos-EVM runs the app-side EVM mempool, which requires config.toml [mempool] type = \"app\" — fresh `evmd init` / `testnet init-files` configs and configs kept across upgrades often still say \"flood\""
   fix:
     - "[change] set config.toml [mempool] type = \"app\"; restart"
+  playbook:
+    - {do: node.set-config, args: {file: config.toml, key: mempool.type, value: "{sig:config.mempool_want}"}, note: "the mempool type this version needs"}
+    - {do: node.service, args: {action: restart}, note: "restart so it takes effect"}
+    - {do: wait.until, args: {condition: synced, timeout: 1800}, note: "wait until it has caught up"}
+    - {do: wait.until, args: {condition: unjailable, timeout: 1800}, when: "val.jailed == true", note: "wait out the jail period"}
+    - {do: val.unjail, when: "val.jailed == true", note: "unjail (signed by the operator key — asks you)"}
+    - {do: wait.until, args: {condition: in-consensus, timeout: 600}, when: "val.jailed == true", note: "check it signs again"}
   test:
     signals: {config.mempool_mismatch: true, config.mempool_type: flood, logs.config_parse: 3}
 

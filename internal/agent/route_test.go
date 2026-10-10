@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/abhijitkrm/cometcli/internal/config"
 	"github.com/abhijitkrm/cometcli/internal/router"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
 )
@@ -120,5 +121,37 @@ func TestRouterOff(t *testing.T) {
 	}
 	if prov.calls != 1 || runs != 0 {
 		t.Fatalf("router off: calls=%d runs=%d", prov.calls, runs)
+	}
+}
+
+func TestDirectCommandsRunWithoutTheModel(t *testing.T) {
+	prov := &mockProvider{}
+	var got []string
+	record := func(name string, tier toolkit.Tier) stubTool {
+		return stubTool{name: name, tier: tier, run: func(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
+			got = append(got, fmt.Sprintf("%s@%s %v", name, c.Profile.Name, a))
+			return &toolkit.Result{Text: name + " done"}, nil
+		}}
+	}
+	a := routedAgent(t, prov, record("node.service", toolkit.TierLocalChange), record("val.vote", toolkit.TierOnChain))
+	a.Ctx.Cfg = &config.Config{Profiles: map[string]*config.Profile{"testp": a.Ctx.Profile, "val3": {Name: "val3"}}}
+	for _, q := range []string{"restart val3", "vote yes on proposal #6"} {
+		out, err := a.Run(context.Background(), q)
+		if err != nil || !strings.Contains(out, "ran directly") {
+			t.Fatalf("%q: %v %s", q, err, out)
+		}
+	}
+	if prov.calls != 0 || len(got) != 2 {
+		t.Fatalf("model calls %d, ran %v", prov.calls, got)
+	}
+	if got[0] != "node.service@val3 map[action:restart]" || !strings.Contains(got[1], "val.vote@testp") || !strings.Contains(got[1], "proposal:6") || !strings.Contains(got[1], "option:yes") {
+		t.Errorf("ran %v", got)
+	}
+	// a word that isn't one of the nodes: not a command, the model reads it
+	if _, err := a.Run(context.Background(), "stop worrying"); err != nil {
+		t.Fatal(err)
+	}
+	if prov.calls != 1 || len(got) != 2 {
+		t.Fatalf("'stop worrying' must reach the model (calls %d, ran %v)", prov.calls, got)
 	}
 }

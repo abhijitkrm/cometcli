@@ -103,7 +103,7 @@ func TestValidatorRole(t *testing.T) {
 	cfg, app := docs()
 	out := whats(Evaluate("v1", s.Expectations(Validator, "v0.7.2", true), cfg, app, []string{"start"}))
 	for _, want := range []string{
-		"FAIL mempool.type = flood, want \"app\"", "FAIL mempool.max-txs = -1",
+		"FAIL mempool.type = flood, want \"app\"",
 		"cors_allowed_origins", "enabled-unsafe-cors", "allow-insecure-unlock", "swagger", "without debug",
 		"timeout_commit = 1s, want 200ms", "external_address", "--json-rpc.ws-origins = missing",
 	} {

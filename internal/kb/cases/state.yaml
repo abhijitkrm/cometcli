@@ -1,6 +1,6 @@
 - id: state-apphash-mismatch
   title: App hash mismatch (state diverged from the network)
-  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, upgrade-version-behind]
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, upgrade-version-behind, node-no-peers, node-low-peers]
   severity: critical
   symptoms: wrong Block.Header.AppHash / CONSENSUS FAILURE; node halts on a block
   match:
@@ -19,7 +19,7 @@
 
 - id: state-db-locked
   title: Database locked by another process
-  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, node-no-peers, node-low-peers]
   severity: high
   match:
     all: ["logs.db_lock > 0"]
@@ -32,7 +32,7 @@
 
 - id: state-db-corrupt
   title: Database corruption
-  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, node-no-peers, node-low-peers]
   severity: critical
   match:
     all: ["logs.db_corrupt > 0"]
@@ -86,7 +86,7 @@
 
 - id: node-db-backend-data-mismatch
   title: The configured DB backend doesn't match the data on disk
-  explains: [node-process-down, node-crash-loop, node-rpc-down, evm-rpc-down, node-restarted-recently, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, cfg-db-backend-mismatch]
+  explains: [node-process-down, node-crash-loop, node-rpc-down, evm-rpc-down, node-restarted-recently, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, cfg-db-backend-mismatch, node-no-peers, node-low-peers]
   severity: critical
   symptoms: "exits at start with \"failed to initialize database: EOF\" even though config.toml and app.toml agree"
   match:
@@ -104,5 +104,13 @@
     - "proc.running true; wait.until synced"
   warnings:
     - never delete data/ as a quick fix on a validator without restoring priv_validator_state.json — double-sign risk
+  playbook:
+    - {do: node.set-config, args: {file: config.toml, key: db_backend, value: "{sig:data.db_backend}"}, note: "the backend the data was written with"}
+    - {do: node.set-config, args: {file: app.toml, key: app-db-backend, value: "{sig:data.db_backend}"}, note: "app.toml must agree"}
+    - {do: node.service, args: {action: restart}, note: "restart so it takes effect"}
+    - {do: wait.until, args: {condition: synced, timeout: 1800}, note: "wait until it has caught up"}
+    - {do: wait.until, args: {condition: unjailable, timeout: 1800}, when: "val.jailed == true", note: "wait out the jail period"}
+    - {do: val.unjail, when: "val.jailed == true", note: "unjail (signed by the operator key — asks you)"}
+    - {do: wait.until, args: {condition: in-consensus, timeout: 600}, when: "val.jailed == true", note: "check it signs again"}
   test:
     signals: {logs.db_init_eof: 1, proc.running: false}
