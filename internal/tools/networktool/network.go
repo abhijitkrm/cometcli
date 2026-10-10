@@ -64,11 +64,17 @@ func (checkTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error
 
 	// the chain itself, through any node of it
 	profiles := chainProfiles(c, spec.Chain.ID, a.String("nodes", ""))
-	if len(profiles) > 0 {
-		pc := &toolkit.Context{Context: c.Context, Profile: profiles[0], Cfg: c.Cfg, Audit: c.Audit}
-		findings = append(findings, ChainDrift(pc, spec)...)
+	// through the first node that answers: one being down isn't the chain's
+	var drift []netspec.Finding
+	for _, p := range profiles {
+		pc := &toolkit.Context{Context: c.Context, Profile: p, Cfg: c.Cfg, Audit: c.Audit}
+		drift = ChainDrift(pc, spec)
 		pc.Close()
+		if len(drift) != 1 || !strings.HasPrefix(drift[0].What, "couldn't read chain params") {
+			break
+		}
 	}
+	findings = append(findings, drift...)
 	// every node, in parallel
 	var mu sync.Mutex
 	var wg sync.WaitGroup

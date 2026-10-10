@@ -26,7 +26,7 @@ func jailedTool(runs *int, jailed int, fail bool) stubTool {
 	return stubTool{name: "chain.validators", tier: toolkit.TierObserve, run: func(_ *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
 		*runs++
 		if fail {
-			return nil, fmt.Errorf("dial 127.0.0.1:9090: connection refused")
+			return nil, fmt.Errorf("rpc error: code = Internal desc = query failed")
 		}
 		if a.String("status", "") != "jailed" {
 			return nil, fmt.Errorf("want status=jailed, got %q", a.String("status", ""))
@@ -153,5 +153,31 @@ func TestDirectCommandsRunWithoutTheModel(t *testing.T) {
 	}
 	if prov.calls != 1 || len(got) != 2 {
 		t.Fatalf("'stop worrying' must reach the model (calls %d, ran %v)", prov.calls, got)
+	}
+}
+
+func TestQuestionsNamingANodeAreAnsweredLocally(t *testing.T) {
+	prov := &mockProvider{}
+	var asked []string
+	check := stubTool{name: "upgrade.check", tier: toolkit.TierObserve, run: func(c *toolkit.Context, _ toolkit.Args) (*toolkit.Result, error) {
+		asked = append(asked, c.Profile.Name)
+		if c.Profile.Name == "archive-rpc" {
+			return nil, fmt.Errorf(`post failed: dial tcp 35.88.80.51:26657: connect: operation timed out`)
+		}
+		return &toolkit.Result{Text: "local binary:   0.6.1"}, nil
+	}}
+	a := routedAgent(t, prov, check)
+	a.Ctx.Cfg = &config.Config{Profiles: map[string]*config.Profile{"testp": a.Ctx.Profile, "val3": {Name: "val3"}, "archive-rpc": {Name: "archive-rpc"}}}
+	out, err := a.Run(context.Background(), "what version is val3 running")
+	if err != nil || !strings.Contains(out, "0.6.1") || !strings.Contains(out, "no model call") {
+		t.Fatalf("val3: %v %s", err, out)
+	}
+	// a node that doesn't answer is a local answer too
+	out, err = a.Run(context.Background(), "what version is archive-rpc running?")
+	if err != nil || !strings.Contains(out, "archive-rpc isn't reachable") || !strings.Contains(out, "no model call") {
+		t.Fatalf("archive-rpc: %v %s", err, out)
+	}
+	if prov.calls != 0 || strings.Join(asked, ",") != "val3,archive-rpc" {
+		t.Fatalf("model calls %d, asked %v", prov.calls, asked)
 	}
 }

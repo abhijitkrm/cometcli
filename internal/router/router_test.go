@@ -116,6 +116,8 @@ func TestCommands(t *testing.T) {
 		{"restart the node", "service", map[string]string{"action": "restart"}},
 		{"Restart val3.", "service", map[string]string{"action": "restart", "node": "val3"}},
 		{"stop sohan1", "service", map[string]string{"action": "stop", "node": "sohan1"}},
+		{"restart val3 please", "service", map[string]string{"action": "restart", "node": "val3"}},
+		{"Please restart val3 now, thanks", "service", map[string]string{"action": "restart", "node": "val3"}},
 		{"unjail", "unjail", map[string]string{}},
 		{"vote yes on proposal #6", "vote", map[string]string{"option": "yes", "proposal": "6"}},
 		{"vote no_with_veto on 7 from val2", "vote", map[string]string{"option": "no_with_veto", "proposal": "7", "node": "val2"}},
@@ -138,6 +140,16 @@ func TestCommands(t *testing.T) {
 				t.Errorf("%q: %s = %q, want %q", x.prompt, k, m.Args[k], v)
 			}
 		}
+	}
+	// questions can carry arguments too
+	for q, id := range map[string]string{"show proposal 7": "7", "Did proposal #12 pass?": "12", "proposal 3 tally": "3"} {
+		m := c.Classify(q)
+		if m.Intent == nil || m.Intent.ID != "proposal" || m.Args["id"] != id {
+			t.Errorf("%q → %v %v (%s), want proposal id %s", q, m.Intent, m.Args, m.Why, id)
+		}
+	}
+	if m := c.Classify("open proposals"); m.Intent == nil || m.Intent.ID != "proposals" {
+		t.Errorf("open proposals → %v", m.Intent)
 	}
 	// near-misses go to the model: it works out what was meant
 	for _, q := range []string{"restart it if it's stuck", "vote the way the others did", "send some tokens to the treasury", "why did it stop"} {

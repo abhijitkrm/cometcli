@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -36,6 +37,16 @@ func (a *Agent) routerOn() bool {
 // not a known question, no node to ask, or a tool failed.
 func (a *Agent) routeLocal(ctx context.Context, input string) (string, bool) {
 	m := a.catalog.Classify(input)
+	if m.Intent == nil {
+		// "is val2 healthy" asks what "is my node healthy" asks, of val2
+		// (routeProfile picks val2); commands keep their own node words
+		if g, ok := a.genericNode(input); ok {
+			if gm := a.catalog.Classify(g); gm.Intent != nil && gm.Intent.Kind != "command" {
+				gm.Why += "; the node's name read as \"node\""
+				m = gm
+			}
+		}
+	}
 	a.lastRoute = m
 	if m.Intent == nil {
 		return "", false
@@ -50,6 +61,9 @@ func (a *Agent) routeLocal(ctx context.Context, input string) (string, bool) {
 		return "", false
 	}
 	key := in.ID + "|" + p.Name
+	if len(m.Args) > 0 {
+		key += "|" + fmt.Sprint(m.Args)
+	}
 	now := time.Now()
 	if text, ok := a.answers.Get(key, now); ok {
 		a.routes.Cached++
@@ -65,9 +79,11 @@ func (a *Agent) routeLocal(ctx context.Context, input string) (string, bool) {
 			a.lastRoute.Why += "; " + st.Tool + " isn't a read-only tool"
 			return "", false
 		}
-		args := map[string]any{}
-		for k, v := range st.Args {
-			args[k] = v
+		args := router.Fill(st.Args, m.Args)
+		if len(args) < len(st.Args) {
+			// a placeholder the prompt didn't fill ("which proposal?")
+			a.lastRoute.Why += "; the question doesn't say which"
+			return "", false
 		}
 		a.emit(Event{Kind: EvToolStart, Tool: st.Tool, Tier: t.Tier().String(), Args: a.Redact.Args(args)})
 		sub, cancel := toolkit.WithDeadline(base, toolkit.CallTimeout(t, args))
@@ -80,7 +96,13 @@ func (a *Agent) routeLocal(ctx context.Context, input string) (string, bool) {
 			r.Err = err.Error()
 			a.emit(Event{Kind: EvToolResult, Tool: st.Tool, Err: a.Redact.Text(firstLine(r.Err))})
 			if !st.Optional {
-				// the model explains failures better than a template
+				if unreachableRe.MatchString(r.Err) {
+					// a node that doesn't answer is a known answer
+					text := fmt.Sprintf("**%s isn't reachable** — %s: %s\n\n`/incident %s` to find out why.", p.Name, st.Tool, firstLine(a.Redact.Text(r.Err)), p.Name)
+					a.routes.Local++
+					return a.answeredLocally(input, in, text+"\n\n_answered locally · no model call · /llm to ask the model_"), true
+				}
+				// the model explains other failures better than a template
 				a.lastRoute.Why += "; " + st.Tool + " failed"
 				return "", false
 			}
@@ -242,4 +264,19 @@ func coerceArgs(t toolkit.Tool, args map[string]any) toolkit.Args {
 		}
 	}
 	return out
+}
+
+// unreachableRe matches a node that didn't answer at all.
+var unreachableRe = regexp.MustCompile(`(?i)connection refused|timed out|i/o timeout|no route to host|host is down|network is unreachable|deadline exceeded`)
+
+// genericNode reads the one node a prompt names as "node", so a question
+// about it classifies like one about "my node".
+func (a *Agent) genericNode(input string) (string, bool) {
+	p, _ := a.nodeFor(input)
+	if p == nil || p.Name == "" {
+		return input, false
+	}
+	re := regexp.MustCompile(`(?i)(^|[^\w.-])` + regexp.QuoteMeta(p.Name) + `($|[^\w.-])`)
+	out := re.ReplaceAllString(input, "${1}node${2}")
+	return out, out != input
 }

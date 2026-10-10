@@ -936,20 +936,11 @@ func derive(r *Report) {
 	}
 	if t, ok := s["config.mempool_type"].(string); ok && r.Chain == "cosmos-evm" {
 		ver, _ := s["node.version"].(string)
+		want, _ := s["config.mempool_want"].(string)
 		maxTxs, hasMax := f("app.mempool_max_txs")
-		switch {
-		case t == "app" && strings.HasPrefix(ver, "0.38"):
-			// CometBFT 0.38 (cosmos/evm v0.6) doesn't know "app" at all
-			s["config.mempool_mismatch"] = true
-		case (t == "flood" || t == "nop") && hasMax && maxTxs >= 0:
-			// an app-side mempool (max-txs >= 0) needs CometBFT's "app"
-			// mempool; "app" with max-txs -1 is fine
-			s["config.mempool_mismatch"] = true
-		case t == "flood" || t == "nop":
-			// recent evmd refuses to start unless the type is "app"; older
-			// versions run fine on flood, so only flag a failing node
-			cfgErrs, _ := f("logs.config_parse")
-			s["config.mempool_mismatch"] = cfgErrs > 0 || s["proc.running"] == false
+		cfgErrs, _ := f("logs.config_parse")
+		if m, known := mempoolMismatch(t, want, ver, maxTxs, hasMax, cfgErrs > 0, s["proc.running"] != false); known {
+			s["config.mempool_mismatch"] = m
 		}
 	}
 	if id, ok := f("evm.chain_id"); ok {
@@ -1049,3 +1040,26 @@ func sortedKeys(m map[string]any) []string {
 }
 
 var imageVersionRe = regexp.MustCompile(`v\d+\.\d+\.\d+`)
+
+// mempoolMismatch says whether config.toml's mempool type is wrong for
+// this cosmos/evm node (known=false: nothing to say).
+func mempoolMismatch(t, want, ver string, maxTxs float64, hasMax, cfgErrs, running bool) (mismatch, known bool) {
+	switch {
+	case want == "flood" && !cfgErrs:
+		// CometBFT 0.38 (cosmos/evm v0.6): flood is right, whatever max-txs
+		// says — a stopped node is just stopped
+		return t == "app", true
+	case t == "app" && (want == "flood" || strings.HasPrefix(ver, "0.38")):
+		// CometBFT 0.38 doesn't know "app" at all
+		return true, true
+	case (t == "flood" || t == "nop") && hasMax && maxTxs >= 0:
+		// an app-side mempool (max-txs >= 0) needs CometBFT's "app"
+		// mempool; "app" with max-txs -1 is fine
+		return true, true
+	case t == "flood" || t == "nop":
+		// recent evmd refuses to start unless the type is "app"; older
+		// versions run fine on flood, so only flag a failing node
+		return cfgErrs || !running, true
+	}
+	return false, false
+}

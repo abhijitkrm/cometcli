@@ -13,6 +13,7 @@ import (
 	stakingv1beta1 "cosmossdk.io/api/cosmos/staking/v1beta1"
 	upgradev1beta1 "cosmossdk.io/api/cosmos/upgrade/v1beta1"
 
+	grpcclient "github.com/abhijitkrm/cometcli/internal/client/grpc"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
 	"github.com/abhijitkrm/cometcli/internal/tools/common"
 )
@@ -140,11 +141,12 @@ type govTool struct{}
 
 func (govTool) Name() string { return "chain.gov" }
 func (govTool) Desc() string {
-	return "List governance proposals (default: voting period)"
+	return "List governance proposals (default: voting period), or show one by id with its tally"
 }
 func (govTool) Schema() map[string]any {
 	return toolkit.ObjSchema(map[string]any{
 		"status": toolkit.Enum("proposal status filter", "voting", "deposit", "passed", "rejected", "all"),
+		"id":     toolkit.Int("one proposal: its id (status is ignored)"),
 	})
 }
 func (govTool) Tier() toolkit.Tier { return toolkit.TierObserve }
@@ -161,6 +163,9 @@ func (govTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) 
 		"rejected": govv1.ProposalStatus_PROPOSAL_STATUS_REJECTED,
 		"all":      govv1.ProposalStatus_PROPOSAL_STATUS_UNSPECIFIED,
 	}[a.String("status", "voting")]
+	if id := a.Int("id", 0); id > 0 {
+		return oneProposal(c, g, uint64(id))
+	}
 	res, err := g.GovV1.Proposals(c, &govv1.QueryProposalsRequest{ProposalStatus: st})
 	if err != nil {
 		return nil, err
@@ -285,4 +290,43 @@ func proposalEnd(p *govv1.Proposal) string {
 		return "-"
 	}
 	return t.AsTime().Format("2006-01-02 15:04")
+}
+
+// oneProposal shows a proposal with its tally: the final one once voting
+// ended, else the running count.
+func oneProposal(c *toolkit.Context, g *grpcclient.Conn, id uint64) (*toolkit.Result, error) {
+	res, err := g.GovV1.Proposal(c, &govv1.QueryProposalRequest{ProposalId: id})
+	if err != nil {
+		return nil, err
+	}
+	p := res.Proposal
+	tally := p.FinalTallyResult
+	if p.Status == govv1.ProposalStatus_PROPOSAL_STATUS_VOTING_PERIOD {
+		if t, err := g.GovV1.TallyResult(c, &govv1.QueryTallyResultRequest{ProposalId: id}); err == nil {
+			tally = t.Tally
+		}
+	}
+	status := strings.TrimPrefix(p.Status.String(), "PROPOSAL_STATUS_")
+	var b strings.Builder
+	fmt.Fprintf(&b, "#%d %s — %s\nvoting ends %s\n", p.Id, status, p.Title, proposalEnd(p))
+	data := map[string]any{"id": p.Id, "title": p.Title, "status": p.Status.String()}
+	if tally != nil {
+		yes, abstain, no, veto := tallyCounts(tally)
+		fmt.Fprintf(&b, "tally: yes %s · no %s · abstain %s · veto %s\n", yes, no, abstain, veto)
+		data["tally"] = map[string]any{"yes": yes, "no": no, "abstain": abstain, "veto": veto}
+	}
+	return &toolkit.Result{Text: b.String(), Data: data}, nil
+}
+
+// tallyCounts reads a tally on any SDK: option_one..four from v0.54, the
+// named counts (filled alone by older chains) before.
+func tallyCounts(t *govv1.TallyResult) (yes, abstain, no, veto string) {
+	or := func(a, b string) string {
+		if a != "" {
+			return a
+		}
+		return b
+	}
+	//nolint:staticcheck // the named counts are all an older chain fills
+	return or(t.OptionOneCount, t.YesCount), or(t.OptionTwoCount, t.AbstainCount), or(t.OptionThreeCount, t.NoCount), or(t.OptionFourCount, t.NoWithVetoCount)
 }

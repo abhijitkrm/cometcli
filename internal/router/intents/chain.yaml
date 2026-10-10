@@ -50,6 +50,21 @@
     {{$n := count (get .g.Data "proposals")}}{{if $n}}**{{$n}} proposal(s) in voting:**{{else}}**No proposals in voting.**{{end}}
     {{trim .g.Text}}
 
+- id: proposal
+  title: one proposal and its tally
+  scope: chain
+  patterns:
+    - '^(show |get |status of |what about |how is |details of )?(the )?(gov |governance )?proposal (number |no |id )?(?P<id>\d+)( status| result| tally| details)?$'
+    - '^(is |did |has )?(the )?proposal (?P<id>\d+) (pass|passed|passing|rejected|failed)$'
+  examples:
+    - show proposal 7
+    - did proposal 7 pass
+    - proposal 7 tally
+  steps:
+    - {as: g, tool: chain.gov, args: {id: "{id}"}}
+  answer: |
+    {{trim .g.Text}}
+
 - id: upgrade-plan
   title: scheduled upgrade
   scope: chain
