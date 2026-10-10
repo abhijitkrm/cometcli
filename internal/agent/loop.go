@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -133,6 +134,11 @@ func New(c *toolkit.Context, reg *toolkit.Registry) (*Agent, error) {
 	ac.Permissions.Ask = append(ac.Permissions.Ask, st.Permissions.Ask...)
 	ac.Permissions.Deny = append(ac.Permissions.Deny, st.Permissions.Deny...)
 	prov, err := NewProvider(ac)
+	if errors.Is(err, ErrNoProvider) {
+		// no model configured: known questions and known incidents are
+		// still answered locally; anything else says what's missing
+		prov, err = noProvider{}, nil
+	}
 	if err != nil {
 		e.close(reg)
 		return nil, err

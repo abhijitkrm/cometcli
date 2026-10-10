@@ -228,6 +228,107 @@ cometcli keys convert cosmos1abc...                    # bech32 ↔ 0x hex
 cometcli keys rm ops
 ```
 
+## Networks (spec, roles, checks)
+
+A network spec, `~/.cometcli/networks/<chain-id>.yaml`, describes one network:
+- chain and EVM ids, denoms
+- genesis gov, staking, slashing, feemarket, EVM, mint and distribution parameters
+- consensus timing and node services
+- DB backend, image, and how images are named
+
+Every node of the chain is checked against it according to its role.
+
+```bash
+cometcli network import run-genesis/network-config.env run-validator/network-config.env \
+    run-archive/network-config.env --image-naming 'primium-{tag}'    # from node-setup's env files
+cometcli network show primium-1
+cometcli network check --network primium-1          # spec sanity, chain drift, every node of the chain
+cometcli network check --network primium-1 --prod   # plus public-network hardening
+cometcli network check --network primium-1 --nodes val1,archive1
+```
+
+`network check` reports at three levels:
+- **Spec:** mistakes such as an expedited voting period that isn't shorter than the voting
+  period. With `--prod` it also flags test-only values: voting period, unbonding,
+  LAN-tuned timeouts, `ws_origins *`, the default min deposit.
+- **Chain:** the live gov, staking and slashing parameters compared with the spec.
+- **Nodes:** each node's `config.toml`, `app.toml` and container command, checked
+  against its role (the profile's `role`):
+
+| Role | Checked |
+|---|---|
+| all | `db_backend` = `app-db-backend` (empty = same) · mempool: `type = "app"` with `max-txs ≥ 0` on cosmos/evm v0.7+, never `"app"` on v0.6 · `minimum-gas-prices` · `evm-chain-id` · enabled services · `--json-rpc.ws-origins` passed as a flag (ws-origins from app.toml is broken in cosmos-evm) |
+| validator | consensus timeouts match the spec · `external_address` set · with `--prod`: no CORS, no unsafe-cors, no insecure unlock, swagger off, no `debug`/`personal` |
+| archive | `pruning = nothing` (app.toml or `--pruning nothing`) · `tx_index = kv` · with `--prod`: CORS/unlock hardening |
+| rpc | `tx_index = kv` · with `--prod`: CORS/unlock hardening |
+
+### Creating a new network
+
+```bash
+cometcli network import run-genesis/network-config.env --chain-id mychain-1     # the new network's spec
+cometcli profile add v1 --ssh-host 203.0.113.1 --service docker --unit primium-validator --role validator
+#   … one profile per genesis validator (build the image on each: upgrade build)
+cometcli genesis create mychain-1 --validators v1,v2,v3,v4 --keyring file --accounts treasury.txt
+```
+
+`genesis create` runs node-setup's distributed genesis workflow, with cometcli as the
+coordinator:
+
+1. **On each validator's own host:** `init` in the image, so the node and consensus keys
+   stay there, and the operator key goes into the node's own keyring.
+2. **Base genesis**, built from the spec:
+   - staking, gov, slashing, mint, distribution and feemarket parameters
+   - EVM precompiles (by name, sorted), access control and erc20
+   - denom metadata and block gas
+   - every validator funded, plus `--accounts` (lines of `<address> <amount>`, bech32 or 0x)
+3. **Each gentx signed on its own host.** Only the gentx comes back.
+4. **`collect-gentxs` and strict `validate-genesis`.**
+5. **Start every node:**
+   - the final genesis is installed everywhere, and also saved for later joins
+   - configs are rendered for the validator role, with every other validator as a peer
+   - compose files are written and every node starts
+6. **Wait for blocks.**
+
+Mnemonics are shown only on your terminal, or written to `--mnemonics-to <dir>`
+(mode 0600). Existing node homes are never overwritten. Several validators on one machine:
+`--docker-network <net> --port-offset N --port-step 10 --home '~/nodes/{profile}'`.
+Back up each validator's `priv_validator_key.json` off-machine afterwards.
+
+### Adding nodes to a network
+
+```bash
+cometcli network import --from-node val1                   # spec + genesis.json from a running node
+cometcli profile add arch1 --ssh-host 203.0.113.9 --service docker --unit primium-archive --role archive
+cometcli --profile arch1 node provision --peers_from val1,val2         # init, genesis, configs, compose, start
+cometcli --profile arch1 node provision --reconfigure                  # re-render configs of an existing node
+```
+
+`node provision` sets up a node on the profile's host, local or over SSH, following the
+spec:
+1. Checks the image is on the host. If not, build it first with `upgrade build`.
+2. Checks the node home is writable. If not, it prints the one-time `sudo chown`.
+3. Runs `init` in the image as the home's owner.
+4. Installs the network's genesis (from `--from-node`).
+5. Renders `config.toml`, `app.toml` and `client.toml` for the role. Only the needed keys
+   change; comments stay. The result passes `network check`.
+6. Writes `docker-compose.yml` into the node home and starts it:
+   - the command includes `--pruning nothing` for archives and the ws-origins flag
+   - validators publish RPC, REST, gRPC and EVM on 127.0.0.1 only; P2P is public
+   - the stop grace period is 60s
+7. Updates the profile.
+
+Peers come from `--peers` or from running nodes via `--peers_from`. For several nodes on
+one machine, use `--docker_network <net> --port_offset N`.
+
+**It refuses a home that already holds a validator key**, since re-initialising would replace
+its keys and state (a double-sign risk). `--reconfigure` re-renders configs only.
+
+For a validator, once it's synced:
+1. The operator creates its key in the node's own keyring, in their terminal.
+2. Fund it.
+3. Run `cometcli --profile <p> val create --amount <stake>`. The consensus key and moniker come
+   from the node, and commission is encoded the way the chain's cosmos-sdk version expects.
+
 ## Remote nodes over SSH
 
 Run cometcli on your laptop and manage a node on another machine. Every host

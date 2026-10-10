@@ -157,3 +157,28 @@
     - {do: val.unjail, when: "val.jailed == true", note: "unjail (asks you)"}
   test:
     signals: {proc.mem_limit_mb: 120, proc.oom_kills: 14, proc.restarts: 7}
+
+- id: node-home-permission-denied
+  title: The node can't write its home (permission denied)
+  explains: [node-process-down, node-crash-loop, node-rpc-down, evm-rpc-down, node-restarted-recently, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
+  severity: critical
+  symptoms: 'exits at start with "mkdir data: permission denied" or "could not create directory"'
+  match:
+    all: ["logs.permission_denied > 0"]
+    any: ["proc.running == false", "proc.restarts >= 1", "logs.startup_error > 0", "logs.panic > 0"]
+  confirm:
+    - "node.logs — the panic names the path it couldn't create"
+    - "bash: ls -ld <home> <home>/data; docker inspect -f '{{.Config.User}} {{.Config.WorkingDir}}' <container>"
+  causes:
+    - the container runs as a user that doesn't own the bind-mounted home (a root-owned disk, a home created by sudo)
+    - the container's working directory isn't writable by that user — evmd creates data/ relative to it
+  fix:
+    - "[change] give the home to the node's user once: sudo chown -R <uid>:<gid> <home> (not sudo for the node itself)"
+    - "[change] run the container with working_dir (and HOME) set to the node home — node provision writes compose files that way"
+    - "[change] recreate the container: docker compose up -d --force-recreate"
+  verify:
+    - "proc.running true and stays up; wait.until synced"
+  warnings:
+    - don't run the node or the setup as root to get past it — files it writes become unwritable for the real user next time
+  test:
+    signals: {logs.permission_denied: 2, proc.running: false, logs.panic: 1}

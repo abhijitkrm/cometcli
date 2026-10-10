@@ -344,7 +344,7 @@ func (editTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error)
 		msg.Description = &stakingv1beta1.Description{}
 	}
 	if r := a.String("commission-rate", ""); r != "" {
-		scaled, err := common.DecScaled(r)
+		scaled, err := common.TxDec(c, r)
 		if err != nil {
 			return nil, fmt.Errorf("commission-rate: %w", err)
 		}

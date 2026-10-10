@@ -78,3 +78,22 @@
     - "[change] disable JSON-RPC on validators or bind it to 127.0.0.1; serve RPC from dedicated nodes"
   test:
     signals: {profile.role: validator, app.json_rpc_enable: true, app.json_rpc_address: "0.0.0.0:8545"}
+
+- id: evm-ws-origins-config-only
+  title: WebSocket origins set only in app.toml — browsers get 403
+  kind: advisory
+  severity: medium
+  symptoms: "EVM WebSocket handshakes from a browser (which always sends Origin) fail with 403 Forbidden; CLI clients work"
+  match:
+    all: ["app.json_rpc_ws == true", "proc.ws_origins_flag == false"]
+  confirm:
+    - "docker inspect -f '{{json .Config.Cmd}}' <container> has no --json-rpc.ws-origins"
+  causes:
+    - "cosmos-evm reads ws-origins from app.toml through viper, which turns [\"*\"] into the literal string \"[*]\" — no origin ever matches; only the CLI flag works"
+  fix:
+    - "[change] add --json-rpc.ws-origins=<origins> to the container command (comma-separated; * for any) — node provision writes it from the network spec"
+    - "[change] recreate the container: docker compose up -d --force-recreate"
+  verify:
+    - "a WebSocket connect with an Origin header returns 101, not 403"
+  test:
+    signals: {app.json_rpc_ws: true, proc.ws_origins_flag: false}

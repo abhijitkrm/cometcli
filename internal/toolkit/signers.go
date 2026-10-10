@@ -17,13 +17,14 @@ type Chooser func(c *Context, prompt string, options []string) (int, error)
 // SecretFunc asks the operator for a secret (input hidden, never logged).
 type SecretFunc func(c *Context, prompt string) (string, error)
 
-// secret asks via the front-end, else COMETCLI_CONTAINER_KEYRING_PASSWORD.
+// secret is COMETCLI_CONTAINER_KEYRING_PASSWORD when the operator set it
+// (scripts, CI, watch), else asked via the front-end.
 func (c *Context) secret(prompt string) (string, error) {
-	if c.Secret != nil {
-		return c.Secret(c, prompt)
-	}
 	if pw := os.Getenv("COMETCLI_CONTAINER_KEYRING_PASSWORD"); pw != "" {
 		return pw, nil
+	}
+	if c.Secret != nil {
+		return c.Secret(c, prompt)
 	}
 	return "", fmt.Errorf("%s: no terminal to ask on — run interactively or set COMETCLI_CONTAINER_KEYRING_PASSWORD", prompt)
 }

@@ -4,7 +4,11 @@
 package tx
 
 import (
+	// key types that appear inside messages (MsgCreateValidator's
+	// consensus pubkey): registered so approvals can show them
 	"context"
+	_ "cosmossdk.io/api/cosmos/crypto/ed25519"
+	_ "cosmossdk.io/api/cosmos/crypto/secp256k1"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"

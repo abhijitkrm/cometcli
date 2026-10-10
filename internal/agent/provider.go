@@ -200,7 +200,7 @@ func NewProvider(ac config.AgentConf) (Provider, error) {
 			base:  base,
 		}, nil
 	case "off", "none", "":
-		return nil, fmt.Errorf("no agent provider — run `cometcli config set agent.provider openrouter` (or groq, gemini, anthropic, openai, openai-compat), or set one in a profile")
+		return nil, ErrNoProvider
 	default:
 		return nil, fmt.Errorf("unknown agent.provider %q", ac.Provider)
 	}
@@ -260,4 +260,23 @@ func apiError(prefix string, resp *http.Response) error {
 		msg = msg[:300] + "…"
 	}
 	return fmt.Errorf("%s: HTTP %d %s", prefix, resp.StatusCode, msg)
+}
+
+// ErrNoProvider means no model is configured.
+var ErrNoProvider = errors.New("no agent provider — run `cometcli config set agent.provider openrouter` (or groq, gemini, anthropic, openai, openai-compat), or set one in a profile")
+
+// noProvider stands in when no model is configured: the local router
+// still answers what it knows.
+type noProvider struct{}
+
+func (noProvider) Name() string { return "none" }
+func (noProvider) Chat(context.Context, *Request) (*Response, error) {
+	return nil, fmt.Errorf("this needs a model, and none is configured (cometcli answers known questions without one) — %w", ErrNoProvider)
+}
+
+// HasModel reports whether a model is configured (otherwise only local
+// answers work).
+func (a *Agent) HasModel() bool {
+	_, none := a.Provider.(noProvider)
+	return !none
 }

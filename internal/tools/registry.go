@@ -10,6 +10,7 @@ import (
 	"github.com/abhijitkrm/cometcli/internal/tools/keystool"
 	"github.com/abhijitkrm/cometcli/internal/tools/montool"
 	"github.com/abhijitkrm/cometcli/internal/tools/nettool"
+	"github.com/abhijitkrm/cometcli/internal/tools/networktool"
 	"github.com/abhijitkrm/cometcli/internal/tools/node"
 	"github.com/abhijitkrm/cometcli/internal/tools/runbooktool"
 	"github.com/abhijitkrm/cometcli/internal/tools/sectool"
@@ -38,6 +39,7 @@ func RegisterAll(r *toolkit.Registry) {
 	runbooktool.Register(r)
 	fleet.Register(r)
 	nettool.Register(r)
+	networktool.Register(r)
 	txtool.Register(r)
 	waittool.Register(r)
 	triage.Register(r)

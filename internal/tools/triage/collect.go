@@ -444,6 +444,10 @@ func collectProcess(c *toolkit.Context, r *Report, set func(string, any)) error 
 			set("proc.uptime_s", float64(int64(time.Since(t).Seconds())))
 		}
 		dockerMemory(c, h, svc.Unit, set)
+		// ws-origins only works as a CLI flag (cosmos-evm's app.toml value is mangled)
+		if cmd, ok := runOK(c, h, "docker inspect -f '{{json .Config.Cmd}}' "+common.ShellQ(svc.Unit)); ok {
+			set("proc.ws_origins_flag", strings.Contains(cmd, "--json-rpc.ws-origins"))
+		}
 		if n, ok := runOK(c, h, "docker inspect -f '{{len .NetworkSettings.Networks}}' "+common.ShellQ(svc.Unit)); ok {
 			if v, err := strconv.Atoi(n); err == nil { // never turn unparsable output into 0
 				set("proc.networks", float64(v))
@@ -753,6 +757,7 @@ func collectConfig(c *toolkit.Context, r *Report, set func(string, any)) error {
 			}
 			if r.Chain == "cosmos-evm" {
 				set("app.json_rpc_enable", get("json-rpc", "enable") == true)
+				set("app.json_rpc_ws", get("json-rpc", "enable") == true && str(get("json-rpc", "ws-address")) != "")
 				set("app.json_rpc_address", str(get("json-rpc", "address")))
 				if v, ok := get("evm", "evm-chain-id").(int64); ok {
 					set("app.evm_chain_id", float64(v))
@@ -883,13 +888,22 @@ func derive(r *Report) {
 			s["config.db_backend_mismatch"] = a != b
 		}
 	}
-	if t, ok := s["config.mempool_type"].(string); ok && r.Chain == "cosmos-evm" && (t == "flood" || t == "nop") {
-		// Cosmos-EVM with the app-side EVM mempool (always on in recent
-		// evmd) refuses to start unless CometBFT's mempool type is "app".
-		// Older versions run fine on flood, so only flag it when the node
-		// is actually failing.
-		cfgErrs, _ := f("logs.config_parse")
-		s["config.mempool_mismatch"] = cfgErrs > 0 || s["proc.running"] == false
+	if t, ok := s["config.mempool_type"].(string); ok && r.Chain == "cosmos-evm" {
+		ver, _ := s["node.version"].(string)
+		maxTxs, hasMax := f("app.mempool_max_txs")
+		switch {
+		case t == "app" && strings.HasPrefix(ver, "0.38"):
+			// CometBFT 0.38 (cosmos/evm v0.6) doesn't know "app" at all
+			s["config.mempool_mismatch"] = true
+		case t == "app" && hasMax && maxTxs < 0:
+			// the app-side mempool needs max-txs >= 0
+			s["config.mempool_mismatch"] = true
+		case t == "flood" || t == "nop":
+			// recent evmd refuses to start unless the type is "app"; older
+			// versions run fine on flood, so only flag a failing node
+			cfgErrs, _ := f("logs.config_parse")
+			s["config.mempool_mismatch"] = cfgErrs > 0 || s["proc.running"] == false
+		}
 	}
 	if id, ok := f("evm.chain_id"); ok {
 		if want, ok := f("app.evm_chain_id"); ok && want > 0 {

@@ -74,9 +74,12 @@ status, cometcli doctor, cometcli tx unjail) and a tool the agent calls.`,
 	}
 
 	for _, c := range toolGroupCommands(reg) {
+		if c.Use == "network" {
+			c.AddCommand(networkImportCmd(), networkShowCmd())
+		}
 		root.AddCommand(c)
 	}
-	root.AddCommand(profileCmd(), auditCmd(), versionCmd(), initCmd(), sessionsCmd(), oneCmd(reg), configCmd(), trustCmd(), watchCmd(reg), drillCmd(reg), sshCmd())
+	root.AddCommand(profileCmd(), auditCmd(), versionCmd(), initCmd(), sessionsCmd(), oneCmd(reg), configCmd(), trustCmd(), watchCmd(reg), drillCmd(reg), sshCmd(), genesisCmd(reg))
 	root.AddCommand(extra...)
 	return root
 }
@@ -176,7 +179,8 @@ func argsFromFlags(cmd *cobra.Command) toolkit.Args {
 // RunTool executes a tool with standard output/audit handling. Exported so
 // hand-written commands (doctor, agent) can drive tools too.
 func RunTool(cmd *cobra.Command, t toolkit.Tool, args toolkit.Args) error {
-	c, err := NewCtx(cmd, !strings.HasPrefix(t.Name(), "keys."))
+	// keys.* and network.* work without an active profile
+	c, err := NewCtx(cmd, !strings.HasPrefix(t.Name(), "keys.") && !strings.HasPrefix(t.Name(), "network."))
 	if err != nil {
 		return err
 	}

@@ -174,7 +174,9 @@ func checker(cond string, a toolkit.Args) (checkFn, error) {
 		return func(c *toolkit.Context, sp *syncProgress) (state, error) {
 			f, err := val.Gather(c, a)
 			if err != nil {
-				return state{}, err
+				// archive and RPC nodes have no validator: sync is
+				// the node's own business
+				return syncedFromNode(c, sp)
 			}
 			if f.CometErr != "" {
 				return state{status: "node RPC unreachable: " + f.CometErr}, nil
@@ -337,4 +339,22 @@ func signalChecker(expr string) (func(*toolkit.Context, *syncProgress) (state, e
 		}
 		return state{done: done, status: strings.Join(parts, ", "), data: data}, nil
 	}, nil
+}
+
+// syncedFromNode decides "synced" from CometBFT status alone.
+func syncedFromNode(c *toolkit.Context, sp *syncProgress) (state, error) {
+	cc, err := c.Comet()
+	if err != nil {
+		return state{}, err
+	}
+	st, err := cc.Status(c)
+	if err != nil {
+		return state{status: "node RPC unreachable: " + err.Error()}, nil
+	}
+	f := &val.Facts{Height: st.SyncInfo.LatestBlockHeight, BlockTime: st.SyncInfo.LatestBlockTime,
+		CatchingUp: st.SyncInfo.CatchingUp, MaxBlockLag: 2 * time.Minute}
+	if f.Synced() {
+		return state{done: true, status: f.SyncState(), data: map[string]any{"height": f.Height}}, nil
+	}
+	return state{status: sp.update(f), data: map[string]any{"height": f.Height}}, nil
 }

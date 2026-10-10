@@ -488,7 +488,9 @@ func renderDiff(d string) string {
 // statusLine is the chat-pane header: provider, mode, live height.
 func (m *AppModel) statusLine() string {
 	prov := "no agent"
-	if m.chat.agent != nil {
+	if m.chat.agent != nil && !m.chat.agent.HasModel() {
+		prov = "no agent model · local answers only"
+	} else if m.chat.agent != nil {
 		prov = fmt.Sprintf("%s/%s", m.chat.agent.Provider.Name(), m.chat.agent.Model)
 		if pol := m.chat.agent.Policy; pol.ReadOnly() {
 			prov += " [readonly]"
