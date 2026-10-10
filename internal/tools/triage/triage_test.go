@@ -268,3 +268,27 @@ func TestEVMMempoolMismatch(t *testing.T) {
 		t.Fatal("case not matched")
 	}
 }
+
+func TestMempoolMismatchByVersion(t *testing.T) {
+	cases := []struct {
+		name, typ, want, ver string
+		maxTxs               float64
+		cfgErrs, running     bool
+		mismatch             bool
+	}{
+		// primium-1, v0.6.1: a stopped validator on flood is just stopped
+		{"v0.6 stopped on flood", "flood", "flood", "", -1, false, false, false},
+		{"v0.6 flood with max-txs", "flood", "flood", "0.38.19", 0, false, true, false},
+		{"v0.6 app", "app", "flood", "", -1, false, true, true},
+		{"v0.7 flood with app mempool", "flood", "app", "0.39.0", 0, false, true, true},
+		{"v0.7 app", "app", "app", "0.39.0", 0, false, true, false},
+		{"v0.7 app with -1", "app", "app", "0.39.0", -1, false, true, false},
+		{"unknown version, failing on flood", "flood", "", "", -1, false, false, true},
+		{"logs say mismatch on flood", "flood", "flood", "", -1, true, false, true},
+	}
+	for _, x := range cases {
+		if m, _ := mempoolMismatch(x.typ, x.want, x.ver, x.maxTxs, true, x.cfgErrs, x.running); m != x.mismatch {
+			t.Errorf("%s: mismatch = %v, want %v", x.name, m, x.mismatch)
+		}
+	}
+}

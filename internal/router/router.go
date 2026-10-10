@@ -244,10 +244,16 @@ func dice(a, b []string) float64 {
 // commandText is a prompt as commands see it: lowercased, spaces
 // collapsed, trailing punctuation dropped — but ':' '@' '#' kept (images,
 // peers, proposal numbers).
+// politeRe is courtesy around a command: "please restart val3 now, thanks".
+var politeRe = regexp.MustCompile(`^(please|pls|can you|could you|kindly)\s+|[\s,]+(please|pls|now|thanks|thank you)$`)
+
 func commandText(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
 	s = strings.TrimRight(s, ".!? ")
-	s = strings.TrimPrefix(s, "please ")
+	for prev := ""; prev != s; {
+		prev = s
+		s = strings.TrimRight(politeRe.ReplaceAllString(s, ""), ",.!? ")
+	}
 	return strings.TrimSpace(spaceRe.ReplaceAllString(s, " "))
 }
 
@@ -289,8 +295,18 @@ func (c *Catalog) Classify(prompt string) Match {
 			continue
 		}
 		for _, re := range in.res {
-			if re.MatchString(n) {
-				return Match{Intent: in, Score: 1, Why: "pattern " + re.String()}
+			if m := re.FindStringSubmatch(n); m != nil {
+				// named groups are the steps' arguments ("proposal 7")
+				var args map[string]string
+				for i, name := range re.SubexpNames() {
+					if name != "" && m[i] != "" {
+						if args == nil {
+							args = map[string]string{}
+						}
+						args[name] = m[i]
+					}
+				}
+				return Match{Intent: in, Score: 1, Why: "pattern " + re.String(), Args: args}
 			}
 		}
 	}

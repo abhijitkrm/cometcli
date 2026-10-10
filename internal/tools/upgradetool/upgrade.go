@@ -49,10 +49,37 @@ func (checkTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error
 		}
 	}
 	if h, err := c.Host(); err == nil && c.Profile.Binary != "" {
-		if out, code, err := h.Run(c, c.Profile.Binary+" version 2>/dev/null || "+c.Profile.Binary+" version --long 2>/dev/null | head -5"); err == nil {
-			fmt.Fprintf(&b, "local binary:   %s\n", common.OneLine(out))
-			data["local_version"] = strings.TrimSpace(out)
+		cmd := c.Profile.Binary + " version 2>/dev/null || " + c.Profile.Binary + " version --long 2>/dev/null | head -5"
+		docker := c.Profile.Service.Type == "docker" && c.Profile.Service.Unit != ""
+		if docker {
+			// the binary lives in the container; the image says what was deployed
+			u := common.ShellQ(c.Profile.Service.Unit)
+			cmd = "docker exec -e HOME=/tmp " + u + " " + c.Profile.Binary + " version 2>&1 | tail -1; echo; docker inspect -f '{{.Config.Image}}' " + u + " 2>/dev/null"
+		}
+		if out, code, err := h.Run(c, cmd); err == nil {
 			c.LogShell("binary version", code)
+			ver, image := strings.TrimSpace(out), ""
+			if docker {
+				lines := strings.Split(strings.TrimSpace(out), "\n")
+				ver, image = strings.TrimSpace(lines[0]), strings.TrimSpace(lines[len(lines)-1])
+				if len(lines) == 1 || strings.Contains(ver, "rror") || strings.Contains(ver, "No such container") {
+					ver = ""
+				}
+			}
+			switch {
+			case ver != "" && image != "":
+				fmt.Fprintf(&b, "local binary:   %s (image %s)\n", common.OneLine(ver), image)
+			case ver != "":
+				fmt.Fprintf(&b, "local binary:   %s\n", common.OneLine(ver))
+			case image != "":
+				fmt.Fprintf(&b, "local image:    %s (container not running)\n", image)
+			}
+			if ver != "" {
+				data["local_version"] = ver
+			}
+			if image != "" {
+				data["image"] = image
+			}
 		}
 	}
 	repo := a.String("repo", c.Profile.Metadata["repo"])
