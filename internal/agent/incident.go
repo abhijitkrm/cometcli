@@ -71,6 +71,9 @@ func (a *Agent) runIncident(ctx context.Context, what string) (string, error) {
 		return handoff(triageNote)
 	}
 
+	// the evidence is what triage saw: refreshSignals updates sig in place
+	// while the playbook runs, and after a fix it matches nothing
+	_, evidence := c.Matches(sig)
 	a.emit(Event{Kind: EvText, Text: fmt.Sprintf("Known case **%s** — %s.\nRunning its playbook locally, no model call; changes and transactions still ask you.", c.ID, c.Title)})
 	var done []string
 	for i, st := range c.Playbook {
@@ -108,7 +111,7 @@ func (a *Agent) runIncident(ctx context.Context, what string) (string, error) {
 		done = append(done, fmt.Sprintf("%s: %s", label, stepOutcome(st.Do, r.Text)))
 	}
 
-	_, matched := c.Matches(sig)
+	matched := evidence
 	if c.PlaybookKind == "report" {
 		return a.reportIncident(ctx, what, c, matched, done), nil
 	}
