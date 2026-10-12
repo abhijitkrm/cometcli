@@ -32,6 +32,7 @@ func (statusTool) Desc() string {
 func (statusTool) Schema() map[string]any {
 	return toolkit.ObjSchema(map[string]any{
 		"timeout": toolkit.Int("per-node timeout seconds (default 8)"),
+		"chain":   toolkit.Str("only the nodes of this chain id (default: all)"),
 	})
 }
 func (statusTool) Tier() toolkit.Tier { return toolkit.TierObserve }
@@ -47,7 +48,11 @@ func (statusTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, erro
 	var mu sync.Mutex
 	var rows []row
 	var wg sync.WaitGroup
+	chain := a.String("chain", "")
 	for name, p := range c.Cfg.Profiles {
+		if chain != "" && p.ChainID != chain {
+			continue
+		}
 		wg.Add(1)
 		go func(name string, p *config.Profile) {
 			defer wg.Done()

@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -11,6 +13,7 @@ import (
 	"github.com/abhijitkrm/cometcli/internal/audit"
 	"github.com/abhijitkrm/cometcli/internal/config"
 	"github.com/abhijitkrm/cometcli/internal/egress"
+	"github.com/abhijitkrm/cometcli/internal/netspec"
 	"github.com/abhijitkrm/cometcli/internal/router"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
 )
@@ -37,6 +40,10 @@ func (a *Agent) routerOn() bool {
 // not a known question, no node to ask, or a tool failed.
 func (a *Agent) routeLocal(ctx context.Context, input string) (string, bool) {
 	m := a.catalog.Classify(input)
+	if c := m.Args["chain"]; m.Intent != nil && c != "" && !a.knownChain(c) {
+		// "is val2 healthy" names a node, not a chain: read it as one
+		m = router.Match{Why: fmt.Sprintf("%q isn't one of your chains", c)}
+	}
 	if m.Intent == nil {
 		// "is val2 healthy" asks what "is my node healthy" asks, of val2
 		// (routeProfile picks val2); commands keep their own node words
@@ -198,6 +205,9 @@ func (a *Agent) RouteWhy() string {
 // failure is shown as it is, not handed to a model.
 func (a *Agent) runCommand(ctx context.Context, input string, m router.Match) (string, bool) {
 	in := m.Intent
+	if m.Args["group"] != "" {
+		return a.runCommandOnGroup(ctx, input, m)
+	}
 	var p *config.Profile
 	if name := m.Args["node"]; name != "" {
 		cfg := a.Ctx.Cfg
@@ -279,4 +289,111 @@ func (a *Agent) genericNode(input string) (string, bool) {
 	re := regexp.MustCompile(`(?i)(^|[^\w.-])` + regexp.QuoteMeta(p.Name) + `($|[^\w.-])`)
 	out := re.ReplaceAllString(input, "${1}node${2}")
 	return out, out != input
+}
+
+// knownChain reports whether a profile is on this chain id.
+func (a *Agent) knownChain(id string) bool {
+	if a.Ctx == nil || a.Ctx.Cfg == nil {
+		return false
+	}
+	for _, p := range a.Ctx.Cfg.Profiles {
+		if strings.EqualFold(p.ChainID, id) {
+			return true
+		}
+	}
+	// a network with a spec but no nodes yet
+	if path, err := netspec.Path(id); err == nil {
+		if _, err := os.Stat(path); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// runCommandOnGroup runs a direct command on every node it names ("stop
+// all primium-1 validators", "build v0.7.2 on all validators"), one after
+// the other, each with its own approvals; a failure doesn't stop the rest.
+func (a *Agent) runCommandOnGroup(ctx context.Context, input string, m router.Match) (string, bool) {
+	in := m.Intent
+	chain := m.Args["chain"]
+	validators := strings.Contains(input, "validator")
+	if chain != "" && !a.knownChain(chain) {
+		a.lastRoute = router.Match{Why: fmt.Sprintf("looked like the %s command for a group, but %q isn't one of your chains", in.ID, chain)}
+		return "", false
+	}
+	var names []string
+	if a.Ctx != nil && a.Ctx.Cfg != nil {
+		for name, p := range a.Ctx.Cfg.Profiles {
+			if (chain == "" || strings.EqualFold(p.ChainID, chain)) && (!validators || p.Role == "validator") {
+				names = append(names, name)
+			}
+		}
+	}
+	if len(names) == 0 {
+		a.lastRoute.Why += "; no nodes in that group"
+		return "", false
+	}
+	sort.Strings(names)
+	if a.Policy.ReadOnly() {
+		for _, st := range in.Steps {
+			if t, ok := a.Reg.Get(st.Tool); ok && t.Tier() > toolkit.TierDiagnose {
+				return a.answeredLocally(input, in, fmt.Sprintf("%s is a %s action and this session is read-only.", in.Title, t.Tier())), true
+			}
+		}
+	}
+	var lines []string
+	failed, stopped := 0, false
+	for _, name := range names {
+		p := a.Ctx.Cfg.Profiles[name]
+		p.Name = name
+		var out []string
+		for _, st := range in.Steps {
+			t, ok := a.Reg.Get(st.Tool)
+			if !ok {
+				a.lastRoute.Why += "; no tool " + st.Tool
+				return "", false
+			}
+			res, err := a.runToolOn(ctx, t, coerceArgs(t, router.Fill(st.Args, m.Args)), "direct command: "+input, p)
+			if err != nil {
+				out = append(out, "✗ "+firstLine(a.Redact.Text(err.Error())))
+				failed++
+				if declined(err) {
+					stopped = true
+				}
+				break
+			}
+			out = append(out, groupLine(res))
+		}
+		lines = append(lines, fmt.Sprintf("- **%s**: %s", name, strings.Join(out, " · ")))
+		if stopped || ctx.Err() != nil {
+			// the operator said no: the rest aren't asked
+			if rest := len(names) - len(lines); rest > 0 {
+				lines = append(lines, fmt.Sprintf("- stopped there: %d more not attempted", rest))
+			}
+			break
+		}
+	}
+	a.routes.Local++
+	text := fmt.Sprintf("**%s** on %d node(s)%s\n%s\n\n_ran directly · no model call_", in.Title, len(names), map[bool]string{true: fmt.Sprintf(" — %d failed", failed), false: ""}[failed > 0], strings.Join(lines, "\n"))
+	return a.answeredLocally(input, in, text), true
+}
+
+// declined reports an approval the operator (or a headless run) refused.
+func declined(err error) bool {
+	e := err.Error()
+	return strings.Contains(e, "not approved") || strings.Contains(e, "denied")
+}
+
+// groupLine is one node's result in a group command: triage says its root
+// causes, anything else its first line.
+func groupLine(res *toolkit.Result) string {
+	if res.Data != nil {
+		if roots, ok := res.Data["roots"].([]string); ok {
+			if len(roots) == 0 {
+				return "no known problem"
+			}
+			return "⚠ " + strings.Join(roots, ", ")
+		}
+	}
+	return firstLine(strings.TrimSpace(res.Text))
 }

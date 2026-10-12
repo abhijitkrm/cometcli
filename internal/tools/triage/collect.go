@@ -432,10 +432,26 @@ func collectProcess(c *toolkit.Context, r *Report, set func(string, any)) error 
 	svc := c.Profile.Service
 	switch svc.Type {
 	case "docker":
-		out, code, err := h.Run(c, "docker inspect -f 'status={{.State.Status}} restarts={{.RestartCount}} oom_killed={{.State.OOMKilled}} started={{.State.StartedAt}} exit={{.State.ExitCode}}' "+common.ShellQ(svc.Unit))
+		out, code, err := h.Run(c, "docker inspect -f 'status={{.State.Status}} restarts={{.RestartCount}} oom_killed={{.State.OOMKilled}} started={{.State.StartedAt}} exit={{.State.ExitCode}}' "+common.ShellQ(svc.Unit)+" 2>&1")
 		if err != nil || code != 0 {
+			why := out
+			if err != nil {
+				why += " " + err.Error()
+			}
+			switch {
+			case dockerDownRe.MatchString(why):
+				// the daemon itself is down: every container on the host is
+				set("proc.docker_down", true)
+				set("proc.running", false)
+				return nil
+			case noContainerRe.MatchString(why):
+				set("proc.container_missing", true)
+				set("proc.running", false)
+				return nil
+			}
 			return fmt.Errorf("docker inspect %s failed: %v", svc.Unit, err)
 		}
+		set("proc.docker_down", false)
 		kv := fields(out)
 		set("proc.running", kv["status"] == "running")
 		set("proc.state", kv["status"])
@@ -458,6 +474,9 @@ func collectProcess(c *toolkit.Context, r *Report, set func(string, any)) error 
 			} else if m := imageVersionRe.FindString(img); m != "" {
 				set("proc.image_version", m)
 			}
+		}
+		if kv["status"] != "running" {
+			dockerStartError(c, h, svc.Unit, set)
 		}
 		if n, ok := runOK(c, h, "docker inspect -f '{{len .NetworkSettings.Networks}}' "+common.ShellQ(svc.Unit)); ok {
 			if v, err := strconv.Atoi(n); err == nil { // never turn unparsable output into 0
@@ -1062,4 +1081,42 @@ func mempoolMismatch(t, want, ver string, maxTxs float64, hasMax, cfgErrs, runni
 		return cfgErrs || !running, true
 	}
 	return false, false
+}
+
+var (
+	dockerDownRe  = regexp.MustCompile(`(?i)cannot connect to the docker daemon|is the docker daemon running|docker\.sock: connect|docker: command not found`)
+	noContainerRe = regexp.MustCompile(`(?i)no such (object|container)`)
+	portTakenRe   = regexp.MustCompile(`(?i)(?:bind for [^:]*:(\d+) failed: port is already allocated|listen tcp4? [^:]*:(\d+): bind: address already in use)`)
+	noImageRe     = regexp.MustCompile(`(?i)no such image|pull access denied|manifest unknown|repository does not exist`)
+)
+
+// dockerStartError reads why a stopped container didn't start: docker's
+// own error (ports, image) is in its state, not in the node's logs.
+func dockerStartError(c *toolkit.Context, h host.Host, unit string, set func(string, any)) {
+	out, ok := runOK(c, h, "docker inspect -f '{{.State.Error}}|{{.Config.Image}}' "+common.ShellQ(unit))
+	if !ok {
+		return
+	}
+	msg, img, _ := strings.Cut(strings.TrimSpace(out), "|")
+	if img != "" {
+		set("proc.image", img)
+		_, present := runOK(c, h, "docker image inspect "+common.ShellQ(img)+" >/dev/null 2>&1 && echo ok")
+		set("proc.image_present", present)
+	}
+	if msg == "" {
+		return
+	}
+	set("proc.start_error", msg)
+	if m := portTakenRe.FindStringSubmatch(msg); m != nil {
+		port := m[1] + m[2]
+		set("proc.port_taken", num(port))
+		if who, ok := runOK(c, h, "docker ps --filter publish="+port+" --format '{{.Names}}'"); ok && strings.TrimSpace(who) != "" {
+			set("proc.port_holder", strings.Fields(who)[0])
+		} else {
+			set("proc.port_holder", "a process outside docker")
+		}
+	}
+	if noImageRe.MatchString(msg) {
+		set("proc.image_present", false)
+	}
 }

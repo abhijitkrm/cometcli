@@ -31,6 +31,20 @@
     **{{get .f.Data "count"}} node(s):**
     {{trim .f.Text}}
 
+- id: network-health
+  title: one network's nodes at a glance
+  scope: chain
+  patterns:
+    - '^(is |how is |hows |status of |health of )?(the )?(?P<chain>[a-z0-9][a-z0-9._]*-[a-z0-9._-]+)( network| chain)?( healthy| ok| okay| up| doing| status)?$'
+  examples:
+    - is primium-2 healthy
+    - status of primium-1
+  steps:
+    - {as: f, tool: fleet.status, args: {chain: "{chain}"}}
+  answer: |
+    **{{get .f.Data "count"}} node(s) on this network:**
+    {{trim .f.Text}}
+
 - id: node-version
   title: what version the node runs
   patterns:
