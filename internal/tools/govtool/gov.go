@@ -122,6 +122,18 @@ func Build(c *toolkit.Context, a toolkit.Args, proposer string) (*Plan, error) {
 			summary = "Changes " + pp.Module + " params (all others unchanged):\n" + strings.Join(pp.Diff, "\n")
 		}
 	}
+	if a.String("kind", "") == "upgrade" && a.String("name", "") != "" {
+		if title == "" {
+			title = "Software upgrade " + a.String("name", "")
+		}
+		if summary == "" {
+			summary = "Upgrade to " + a.String("name", "")
+			if img := a.String("image", ""); img != "" {
+				summary += " (image " + img + ")"
+			}
+			summary += ". Validators: build or stage the new binary before the halt height, then switch after the halt."
+		}
+	}
 	if title == "" || summary == "" {
 		return nil, fmt.Errorf("title and summary are required")
 	}

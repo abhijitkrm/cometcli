@@ -197,3 +197,26 @@ func TestKeySeedIsProtected(t *testing.T) {
 		}
 	}
 }
+
+// What a model ran on the scratch-test archive with bash allowed: each one
+// corrupts or forks a node's state and must be refused in every mode.
+func TestStateDestroyingCommandsFromTheScratchTest(t *testing.T) {
+	for _, cmd := range []string{
+		"cd /home/ubuntu/.cometcli-nodes/v6-arch/data && rm -rf *.db addrbook.json",
+		"cd data && rm -rf *.db",
+		"rm -rf ~/.evmd/data/*.db",
+		"rm /home/ubuntu/.cometcli-nodes/v6-arch/data/upgrade-info.json",
+		"rm -f data/upgrade-info.json",
+		"docker run -d --name x primium-v0.7.3 start --unsafe-skip-upgrades 9334",
+		"evmd start --unsafe-skip-upgrades 9334",
+	} {
+		if v := Classify(cmd, Opts{Binary: "evmd"}); v.Forbidden == "" {
+			t.Errorf("%q must be refused (got %s)", cmd, v.Reason)
+		}
+	}
+	for _, cmd := range []string{"rm -f /tmp/notes.db.bak.txt", "ls data/*.db", "du -sh data/application.db"} {
+		if v := Classify(cmd, Opts{Binary: "evmd"}); v.Forbidden != "" {
+			t.Errorf("%q should be allowed: %s", cmd, v.Forbidden)
+		}
+	}
+}

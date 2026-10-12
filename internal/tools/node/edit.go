@@ -3,6 +3,7 @@ package node
 import (
 	"errors"
 	"fmt"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -118,15 +119,25 @@ func (recreateTool) Run(c *toolkit.Context, _ toolkit.Args) (*toolkit.Result, er
 	}
 	out, code, err := h.Run(c, "docker inspect -f '{{index .Config.Labels \"com.docker.compose.project.config_files\"}}|{{index .Config.Labels \"com.docker.compose.project.working_dir\"}}|{{index .Config.Labels \"com.docker.compose.service\"}}' "+common.ShellQ(p.Service.Unit))
 	parts := strings.SplitN(strings.TrimSpace(out), "|", 3)
-	if err != nil || code != 0 || len(parts) < 3 || parts[0] == "" || parts[0] == "<no value>" {
+	var file, dir, svc string
+	switch {
+	case err == nil && code == 0 && len(parts) == 3 && parts[0] != "" && parts[0] != "<no value>":
+		file, dir, svc = strings.Split(parts[0], ",")[0], parts[1], parts[2]
+	case strings.Contains(strings.ToLower(out), "no such") && p.Home != "":
+		// the container is gone: the compose file cometcli wrote in the
+		// node's home creates it again, on the same data dir
+		dir, file = p.Home, path.Join(p.Home, "docker-compose.yml")
+		if _, c2, _ := h.Run(c, "test -f "+common.ShellQ(file)); c2 != 0 {
+			return nil, fmt.Errorf("%s is gone and %s has no docker-compose.yml to create it from — node.provision reconfigure=true renders one", p.Service.Unit, p.Home)
+		}
+	default:
 		return nil, fmt.Errorf("%s wasn't created by docker compose — no compose file to recreate it from", p.Service.Unit)
 	}
-	file, dir, svc := strings.Split(parts[0], ",")[0], parts[1], parts[2]
 	if err := c.Approve(fmt.Sprintf("recreate %s (docker compose up -d --force-recreate %s, %s)", p.Service.Unit, svc, file), toolkit.TierLocalChange,
 		map[string]any{"compose": file, "service": svc}); err != nil {
 		return nil, err
 	}
-	res, err := host.Exec(c, h, fmt.Sprintf("cd %s && docker compose -f %s up -d --force-recreate %s 2>&1 | tail -3", common.ShellQ(dir), common.ShellQ(file), common.ShellQ(svc)), 64<<10)
+	res, err := host.Exec(c, h, fmt.Sprintf("cd %s && docker compose -f %s up -d --force-recreate %s 2>&1 | tail -3", common.ShellQ(dir), common.ShellQ(file), svcArg(svc)), 64<<10)
 	if err != nil || res.Code != 0 {
 		return nil, fmt.Errorf("recreate failed: %v %s", err, strings.TrimSpace(res.Output))
 	}
@@ -239,4 +250,11 @@ func (repairConfigTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result
 		text += "; a disabled key falls back to its default until it's set again"
 	}
 	return &toolkit.Result{Text: text, Data: map[string]any{"changed": true, "disabled": disabled}}, nil
+}
+
+func svcArg(svc string) string {
+	if svc == "" {
+		return "" // every service in the file
+	}
+	return common.ShellQ(svc)
 }

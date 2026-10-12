@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"path"
 	"regexp"
 	"sort"
 	"strconv"
@@ -447,6 +448,7 @@ func collectProcess(c *toolkit.Context, r *Report, set func(string, any)) error 
 			case noContainerRe.MatchString(why):
 				set("proc.container_missing", true)
 				set("proc.running", false)
+				composeImage(c, h, set)
 				return nil
 			}
 			return fmt.Errorf("docker inspect %s failed: %v", svc.Unit, err)
@@ -1089,6 +1091,33 @@ var (
 	portTakenRe   = regexp.MustCompile(`(?i)(?:bind for [^:]*:(\d+) failed: port is already allocated|listen tcp4? [^:]*:(\d+): bind: address already in use)`)
 	noImageRe     = regexp.MustCompile(`(?i)no such image|pull access denied|manifest unknown|repository does not exist`)
 )
+
+var (
+	composeImageRe = regexp.MustCompile(`(?m)^\s*image:\s*["']?([^"'\s]+)`)
+	versionRe      = regexp.MustCompile(`v\d+\.\d+\.\d+`)
+)
+
+// composeImage reads, for a node whose container is gone, the image its
+// compose file runs and whether that image is still on the host.
+func composeImage(c *toolkit.Context, h host.Host, set func(string, any)) {
+	if c.Profile == nil || c.Profile.Home == "" {
+		return
+	}
+	raw, err := h.ReadFile(c, path.Join(c.Profile.Home, "docker-compose.yml"))
+	if err != nil {
+		return
+	}
+	m := composeImageRe.FindStringSubmatch(string(raw))
+	if m == nil {
+		return
+	}
+	set("proc.image", m[1])
+	_, present := runOK(c, h, "docker image inspect "+common.ShellQ(m[1])+" >/dev/null 2>&1 && echo ok")
+	set("proc.image_present", present)
+	if v := versionRe.FindString(m[1]); v != "" {
+		set("proc.image_version", v)
+	}
+}
 
 // dockerStartError reads why a stopped container didn't start: docker's
 // own error (ports, image) is in its state, not in the node's logs.

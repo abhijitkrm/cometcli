@@ -338,6 +338,19 @@ For a validator, once it's synced:
 3. Run `cometcli --profile <p> val create --amount <stake>`. The consensus key and moniker come
    from the node, and commission is encoded the way the chain's cosmos-sdk version expects.
 
+### A validator joining a running network
+
+```bash
+cometcli --profile val3 node provision --role validator --network mychain-1 --peers_from val1,val2
+cometcli --profile val3 wait until --condition synced
+cometcli --profile val3 val operator-key            # key in the node's own keyring; mnemonic → 0600 file on that host
+cometcli --profile val1 tx send --to <val3 operator> --amount <stake+fees>
+cometcli --profile val3 val create --amount <stake> # its consensus key is read from the node
+```
+
+While a node is down, chain queries (jail status, upgrade plans, params) go to another
+node of the same chain from your profiles, through that node's own connection.
+
 ### Validators you don't run (Workflow B) and offline keys
 
 `genesis create` needs SSH to every genesis validator. For a launch with validators run

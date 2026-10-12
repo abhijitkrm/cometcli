@@ -144,3 +144,13 @@ func TestCmdFlag(t *testing.T) {
 		t.Fatal("flag parsing")
 	}
 }
+
+func TestUpgradeHandlersAreRecordedPerTag(t *testing.T) {
+	s := &Spec{}
+	if !s.RecordHandler("v0.7.3", "v0.7.2-to-v0.7.3") || s.RecordHandler("v0.7.3", "v0.7.2-to-v0.7.3") {
+		t.Fatal("record once")
+	}
+	if s.HandlerFor("v0.7.3") != "v0.7.2-to-v0.7.3" || s.HandlerFor("v0.8.0") != "" {
+		t.Fatalf("lookup: %+v", s.Upgrades)
+	}
+}

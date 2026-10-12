@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sort"
 	"sync"
 	"time"
 
@@ -68,6 +69,10 @@ type Context struct {
 	txb     *tx.Builder
 	txErr   error
 	signerB *tx.Builder // TxSigner's choice, reused for the context's life
+	// sibling is another node of the chain whose gRPC stands in while this
+	// one is down; noSibling stops a sibling looking for siblings itself
+	sibling   *Context
+	noSibling bool
 }
 
 var errNoProfile = fmt.Errorf("no active profile — run `cometcli profile add`")
@@ -135,8 +140,43 @@ func (c *Context) GRPC() (*grpcclient.Conn, error) {
 			conn, err, c.GRPCFallback = fb, nil, true
 		}
 	}
+	if err != nil && c.Profile.Endpoints.FallbackGRPC == "" && !c.noSibling {
+		// the node is down: ask another node of the same chain you run
+		// (through its own connection) — jail status, upgrade plans and
+		// params are the chain's, not this node's
+		if fb, sib := c.siblingGRPCLocked(); fb != nil {
+			conn, err, c.GRPCFallback, c.sibling = fb, nil, true, sib
+		}
+	}
 	c.grpc = conn
 	return conn, err
+}
+
+// siblingGRPCLocked dials the gRPC of another profile on the same chain.
+func (c *Context) siblingGRPCLocked() (*grpcclient.Conn, *Context) {
+	if c.Cfg == nil || c.Profile.ChainID == "" {
+		return nil, nil
+	}
+	var names []string
+	for n, p := range c.Cfg.Profiles {
+		if n != c.Profile.Name && p.ChainID == c.Profile.ChainID && p.Endpoints.GRPC != "" {
+			names = append(names, n)
+		}
+	}
+	sort.Strings(names)
+	for i, n := range names {
+		if i == 2 {
+			break
+		}
+		p := *c.Cfg.Profiles[n]
+		p.Name = n
+		sub := &Context{Context: c.Context, Profile: &p, Cfg: c.Cfg, noSibling: true}
+		if conn, err := sub.GRPC(); err == nil {
+			return conn, sub
+		}
+		sub.Close()
+	}
+	return nil, nil
 }
 
 // FallbackGRPC switches chain queries to endpoints.fallback_grpc — for a
@@ -359,6 +399,10 @@ func (c *Context) Check(g Gate) error {
 // it per-call would kill auditing for the rest of the session. The owner
 // that opened the logger closes it at shutdown.
 func (c *Context) Close() {
+	if c.sibling != nil {
+		c.sibling.Close() // closes the stand-in gRPC with its connection
+		c.grpc, c.sibling = nil, nil
+	}
 	if c.grpc != nil {
 		c.grpc.Close()
 	}

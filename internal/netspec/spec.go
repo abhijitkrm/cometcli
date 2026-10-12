@@ -36,6 +36,9 @@ type Spec struct {
 	FeeDenom    string `yaml:"fee_denom,omitempty"`
 	DBBackend   string `yaml:"db_backend"` // goleveldb | rocksdb
 	HostHome    string `yaml:"host_home,omitempty"`
+	// Upgrades records releases built with an added upgrade handler, so a
+	// node that loses its image (or a new node) rebuilds the same binary.
+	Upgrades []UpgradeBuild `yaml:"upgrades,omitempty"`
 	// Extra keeps imported settings with no field yet, so nothing is lost.
 	Extra map[string]string `yaml:"extra,omitempty"`
 }
@@ -455,4 +458,35 @@ func (s *Spec) Bech32() string {
 		return s.Chain.Bech32Prefix
 	}
 	return "cosmos"
+}
+
+// UpgradeBuild is a release tag and the handler added when building it.
+type UpgradeBuild struct {
+	Tag     string `yaml:"tag"`
+	Handler string `yaml:"handler"`
+}
+
+// HandlerFor is the handler recorded for a release tag ("" if none).
+func (s *Spec) HandlerFor(tag string) string {
+	for _, u := range s.Upgrades {
+		if u.Tag == tag {
+			return u.Handler
+		}
+	}
+	return ""
+}
+
+// RecordHandler notes that tag was built with handler (once per tag).
+func (s *Spec) RecordHandler(tag, handler string) bool {
+	for i, u := range s.Upgrades {
+		if u.Tag == tag {
+			if u.Handler == handler {
+				return false
+			}
+			s.Upgrades[i].Handler = handler
+			return true
+		}
+	}
+	s.Upgrades = append(s.Upgrades, UpgradeBuild{Tag: tag, Handler: handler})
+	return true
 }

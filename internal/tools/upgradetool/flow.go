@@ -19,6 +19,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"github.com/abhijitkrm/cometcli/internal/netspec"
 	"io"
 	"net/http"
 	"path"
@@ -311,9 +312,24 @@ func (buildTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error
 		if repo := c.Profile.Metadata["repo"]; repo != "" {
 			r.Repo = repo
 		}
+		specDefaults(c.Profile, r, a)
+	} else if a.String("image", "") == "" && c.Profile.Metadata["image"] == "" {
+		// the spec's naming beats deriving from the running image: with
+		// primium-{tag}, the version is in the name, not the tag
+		specImage(c.Profile, a)
 	}
 	tag := a.String("tag", "")
 	handler := a.String("handler", "")
+	if handler == "" && tag != "" {
+		// a rebuild must reproduce the image the chain ran: if this tag was
+		// built with an added handler, add it again
+		handler = c.Profile.Metadata["handler."+tag]
+		if handler == "" && c.Profile.ChainID != "" {
+			if spec, _, err := netspec.Load(c.Profile.ChainID); err == nil {
+				handler = spec.HandlerFor(tag)
+			}
+		}
+	}
 	repo := a.String("repo", r.Repo)
 	if !tagRe.MatchString(tag) || (handler != "" && !tagRe.MatchString(handler)) || repo == "" {
 		return nil, fmt.Errorf("tag, handler and repo must be plain names (letters, digits, . _ -)")
@@ -424,8 +440,9 @@ fi
 		detail["builder"] = fmt.Sprintf("Go %s → %s (%s needs it; the build uses a copy, your Dockerfile is unchanged)", have, need, tag)
 	}
 	prompt := fmt.Sprintf("build %s on %s from %s@%s (takes several minutes; the node keeps running)", image, c.Profile.Name, repo, tag)
-	if why := breaking(c, repo, tag); why != "" {
-		// consensus-breaking: always asked, whatever the auto-approval
+	if why := breaking(c, repo, tag); why != "" && !fresh {
+		// a running node could be switched onto it too early: the warning
+		// matters, so it's always asked — a new host has nothing to protect
 		detail["consensus"] = why + " — every validator must switch together at an upgrade height (gov proposal or halt-height); never restart a node onto it early"
 		if err := toolkit.RequireApproval(c, "CONSENSUS-BREAKING release — "+prompt, toolkit.TierLocalChange, detail); err != nil {
 			return nil, err
@@ -451,14 +468,30 @@ fi
 		fmt.Fprintf(&b, "\nhandler %s: in the new binary ✓", handler)
 		data["handler"] = handler
 	}
-	// remember the Dockerfile for the next build on this node
-	if c.Cfg != nil && c.Profile.Name != "" && c.Profile.Metadata["dockerfile"] != dockerfile {
+	// remember the Dockerfile, and any handler added to this tag, for the
+	// next build of it on this node (a rebuild after the image was lost
+	// must be the same binary, or the node can't replay the upgrade)
+	if c.Cfg != nil && c.Profile.Name != "" {
 		_ = c.Cfg.UpdateProfile(c.Profile.Name, func(p *config.Profile) {
 			if p.Metadata == nil {
 				p.Metadata = map[string]string{}
 			}
 			p.Metadata["dockerfile"] = dockerfile
+			if handler != "" {
+				p.Metadata["handler."+tag] = handler
+			}
 		})
+		if handler != "" && c.Profile.ChainID != "" {
+			if spec, _, err := netspec.Load(c.Profile.ChainID); err == nil && spec.RecordHandler(tag, handler) {
+				_, _ = spec.Save()
+			}
+		}
+		if handler != "" {
+			if c.Profile.Metadata == nil {
+				c.Profile.Metadata = map[string]string{}
+			}
+			c.Profile.Metadata["handler."+tag] = handler
+		}
 	}
 	return &toolkit.Result{Text: b.String(), Data: data}, nil
 }
@@ -567,8 +600,8 @@ func (switchTool) Desc() string {
 }
 func (switchTool) Schema() map[string]any {
 	return toolkit.ObjSchema(map[string]any{
-		"image": toolkit.Str("the image to run now, e.g. primium-evm:v0.6.1"),
-	}, "image")
+		"image": toolkit.Str("the image to run now, e.g. primium-v0.7.3 (default: the local image whose binary registers the halted plan)"),
+	})
 }
 func (switchTool) Tier() toolkit.Tier                 { return toolkit.TierLocalChange }
 func (switchTool) Timeout(toolkit.Args) time.Duration { return 10 * time.Minute }
@@ -581,11 +614,52 @@ func (switchTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, erro
 		return nil, err
 	}
 	image := a.String("image", "")
-	if image == "" || strings.ContainsAny(image, "'\"|\\ ") {
-		return nil, fmt.Errorf("image is required (e.g. primium-evm:v0.6.1)")
+	if strings.ContainsAny(image, "'\"|\\ ") {
+		return nil, fmt.Errorf("image %q: a plain image name", image)
 	}
 	if r.ComposeFile == "" {
 		return nil, fmt.Errorf("%s isn't managed by docker compose — no deployed compose file to update", c.Profile.Service.Unit)
+	}
+	if image == "" {
+		// the image built for the halted plan: the one whose binary registers it
+		logs, _, _ := sh(c, "docker logs --tail 300 "+common.ShellQ(c.Profile.Service.Unit)+" 2>&1 | grep -a 'UPGRADE \"' | tail -1", time.Minute)
+		m := upgradeNeededRe.FindStringSubmatch(logs)
+		if m == nil {
+			return nil, fmt.Errorf("%s hasn't halted for an upgrade (no `UPGRADE \"…\" NEEDED` in its log) — nothing to switch to yet", c.Profile.Service.Unit)
+		}
+		out, _, _ := sh(c, "docker images --format '{{.Repository}}:{{.Tag}}' | grep -v '<none>'", time.Minute)
+		var found []string
+		for _, img := range strings.Fields(out) {
+			if img == r.Image {
+				continue
+			}
+			if ok, err := imageHas(c, img, r.Binary, m[1]); err == nil && ok {
+				found = append(found, img)
+			}
+		}
+		if len(found) > 1 {
+			// prefer the image named the way the network names its builds
+			if spec, _, err := netspec.Load(c.Profile.ChainID); err == nil && spec.Image.Naming != "" {
+				re := regexp.MustCompile("^" + strings.ReplaceAll(regexp.QuoteMeta(spec.Image.Naming), regexp.QuoteMeta("{tag}"), `v\d+\.\d+\.\d+`) + "(:latest)?$")
+				var named []string
+				for _, f := range found {
+					if re.MatchString(f) {
+						named = append(named, f)
+					}
+				}
+				if len(named) == 1 {
+					found = named
+				}
+			}
+		}
+		switch len(found) {
+		case 0:
+			return nil, fmt.Errorf("no image on %s registers the halted plan %q — build it: upgrade build --tag <release> (and --handler %s if the release has none)", c.Profile.Name, m[1], m[1])
+		case 1:
+			image = found[0]
+		default:
+			return nil, fmt.Errorf("several images register %q (%s) — pass image", m[1], strings.Join(found, ", "))
+		}
 	}
 	if r.Image == image {
 		return nil, fmt.Errorf("%s already runs %s", c.Profile.Service.Unit, image)
@@ -698,4 +772,40 @@ func fetch(c *toolkit.Context, url string) string {
 	}
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	return string(raw)
+}
+
+// specDefaults fills what a new host can't tell from a running node — the
+// release's source repo and the image naming — from the network's spec.
+func specDefaults(p *config.Profile, r *running, a toolkit.Args) {
+	if p == nil || p.ChainID == "" {
+		return
+	}
+	spec, _, err := netspec.Load(p.ChainID)
+	if err != nil {
+		return
+	}
+	if spec.Image.Repo != "" && p.Metadata["repo"] == "" {
+		r.Repo = spec.Image.Repo
+	}
+	if a.String("image", "") == "" && p.Metadata["image"] == "" {
+		specImage(p, a)
+	}
+}
+
+// specImage sets the image naming from the network's spec, when it has one.
+func specImage(p *config.Profile, a toolkit.Args) {
+	if p == nil || p.ChainID == "" {
+		return
+	}
+	spec, _, err := netspec.Load(p.ChainID)
+	if err != nil {
+		return
+	}
+	naming := spec.Image.Naming
+	if naming == "" && spec.Image.Name != "" {
+		naming = spec.Image.Name + ":{tag}"
+	}
+	if naming != "" {
+		a["image"] = naming
+	}
 }

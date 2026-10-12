@@ -677,3 +677,48 @@ hosts, and the profiles (unless --keep-profiles). Reports the space freed.`,
 	f.BoolVar(&yes, "yes", false, "don't ask for confirmation")
 	return cmd
 }
+
+// operatorKeyCmd makes a joining validator's operator key in its node's
+// own keyring.
+func operatorKeyCmd() *cobra.Command {
+	var keyring, mnemonicTo, name string
+	cmd := &cobra.Command{
+		Use:   "operator-key",
+		Short: "Make this validator's operator key in its node's own keyring (validators joining after genesis)",
+		Long: `For a validator joining a running network (node provision, then this,
+then fund the address and val create): creates the operator key inside
+the node container's keyring. The mnemonic goes to a 0600 file on the
+node's host (default <home>.operator.mnemonic) and is never shown; the
+profile is set to sign there.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			w := cmd.OutOrStdout()
+			c, _, err := keyMachine(cmd, flagProfile)
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+			if flagProfile == "" {
+				return fmt.Errorf("--profile: the validator's profile")
+			}
+			if name == "" {
+				name = c.Profile.Name
+			}
+			kr, err := keyringFor(keyring)
+			if err != nil {
+				return err
+			}
+			acc, mfile, err := networktool.OperatorKey(c, name, kr, mnemonicTo)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(w, "✓ operator key %s → %s, in %s's keyring\n✓ mnemonic → %s on the node's host (0600) — never shown\n", name, acc, c.Profile.Service.Unit, mfile)
+			fmt.Fprintf(w, "→ fund %s, then: cometcli --profile %s val create --amount <stake>\n\n%s\n", acc, c.Profile.Name, backupReminder)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&keyring, "keyring", "file", "file (password) or test (unencrypted, test networks)")
+	cmd.Flags().StringVar(&mnemonicTo, "mnemonic-to", "", "where the mnemonic goes on the node's host (0600)")
+	cmd.Flags().StringVar(&name, "name", "", "key name (default: the profile name)")
+	return cmd
+}

@@ -271,9 +271,16 @@ func (a *Agent) runToolOn(ctx context.Context, t toolkit.Tool, args toolkit.Args
 // says nothing about the incident).
 func stepOutcome(tool, text string) string {
 	text = strings.TrimSpace(text)
-	switch tool {
-	case "node.logs", "bash", "read", "grep":
-		return fmt.Sprintf("%d lines of output", len(strings.Split(text, "\n")))
+	lines := strings.Split(text, "\n")
+	switch {
+	case tool == "node.logs" || tool == "read" || tool == "grep":
+		return fmt.Sprintf("%d lines of output", len(lines))
+	case tool == "bash" && len(lines) <= 4 && len(text) <= 300:
+		// a short answer is the finding itself (who holds a port, what a
+		// command printed): show it
+		return strings.Join(strings.Fields(strings.ReplaceAll(text, "\n", " · ")), " ")
+	case tool == "bash":
+		return fmt.Sprintf("%d lines of output", len(lines))
 	}
 	return firstLine(text)
 }

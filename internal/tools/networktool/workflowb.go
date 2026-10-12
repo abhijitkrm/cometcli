@@ -622,7 +622,7 @@ func RemoveNode(c *toolkit.Context, chainID, homeDir, unit string) (string, erro
 		return "", err
 	}
 	out, _, _ := run(c, h, fmt.Sprintf(`h=%s; case "$h" in "~"|"~/"*) h="$HOME${h#\~}";; esac; test -d "$h" || { echo none; exit 0; }
-c=$(grep -m1 -o '"chain_id": *"[^"]*"' "$h/config/genesis.json" 2>/dev/null | sed 's/.*"\([^"]*\)"$/\1/'); echo "$h ${c:--} $(du -sh "$h" 2>/dev/null | cut -f1)"`, shellHome(homeDir)), time.Minute)
+c=$( { cat "$h/config/genesis.json" 2>/dev/null || sudo -n cat "$h/config/genesis.json" 2>/dev/null; } | grep -m1 -o '"chain_id": *"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/'); echo "$h ${c:--} $( { du -sh "$h" 2>/dev/null || sudo -n du -sh "$h"; } | cut -f1)"`, shellHome(homeDir)), time.Minute)
 	f := strings.Fields(out)
 	if len(f) == 1 && f[0] == "none" {
 		return "nothing at " + homeDir, nil
@@ -639,7 +639,8 @@ c=$(grep -m1 -o '"chain_id": *"[^"]*"' "$h/config/genesis.json" 2>/dev/null | se
 	}
 	script := fmt.Sprintf(`cd %[1]s 2>/dev/null && { docker compose -f docker-compose.yml down -t 20 >/dev/null 2>&1 || true; }
 docker rm -f %[2]s >/dev/null 2>&1 || true
-rm -rf %[1]s %[1]s.operator.mnemonic && echo removed`, common.ShellQ(abs), common.ShellQ(unit))
+# a container that ran as root leaves root-owned files: sudo, without a password, for those
+{ rm -rf %[1]s %[1]s.operator.mnemonic 2>/dev/null || sudo -n rm -rf %[1]s %[1]s.operator.mnemonic; } && ! test -e %[1]s && echo removed`, common.ShellQ(abs), common.ShellQ(unit))
 	if out, _, err := run(c, h, script, 3*time.Minute); err != nil || !strings.Contains(out, "removed") {
 		return "", fmt.Errorf("removing %s: %v %s", abs, err, out)
 	}
@@ -655,4 +656,53 @@ func RemoveBuilder(c *toolkit.Context, chainID string) string {
 	dir := "~/.cometcli-build/genesis-" + chainID
 	out, _, _ := run(c, h, fmt.Sprintf(`d="$HOME/.cometcli-build/genesis-%s"; test -d "$d" && { s=$(du -sh "$d" | cut -f1); rm -rf "$d" && echo "removed %s ($s)"; } || true`, chainID, dir), time.Minute)
 	return strings.TrimSpace(out)
+}
+
+// OperatorKey creates the validator's operator key in its running node's
+// own keyring (a validator joining after genesis). The mnemonic goes to a
+// 0600 file on the node's host — never back over the connection — and the
+// profile is set to sign with it there.
+func OperatorKey(c *toolkit.Context, name string, kr KeyringOpts, mnemonicTo string) (string, string, error) {
+	p := c.Profile
+	if p.Service.Type != "docker" || p.Service.Unit == "" || p.Home == "" {
+		return "", "", fmt.Errorf("%s isn't a provisioned docker node (node provision first)", p.Name)
+	}
+	h, err := c.Host()
+	if err != nil {
+		return "", "", err
+	}
+	if mnemonicTo == "" {
+		mnemonicTo = p.Home + ".operator.mnemonic"
+	}
+	ev := "docker exec -i " + common.ShellQ(p.Service.Unit) + " evmd"
+	if out, _, _ := run(c, h, fmt.Sprintf("%s keys show %s --keyring-backend %s --home %s -a 2>/dev/null </dev/null || true", ev, common.ShellQ(name), kr.Backend, containerHome), time.Minute); strings.TrimSpace(out) != "" && kr.Backend == "test" {
+		return "", "", fmt.Errorf("%s already has a key %q (%s)", p.Name, name, strings.TrimSpace(out))
+	}
+	script := fmt.Sprintf(`set -e; umask 077; out=$(mktemp); trap 'rm -f "$out"' EXIT
+%[1]s keys add %[2]s --keyring-backend %[3]s --home %[4]s --output json > "$out" 2>/dev/null
+m=%[5]s; case "$m" in "~/"*) m="$HOME${m#\~}";; esac
+test -e "$m" && { echo "refusing to overwrite $m" >&2; exit 5; }
+sed -n 's/.*"mnemonic":"\([^"]*\)".*/\1/p' "$out" > "$m"; chmod 600 "$m"; test -s "$m"
+sed -n 's/.*"address":"\([^"]*\)".*/\1/p' "$out"`, ev, common.ShellQ(name), kr.Backend, containerHome, shellHome(mnemonicTo))
+	res, err := host.ExecIn(c, h, script, kr.stdin(2), 1<<16)
+	if err != nil || res.Code != 0 {
+		return "", "", fmt.Errorf("creating the operator key failed (exit %d): %s", res.Code, strings.TrimSpace(res.Output))
+	}
+	acc := strings.TrimSpace(lastLine(res.Output))
+	if !strings.Contains(acc, "1") {
+		return "", "", fmt.Errorf("unexpected operator address %q", acc)
+	}
+	np := *p
+	if np.Metadata == nil {
+		np.Metadata = map[string]string{}
+	}
+	np.Metadata["account"] = acc
+	np.Signer.Mode, np.Signer.ContainerKey, np.Signer.ContainerKeyring, np.Signer.ContainerHome = "container", name, kr.Backend, containerHome
+	if c.Cfg != nil {
+		if err := c.Cfg.UpsertProfile(&np); err != nil {
+			return "", "", err
+		}
+		*p = np
+	}
+	return acc, mnemonicTo, nil
 }

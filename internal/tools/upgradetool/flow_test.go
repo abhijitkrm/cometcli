@@ -1,10 +1,12 @@
 package upgradetool
 
 import (
-	"github.com/abhijitkrm/cometcli/internal/config"
-	"github.com/abhijitkrm/cometcli/internal/toolkit"
 	"sort"
 	"testing"
+
+	"github.com/abhijitkrm/cometcli/internal/config"
+	"github.com/abhijitkrm/cometcli/internal/netspec"
+	"github.com/abhijitkrm/cometcli/internal/toolkit"
 )
 
 func TestSemverOrder(t *testing.T) {
@@ -79,5 +81,40 @@ func TestBreakingNotes(t *testing.T) {
 	}
 	if m := fromGoRe.FindStringSubmatch("ARG X\nFROM golang:1.25.8-alpine AS b\n"); m == nil || m[1] != "1.25.8" {
 		t.Fatalf("from line: %v", m)
+	}
+}
+
+func TestFreshHostTakesImageAndRepoFromTheSpec(t *testing.T) {
+	t.Setenv("COMETCLI_HOME", t.TempDir())
+	spec := &netspec.Spec{Chain: netspec.Chain{ID: "fresh-1", Denom: "adex"}, Image: netspec.Image{Name: "primium-evm", Tag: "v0.7.2", Repo: "cosmos/evm", Naming: "primium-{tag}"}}
+	if _, err := spec.Save(); err != nil {
+		t.Fatal(err)
+	}
+	r := &running{Repo: "someone/else"}
+	a := toolkit.Args{}
+	specDefaults(&config.Profile{Name: "n1", ChainID: "fresh-1"}, r, a)
+	if r.Repo != "cosmos/evm" || a.String("image", "") != "primium-{tag}" {
+		t.Fatalf("repo %q image %q", r.Repo, a.String("image", ""))
+	}
+	// an explicit image or the profile's own settings win
+	r, a = &running{Repo: "x/y"}, toolkit.Args{"image": "mine:{tag}"}
+	specDefaults(&config.Profile{Name: "n1", ChainID: "fresh-1", Metadata: map[string]string{"repo": "my/fork"}}, r, a)
+	if r.Repo != "x/y" || a.String("image", "") != "mine:{tag}" {
+		t.Fatalf("overrides lost: repo %q image %q", r.Repo, a.String("image", ""))
+	}
+}
+
+func TestRunningNodeUsesTheSpecNaming(t *testing.T) {
+	t.Setenv("COMETCLI_HOME", t.TempDir())
+	spec := &netspec.Spec{Chain: netspec.Chain{ID: "named-1"}, Image: netspec.Image{Name: "primium-evm", Tag: "v0.7.2", Naming: "primium-{tag}"}}
+	if _, err := spec.Save(); err != nil {
+		t.Fatal(err)
+	}
+	a := toolkit.Args{}
+	specImage(&config.Profile{ChainID: "named-1"}, a)
+	c := &toolkit.Context{Profile: &config.Profile{}}
+	// running primium-v0.7.2, building v0.7.3: primium-v0.7.3, not primium-v0.7.2:v0.7.3
+	if got := ImageFor(c, a.String("image", ""), "primium-v0.7.2", "v0.7.3"); got != "primium-v0.7.3" {
+		t.Fatalf("image %q", got)
 	}
 }

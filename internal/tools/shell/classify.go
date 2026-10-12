@@ -41,7 +41,7 @@ var (
 	copiers      = map[string]bool{"cp": true, "install": true, "ln": true, "rsync": true, "scp": true}
 	interpreters = map[string]bool{"python": true, "python3": true, "python2": true, "perl": true, "node": true, "ruby": true, "php": true, "jq": false}
 	// a node's data dir (or what's in it), by name or by the stores it holds
-	nodeDataRe = regexp.MustCompile(`(^|/)data/?(\*)?$|(^|/)data/(\*|application\.db|blockstore\.db|state\.db|tx_index\.db|evidence\.db|cs\.wal|snapshots)(/|$)|(application|blockstore|state|evidence)\.db/?$|(^|/)cs\.wal(/|$)`)
+	nodeDataRe = regexp.MustCompile(`(^|/)data/?(\*)?$|(^|/)data/(\*|[^/]*\.db|cs\.wal|snapshots)(/|$)|\.db/?$|(^|/)\*\.db$|(^|/)cs\.wal(/|$)|(^|/)upgrade-info\.json$|(^|/)wasm(/|$)`)
 )
 
 func (a *acc) raise(t toolkit.Tier, reason string) {
@@ -490,6 +490,9 @@ func (a *acc) simple(words []string) {
 				break
 			}
 		}
+	}
+	if strings.Contains(strings.Join(words, " "), "unsafe-skip-upgrades") {
+		a.forbid("--unsafe-skip-upgrades makes a node skip an upgrade the network applied — its state forks from the chain's; the operator decides that")
 	}
 	if interpreters[name] && a.cmdText != "" && strings.Contains(a.cmdText, "priv_validator_state") {
 		a.forbid("a script that touches priv_validator_state.json risks double-signing — the operator handles that file")
