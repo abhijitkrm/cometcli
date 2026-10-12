@@ -24,6 +24,7 @@ func Register(r *toolkit.Registry) {
 	r.Register(consensusTool{})
 	r.Register(setConfigTool{})
 	r.Register(recreateTool{})
+	r.Register(repairConfigTool{})
 }
 
 type statusTool struct{}

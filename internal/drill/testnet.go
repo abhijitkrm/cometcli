@@ -103,7 +103,11 @@ func (n *Net) Up(ctx context.Context, cfg *config.Config, log func(string)) erro
 	if n.Image == "" && n.Spec == nil {
 		return fmt.Errorf("an evmd image (--image) or a network spec (--spec) is required")
 	}
-	if out, _ := docker(ctx, "ps", "-a", "--filter", "name=^"+project+"-", "-q"); out != "" {
+	out, err := docker(ctx, "ps", "-a", "--filter", "name=^"+project+"-", "-q")
+	if err != nil {
+		return fmt.Errorf("docker isn't available here — start it first (%v)", err)
+	}
+	if out != "" {
 		return fmt.Errorf("a drill network already exists — `cometcli drill testnet down` first")
 	}
 	if n.Spec != nil {
