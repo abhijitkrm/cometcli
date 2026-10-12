@@ -244,7 +244,7 @@ func profileAddCmd() *cobra.Command {
 	f.StringVar(&p.Signer.Backend, "signer-backend", "", "os | file")
 	f.StringVar(&p.Signer.Mode, "signer-mode", "", "local (cometcli keyring) | container (the node's own keyring); empty asks when both work")
 	f.StringVar(&p.Signer.ContainerHome, "container-home", "", "node home inside the container, for signing there (e.g. /data/node0/evmd)")
-	f.StringVar(&imageName, "image-name", "", "how images built from releases are named; {tag} = release tag, e.g. primium-{tag} → primium-v0.7.2")
+	f.StringVar(&imageName, "image-name", "", "how images built from releases are named; {tag} = release tag, e.g. mychain-{tag} → mychain-v0.7.2")
 	f.StringVar(&p.Signer.ContainerKey, "container-key", "", "key name (or address) in the container's keyring (default: the operator account)")
 	f.StringVar(&p.Signer.ContainerKeyring, "container-keyring", "", "keyring backend inside the container: test | file (detected when empty)")
 	f.StringVar(&feeDenom, "fee-denom", "", "fee denom (e.g. atest)")

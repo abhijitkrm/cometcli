@@ -67,7 +67,7 @@ func CreateNetwork(ctxFor func(*config.Profile) *toolkit.Context, spec *netspec.
 		}
 		unit := p.Service.Unit
 		if unit == "" {
-			unit = "primium-validator"
+			unit = netspec.ContainerName(spec.Chain.ID, netspec.Validator)
 		}
 		ports := netspec.Compose{Services: spec.Services, PortOffset: o.PortBase + i*o.PortStep}.HostPorts()
 		if err := portsFree(c, h, ports, unit); err != nil {
@@ -138,7 +138,7 @@ func CreateNetwork(ctxFor func(*config.Profile) *toolkit.Context, spec *netspec.
 			if u := profiles[i].Service.Unit; u != "" {
 				return u
 			}
-			return "primium-validator"
+			return netspec.ContainerName(spec.Chain.ID, netspec.Validator)
 		}
 		if p := profiles[i]; p.Transport.Type == "ssh" && p.Transport.Host != "" {
 			return p.Transport.Host

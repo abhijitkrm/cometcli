@@ -85,7 +85,7 @@ func (provisionTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, e
 	moniker := a.String("moniker", p.Name)
 	unit := p.Service.Unit
 	if unit == "" {
-		unit = "primium-" + string(role)
+		unit = netspec.ContainerName(spec.Chain.ID, role)
 	}
 	image := a.String("image", "")
 	if image == "" {

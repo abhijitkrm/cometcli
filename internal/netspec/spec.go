@@ -52,10 +52,10 @@ type Chain struct {
 }
 
 type Image struct {
-	Name   string `yaml:"name"`             // e.g. primium-evm
+	Name   string `yaml:"name"`             // e.g. mychain-evm
 	Tag    string `yaml:"tag"`              // e.g. v0.7.2
 	Repo   string `yaml:"repo,omitempty"`   // official source, e.g. cosmos/evm
-	Naming string `yaml:"naming,omitempty"` // e.g. primium-{tag}
+	Naming string `yaml:"naming,omitempty"` // e.g. mychain-{tag}
 }
 
 type Genesis struct {
@@ -241,7 +241,7 @@ func ParseEnv(raw string) map[string]string {
 
 var envKeyRe = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 
-// FromEnv builds a spec from node-setup's network-config.env keys. Keys it
+// FromEnv builds a spec from network-config.env keys (KEY=value). Keys it
 // doesn't map are kept in Extra.
 func FromEnv(env map[string]string) *Spec {
 	used := map[string]bool{}
@@ -300,7 +300,13 @@ func FromEnv(env map[string]string) *Spec {
 	}
 	s.MinGasPrice = str("MIN_GAS_PRICE")
 	s.DBBackend = str("DB_BACKEND")
-	s.HostHome = str("PRIMIUM_HOST_HOME")
+	// HOST_HOME, or a deployment's own <NAME>_HOST_HOME
+	s.HostHome = str("HOST_HOME")
+	for k := range env {
+		if s.HostHome == "" && strings.HasSuffix(k, "_HOST_HOME") {
+			s.HostHome = str(k)
+		}
+	}
 	for k, v := range env {
 		if !used[k] {
 			if s.Extra == nil {

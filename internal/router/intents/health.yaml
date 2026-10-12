@@ -37,8 +37,8 @@
   patterns:
     - '^(is |how is |hows |status of |health of )?(the )?(?P<chain>[a-z0-9][a-z0-9._]*-[a-z0-9._-]+)( network| chain)?( healthy| ok| okay| up| doing| status)?$'
   examples:
-    - is primium-2 healthy
-    - status of primium-1
+    - is mychain-2 healthy
+    - status of testnet-1
   steps:
     - {as: f, tool: fleet.status, args: {chain: "{chain}"}}
   answer: |

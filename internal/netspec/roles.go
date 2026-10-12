@@ -27,6 +27,22 @@ func RoleOf(profileRole string) Role {
 	return Validator
 }
 
+var containerUnsafe = regexp.MustCompile(`[^a-zA-Z0-9_.-]+`)
+
+// ContainerName is the default container for a node of a chain when its
+// profile names none: <chain id>-<role>, so two chains on one host never
+// share a name.
+func ContainerName(chainID string, role Role) string {
+	id := strings.Trim(containerUnsafe.ReplaceAllString(chainID, "-"), "-._")
+	if id == "" {
+		id = "evmd"
+	}
+	if role == "" {
+		role = Validator
+	}
+	return id + "-" + string(role)
+}
+
 // Expect is one setting a node of a role should have.
 type Expect struct {
 	File string   // config.toml | app.toml | cmd (the container command)

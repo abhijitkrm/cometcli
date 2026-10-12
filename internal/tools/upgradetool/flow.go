@@ -285,8 +285,8 @@ func (buildTool) Desc() string {
 func (buildTool) Schema() map[string]any {
 	return toolkit.ObjSchema(map[string]any{
 		"tag":        toolkit.Str("release tag to build, e.g. v0.6.1"),
-		"image":      toolkit.Str("image to produce; {tag} is the release tag, {version} the tag without v — e.g. primium-{tag} → primium-v0.7.2 (default: the profile's metadata.image, else the running image's name with the new tag)"),
-		"dockerfile": toolkit.Str("Dockerfile on the node (default: the one the last build used, Dockerfile.primium beside the compose project or under the home dir, else cometcli's built-in one; \"builtin\" forces that)"),
+		"image":      toolkit.Str("image to produce; {tag} is the release tag, {version} the tag without v — e.g. mychain-{tag} → mychain-v0.7.2 (default: the profile's metadata.image, else the running image's name with the new tag)"),
+		"dockerfile": toolkit.Str("Dockerfile on the node (default: the one the last build used, a Dockerfile beside the node's compose project, else cometcli's built-in one; \"builtin\" forces that)"),
 		"handler":    toolkit.Str("forks only: add a no-op upgrade handler with this plan name (official releases ship their own — leave empty)"),
 		"repo":       toolkit.Str("github owner/repo (default: the running image's source)"),
 	}, "tag")
@@ -315,7 +315,7 @@ func (buildTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error
 		specDefaults(c.Profile, r, a)
 	} else if a.String("image", "") == "" && c.Profile.Metadata["image"] == "" {
 		// the spec's naming beats deriving from the running image: with
-		// primium-{tag}, the version is in the name, not the tag
+		// mychain-{tag}, the version is in the name, not the tag
 		specImage(c.Profile, a)
 	}
 	tag := a.String("tag", "")
@@ -336,7 +336,7 @@ func (buildTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error
 	}
 	image := ImageFor(c, a.String("image", ""), r.Image, tag)
 	if fresh && strings.HasPrefix(image, ":") {
-		return nil, fmt.Errorf("%s has no node container yet to take the image name from — pass image, e.g. primium-{tag}", c.Profile.Name)
+		return nil, fmt.Errorf("%s has no node container yet to take the image name from — pass image, e.g. mychain-{tag}", c.Profile.Name)
 	}
 	if image == r.Image {
 		return nil, fmt.Errorf("%s is the image running now — build a different tag", image)
@@ -353,17 +353,9 @@ func (buildTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error
 		}
 	}
 	if dockerfile == "" && r.ComposeDir != "" {
-		for _, d := range []string{r.ComposeDir, path.Dir(r.ComposeDir)} {
-			p := path.Join(d, "Dockerfile.primium")
-			if _, code, _ := sh(c, "test -f "+common.ShellQ(p), time.Minute); code == 0 {
-				dockerfile = p
-				break
-			}
-		}
-	}
-	if dockerfile == "" {
-		// deployments differ per host: look under the user's home
-		out, _, _ := sh(c, "find \"$HOME\" -maxdepth 7 -name Dockerfile.primium -not -path '*/.cometcli-build/*' 2>/dev/null | head -10", 2*time.Minute)
+		// the Dockerfile beside the node's compose project (or one level up)
+		out, _, _ := sh(c, "for d in "+common.ShellQ(r.ComposeDir)+" "+common.ShellQ(path.Dir(r.ComposeDir))+
+			"; do find \"$d\" -maxdepth 1 -type f -name 'Dockerfile*' ! -name '.cometcli.Dockerfile' 2>/dev/null; done | sort -u | head -10", time.Minute)
 		var found []string
 		for _, l := range strings.Split(strings.TrimSpace(out), "\n") {
 			if l = strings.TrimSpace(l); l != "" {
@@ -371,13 +363,15 @@ func (buildTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error
 			}
 		}
 		switch len(found) {
+		case 0:
 		case 1:
 			dockerfile = found[0]
-		case 0:
-			dockerfile = "builtin"
 		default:
-			return nil, fmt.Errorf("several Dockerfile.primium on this host — pass dockerfile with the one that built %s (or \"builtin\" for cometcli's):\n  %s", r.Image, strings.Join(found, "\n  "))
+			return nil, fmt.Errorf("several Dockerfiles beside %s — pass dockerfile with the one that built %s (or \"builtin\" for cometcli's):\n  %s", r.ComposeDir, r.Image, strings.Join(found, "\n  "))
 		}
+	}
+	if dockerfile == "" {
+		dockerfile = "builtin"
 	}
 	builtinNote := ""
 	if dockerfile == "builtin" {
@@ -387,14 +381,14 @@ func (buildTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error
 		if err != nil {
 			return nil, err
 		}
-		dockerfile = path.Join(strings.TrimSpace(home), ".cometcli-build", "Dockerfile.primium")
+		dockerfile = path.Join(strings.TrimSpace(home), ".cometcli-build", "Dockerfile.evmd")
 		if _, code, _ := sh(c, "mkdir -p "+common.ShellQ(path.Dir(dockerfile)), time.Minute); code != 0 {
 			return nil, fmt.Errorf("can't create %s on %s", path.Dir(dockerfile), c.Profile.Name)
 		}
 		if err := h.WriteFile(c, dockerfile, []byte(builtinDockerfile), 0o644); err != nil {
 			return nil, err
 		}
-		why := "no Dockerfile.primium on this host"
+		why := "no Dockerfile beside the node's compose project"
 		if fresh {
 			why = "no node on this host yet"
 		}
@@ -428,7 +422,7 @@ if [ -n "$need" ] && [ -n "$have" ] && [ "$(printf '%%s\n%%s\n' "$have" "$need" 
   echo "note: $(basename %s) builds with Go $have; $(git describe --tags 2>/dev/null) needs Go $need — built with golang:$need (your Dockerfile is unchanged)"
 fi
 `, common.ShellQ(dockerfile), common.ShellQ(dockerfile))
-	fmt.Fprintf(&script, "docker build -q -f \"$df\" -t %s --label name=primium --label org.opencontainers.image.version=%s --label org.opencontainers.image.source=https://github.com/%s . >/dev/null\n",
+	fmt.Fprintf(&script, "docker build -q -f \"$df\" -t %s --label org.opencontainers.image.version=%s --label org.opencontainers.image.source=https://github.com/%s . >/dev/null\n",
 		common.ShellQ(image), common.ShellQ(tag), repo)
 	fmt.Fprintf(&script, "echo \"version: $(docker run --rm --entrypoint %s %s version 2>&1 | head -1)\"\n", r.Binary, common.ShellQ(image))
 	detail := map[string]any{"image": image, "tag": tag, "repo": repo, "dockerfile": dockerfile, "source": src}
@@ -600,7 +594,7 @@ func (switchTool) Desc() string {
 }
 func (switchTool) Schema() map[string]any {
 	return toolkit.ObjSchema(map[string]any{
-		"image": toolkit.Str("the image to run now, e.g. primium-v0.7.3 (default: the local image whose binary registers the halted plan)"),
+		"image": toolkit.Str("the image to run now, e.g. mychain-v0.7.3 (default: the local image whose binary registers the halted plan)"),
 	})
 }
 func (switchTool) Tier() toolkit.Tier                 { return toolkit.TierLocalChange }

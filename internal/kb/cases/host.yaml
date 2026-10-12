@@ -253,7 +253,7 @@
     - {do: wait.until, args: {condition: unjailable, timeout: 1800}, when: "val.jailed == true", note: "wait out the jail period"}
     - {do: val.unjail, when: "val.jailed == true", note: "unjail (signed by the operator key — asks you)"}
   test:
-    signals: {proc.image_present: false, proc.running: false, proc.image: "primium-v0.7.2", proc.image_version: "v0.7.2"}
+    signals: {proc.image_present: false, proc.running: false, proc.image: "mychain-v0.7.2", proc.image_version: "v0.7.2"}
 
 - id: node-container-missing
   title: The node's container doesn't exist

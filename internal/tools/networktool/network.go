@@ -219,7 +219,7 @@ func containerInfo(c *toolkit.Context, h host.Host) (version string, cmd []strin
 	_ = json.Unmarshal([]byte(parts[0]), &cmd)
 	version = parts[1]
 	if version == "" || version == "<no value>" {
-		// primium-v0.7.2 or primium-evm:v0.7.2
+		// mychain-v0.7.2 or mychain-evm:v0.7.2
 		if _, tag, ok := strings.Cut(parts[2], ":"); ok {
 			version = tag
 		} else if i := strings.LastIndex(parts[2], "-v"); i >= 0 {

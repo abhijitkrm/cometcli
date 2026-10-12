@@ -558,7 +558,7 @@ validator as a peer. Your own validators are installed and started.`,
 			}
 			defer c.Close()
 			if c.Profile.Service.Unit == "" {
-				c.Profile.Service.Unit = "primium-validator"
+				c.Profile.Service.Unit = netspec.ContainerName(p.ChainID, netspec.Validator)
 			}
 			c.Progress = func(s string) { fmt.Fprintln(w, s) }
 			res, err := networktool.InstallPackage(c, p, gen, sp, ihome, ioffset, iip)
