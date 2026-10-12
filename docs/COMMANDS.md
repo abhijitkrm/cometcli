@@ -492,6 +492,8 @@ cometcli gov propose --kind params --module feemarket --set 'min_gas_multiplier=
 cometcli chain params --module feemarket   # one module's current params
 cometcli gov propose --kind messages --title "…" --summary "…" \
     --messages '[{"@type":"/cosmos.distribution.v1beta1.MsgCommunityPoolSpend", …}]'
+cometcli gov propose --kind cancel-upgrade         # cancels the scheduled plan (refused if the vote can't pass before its height)
+cometcli upgrade ready                 # this node vs the scheduled plan: finds the image that registers it, or says to build one
 cometcli gov deposit --proposal 7      # tops up exactly what's missing to the minimum
 cometcli val vote --proposal 7 --option yes
 cometcli wait until --condition proposal-status --value 7:PASSED

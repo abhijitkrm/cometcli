@@ -19,7 +19,6 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"github.com/abhijitkrm/cometcli/internal/netspec"
 	"io"
 	"net/http"
 	"path"
@@ -29,8 +28,11 @@ import (
 	"strings"
 	"time"
 
+	upgradev1beta1 "cosmossdk.io/api/cosmos/upgrade/v1beta1"
+
 	"github.com/abhijitkrm/cometcli/internal/client/host"
 	"github.com/abhijitkrm/cometcli/internal/config"
+	"github.com/abhijitkrm/cometcli/internal/netspec"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
 	"github.com/abhijitkrm/cometcli/internal/tools/common"
 )
@@ -521,6 +523,36 @@ func handlerRecord(c *toolkit.Context, asked, running, tag, handler string) (boo
 	return false, nil
 }
 
+// imagesFor lists the local images (other than the running one) whose
+// binary registers plan; with several, those named the network's way win.
+func imagesFor(c *toolkit.Context, r *running, plan string) []string {
+	out, _, _ := sh(c, "docker images --format '{{.Repository}}:{{.Tag}}' | grep -v '<none>'", time.Minute)
+	var found []string
+	for _, img := range strings.Fields(out) {
+		if img == r.Image {
+			continue
+		}
+		if ok, err := imageHas(c, img, r.Binary, plan); err == nil && ok {
+			found = append(found, img)
+		}
+	}
+	if len(found) > 1 {
+		if spec, _, err := netspec.Load(c.Profile.ChainID); err == nil && spec.Image.Naming != "" {
+			re := regexp.MustCompile("^" + strings.ReplaceAll(regexp.QuoteMeta(spec.Image.Naming), regexp.QuoteMeta("{tag}"), `v\d+\.\d+\.\d+`) + "(:latest)?$")
+			var named []string
+			for _, f := range found {
+				if re.MatchString(f) {
+					named = append(named, f)
+				}
+			}
+			if len(named) == 1 {
+				found = named
+			}
+		}
+	}
+	return found
+}
+
 func tail(s string, n int) string {
 	l := strings.Split(strings.TrimSpace(s), "\n")
 	if len(l) > n {
@@ -566,14 +598,44 @@ func (readyTool) Desc() string {
 }
 func (readyTool) Schema() map[string]any {
 	return toolkit.ObjSchema(map[string]any{
-		"name":  toolkit.Str("upgrade plan name"),
-		"image": toolkit.Str("the image to switch to after the halt"),
-	}, "name", "image")
+		"name":  toolkit.Str("upgrade plan name (default: the plan scheduled on chain)"),
+		"image": toolkit.Str("the image to switch to after the halt (default: the local image whose binary registers the plan)"),
+	})
 }
 func (readyTool) Tier() toolkit.Tier { return toolkit.TierObserve }
 
 func (readyTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
-	ok, text, data, err := Ready(c, a.String("name", ""), a.String("image", ""))
+	name, image := a.String("name", ""), a.String("image", "")
+	if name == "" {
+		g, err := c.GRPC()
+		if err != nil {
+			return nil, fmt.Errorf("pass name — can't read the scheduled plan: %w", err)
+		}
+		res, err := g.Upgrade.CurrentPlan(c, &upgradev1beta1.QueryCurrentPlanRequest{})
+		if err != nil {
+			return nil, err
+		}
+		if res.Plan == nil {
+			return nil, fmt.Errorf("no upgrade is scheduled on chain — pass name (and image) to check ahead of a proposal")
+		}
+		name = res.Plan.Name
+	}
+	if image == "" {
+		r, err := inspectRunning(c)
+		if err != nil {
+			return nil, err
+		}
+		switch found := imagesFor(c, r, name); len(found) {
+		case 0:
+			text := fmt.Sprintf("✗ no image on %s registers plan %q — build it before the halt: upgrade build --tag <release> (with --handler %s if the release has none)\nnot ready\n", c.Profile.Name, name, name)
+			return &toolkit.Result{Text: text, Data: map[string]any{"ready": false, "name": name}}, nil
+		case 1:
+			image = found[0]
+		default:
+			return nil, fmt.Errorf("several images register %q (%s) — pass image", name, strings.Join(found, ", "))
+		}
+	}
+	ok, text, data, err := Ready(c, name, image)
 	if err != nil {
 		return nil, err
 	}
@@ -652,31 +714,7 @@ func (switchTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, erro
 		if m == nil {
 			return nil, fmt.Errorf("%s hasn't halted for an upgrade (no `UPGRADE \"…\" NEEDED` in its log) — nothing to switch to yet", c.Profile.Service.Unit)
 		}
-		out, _, _ := sh(c, "docker images --format '{{.Repository}}:{{.Tag}}' | grep -v '<none>'", time.Minute)
-		var found []string
-		for _, img := range strings.Fields(out) {
-			if img == r.Image {
-				continue
-			}
-			if ok, err := imageHas(c, img, r.Binary, m[1]); err == nil && ok {
-				found = append(found, img)
-			}
-		}
-		if len(found) > 1 {
-			// prefer the image named the way the network names its builds
-			if spec, _, err := netspec.Load(c.Profile.ChainID); err == nil && spec.Image.Naming != "" {
-				re := regexp.MustCompile("^" + strings.ReplaceAll(regexp.QuoteMeta(spec.Image.Naming), regexp.QuoteMeta("{tag}"), `v\d+\.\d+\.\d+`) + "(:latest)?$")
-				var named []string
-				for _, f := range found {
-					if re.MatchString(f) {
-						named = append(named, f)
-					}
-				}
-				if len(named) == 1 {
-					found = named
-				}
-			}
-		}
+		found := imagesFor(c, r, m[1])
 		switch len(found) {
 		case 0:
 			return nil, fmt.Errorf("no image on %s registers the halted plan %q — build it: upgrade build --tag <release> (and --handler %s if the release has none)", c.Profile.Name, m[1], m[1])

@@ -56,12 +56,12 @@ type proposeTool struct{}
 func (proposeTool) Name() string { return "gov.propose" }
 func (proposeTool) Desc() string {
 	return "Submit a governance proposal: kind=text (title, summary), kind=upgrade (name = the release's upgrade handler name, height or in_blocks; " +
-		"refused when the vote can't finish before the height), kind=params (module + set: built from the chain's current params, only the named fields changed — title/summary default to the diff), or kind=messages (JSON array of {\"@type\":…} msgs, authority = the gov module). " +
+		"refused when the vote can't finish before the height), kind=params (module + set: built from the chain's current params, only the named fields changed — title/summary default to the diff), kind=cancel-upgrade (cancels the scheduled plan; refused when none is, or when the vote can't pass before its height), or kind=messages (JSON array of {\"@type\":…} msgs, authority = the gov module). " +
 		"Deposit defaults to the chain's minimum. Returns the proposal id."
 }
 func (proposeTool) Schema() map[string]any {
 	return toolkit.ObjSchema(common.WithTx(map[string]any{
-		"kind":      toolkit.Enum("proposal kind", "text", "upgrade", "params", "messages"),
+		"kind":      toolkit.Enum("proposal kind", "text", "upgrade", "cancel-upgrade", "params", "messages"),
 		"module":    toolkit.Str(`params: the module — evm, feemarket, erc20, staking, slashing, gov, mint, distribution, … (any with MsgUpdateParams on this chain)`),
 		"set":       toolkit.Str(`params: the changes, ';'-separated — field=value, list+=items, list-=items (nested: a.b=value). e.g. "active_static_precompiles+=ics02" (precompiles by name) or "base_fee_change_denominator=16; min_gas_price=0.5"`),
 		"dry_run":   toolkit.Bool("build and show the proposal (the diff for params) without signing or sending it"),
@@ -132,6 +132,24 @@ func Build(c *toolkit.Context, a toolkit.Args, proposer string) (*Plan, error) {
 				summary += " (image " + img + ")"
 			}
 			summary += ". Validators: build or stage the new binary before the halt height, then switch after the halt."
+		}
+	}
+	// cancelling: there must be a plan, and its name makes the defaults
+	var cancelPlan *upgradev1beta1.Plan
+	if a.String("kind", "") == "cancel-upgrade" {
+		res, err := g.Upgrade.CurrentPlan(c, &upgradev1beta1.QueryCurrentPlanRequest{})
+		if err != nil {
+			return nil, fmt.Errorf("current upgrade plan: %w", err)
+		}
+		if res.Plan == nil {
+			return nil, fmt.Errorf("no upgrade is scheduled — nothing to cancel")
+		}
+		cancelPlan = res.Plan
+		if title == "" {
+			title = "Cancel software upgrade " + cancelPlan.Name
+		}
+		if summary == "" {
+			summary = fmt.Sprintf("Cancels the scheduled upgrade %s at height %d. Nodes keep running the current binary.", cancelPlan.Name, cancelPlan.Height)
 		}
 	}
 	if title == "" || summary == "" {
@@ -243,6 +261,34 @@ func Build(c *toolkit.Context, a toolkit.Args, proposer string) (*Plan, error) {
 		}
 		msg.Messages = []*anypb.Any{any}
 		p.Detail["upgrade"] = fmt.Sprintf("%s at %d", name, height)
+	case "cancel-upgrade":
+		cur, blockTime, err := chainClock(c)
+		if err != nil {
+			return nil, err
+		}
+		// the cancel must pass before the chain halts at the plan's height
+		left := cancelPlan.Height - cur
+		need := int64(votingPeriod/blockTime) + 1
+		if left <= need {
+			hint := ""
+			if !expedited && params.ExpeditedVotingPeriod != nil {
+				hint = fmt.Sprintf(" — an expedited vote takes %s (expedited=true)", params.ExpeditedVotingPeriod.AsDuration())
+			}
+			return nil, fmt.Errorf("the plan %s halts the chain in %d blocks (≈ %s), but this vote takes %s ≈ %d blocks: it can't pass in time%s",
+				cancelPlan.Name, left, (time.Duration(left) * blockTime).Round(time.Second), votingPeriod, need, hint)
+		}
+		p.Notes = append(p.Notes, fmt.Sprintf("cancels %s at height %d (≈ %s from now); the vote ends ≈ %d blocks before it",
+			cancelPlan.Name, cancelPlan.Height, (time.Duration(left)*blockTime).Round(time.Minute), left-need))
+		gov, err := ModuleAddress("gov", accountPrefix(proposer))
+		if err != nil {
+			return nil, err
+		}
+		any, err := cosmosAny(&upgradev1beta1.MsgCancelUpgrade{Authority: gov})
+		if err != nil {
+			return nil, err
+		}
+		msg.Messages = []*anypb.Any{any}
+		p.Detail["cancels"] = fmt.Sprintf("%s at %d", cancelPlan.Name, cancelPlan.Height)
 	case "messages":
 		anys, err := parseMessages(a.String("messages", ""))
 		if err != nil {
