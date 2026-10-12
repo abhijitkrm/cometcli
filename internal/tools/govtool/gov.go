@@ -56,12 +56,15 @@ type proposeTool struct{}
 func (proposeTool) Name() string { return "gov.propose" }
 func (proposeTool) Desc() string {
 	return "Submit a governance proposal: kind=text (title, summary), kind=upgrade (name = the release's upgrade handler name, height or in_blocks; " +
-		"refused when the vote can't finish before the height), or kind=messages (JSON array of {\"@type\":…} msgs, authority = the gov module). " +
+		"refused when the vote can't finish before the height), kind=params (module + set: built from the chain's current params, only the named fields changed — title/summary default to the diff), or kind=messages (JSON array of {\"@type\":…} msgs, authority = the gov module). " +
 		"Deposit defaults to the chain's minimum. Returns the proposal id."
 }
 func (proposeTool) Schema() map[string]any {
 	return toolkit.ObjSchema(common.WithTx(map[string]any{
-		"kind":      toolkit.Enum("proposal kind", "text", "upgrade", "messages"),
+		"kind":      toolkit.Enum("proposal kind", "text", "upgrade", "params", "messages"),
+		"module":    toolkit.Str(`params: the module — evm, feemarket, erc20, staking, slashing, gov, mint, distribution, … (any with MsgUpdateParams on this chain)`),
+		"set":       toolkit.Str(`params: the changes, ';'-separated — field=value, list+=items, list-=items (nested: a.b=value). e.g. "active_static_precompiles+=ics02" (precompiles by name) or "base_fee_change_denominator=16; min_gas_price=0.5"`),
+		"dry_run":   toolkit.Bool("build and show the proposal (the diff for params) without signing or sending it"),
 		"title":     toolkit.Str("proposal title"),
 		"summary":   toolkit.Str("proposal summary / description"),
 		"metadata":  toolkit.Str("metadata (ipfs:// link or JSON); text proposals need metadata or a summary"),
@@ -102,6 +105,23 @@ func Build(c *toolkit.Context, a toolkit.Args, proposer string) (*Plan, error) {
 		return nil, fmt.Errorf("gov params: empty response")
 	}
 	title, summary := strings.TrimSpace(a.String("title", "")), strings.TrimSpace(a.String("summary", ""))
+	// a params change is built first: its title and summary can come from it
+	var pp *ParamsProposal
+	if a.String("kind", "") == "params" {
+		changes, err := ParseChanges(a.String("set", ""))
+		if err != nil {
+			return nil, err
+		}
+		if pp, err = BuildParams(c, a.String("module", ""), changes, accountPrefix(proposer)); err != nil {
+			return nil, err
+		}
+		if title == "" {
+			title = fmt.Sprintf("Update %s params: %s", pp.Module, strings.Join(pp.Keys, ", "))
+		}
+		if summary == "" {
+			summary = "Changes " + pp.Module + " params (all others unchanged):\n" + strings.Join(pp.Diff, "\n")
+		}
+	}
 	if title == "" || summary == "" {
 		return nil, fmt.Errorf("title and summary are required")
 	}
@@ -222,8 +242,14 @@ func Build(c *toolkit.Context, a toolkit.Args, proposer string) (*Plan, error) {
 			types = append(types, x.TypeUrl)
 		}
 		p.Detail["messages"] = strings.Join(types, ", ")
+	case "params":
+		msg.Messages = []*anypb.Any{pp.Any}
+		p.Detail["module"] = pp.Module + " (" + pp.Any.TypeUrl + ")"
+		p.Detail["changes"] = strings.Join(pp.Diff, "\n")
+		p.Detail["message"] = pp.MessageJSON()
+		p.Notes = append(p.Notes, "built from the chain's current "+pp.Module+" params: every other field is sent as it is now (the message replaces them all)")
 	default:
-		return nil, fmt.Errorf("kind %q: want text, upgrade or messages", kind)
+		return nil, fmt.Errorf("kind %q: want text, upgrade, params or messages", kind)
 	}
 	p.Msg = msg
 	return p, nil
@@ -237,6 +263,19 @@ func (proposeTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, err
 	p, err := Build(c, a, proposer)
 	if err != nil {
 		return nil, err
+	}
+	if a.Bool("dry_run", false) {
+		var b strings.Builder
+		fmt.Fprintf(&b, "proposal (not sent): %s\n", p.Msg.Title)
+		for _, k := range []string{"module", "changes", "upgrade", "messages", "deposit", "voting_period", "message"} {
+			if v := p.Detail[k]; v != "" {
+				fmt.Fprintf(&b, "%s:\n  %s\n", k, strings.ReplaceAll(v, "\n", "\n  "))
+			}
+		}
+		for _, n := range p.Notes {
+			b.WriteString("note: " + n + "\n")
+		}
+		return &toolkit.Result{Text: b.String(), Data: map[string]any{"dry_run": true, "changes": p.Detail["changes"]}}, nil
 	}
 	meta := p.Detail
 	for i, n := range p.Notes {

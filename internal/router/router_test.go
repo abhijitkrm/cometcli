@@ -127,6 +127,10 @@ func TestCommands(t *testing.T) {
 		{"set app mempool.max-txs 0", "set-config", map[string]string{"file": "app", "key": "mempool.max-txs", "value": "0"}},
 		{"build v0.7.3 on val2", "build", map[string]string{"tag": "v0.7.3", "node": "val2"}},
 		{"switch to primium-evm:v0.7.3", "switch", map[string]string{"image": "primium-evm:v0.7.3"}},
+		{"propose enabling the ics02 precompile", "params-precompiles", map[string]string{"items": "ics02"}},
+		{"propose adding ics02 and bank precompiles", "params-precompiles", map[string]string{"items": "ics02 and bank"}},
+		{"propose feemarket params change: min_gas_multiplier=0.4", "params-change", map[string]string{"module": "feemarket", "set": "min_gas_multiplier=0.4"}},
+		{"preview evm params access_control.create.access_type=access_type_restricted", "params-preview", map[string]string{"module": "evm"}},
 		{"check the network for production", "network-check", map[string]string{"prod": "for production"}},
 	}
 	for _, x := range cases {
@@ -147,6 +151,12 @@ func TestCommands(t *testing.T) {
 		if m.Intent == nil || m.Intent.ID != "proposal" || m.Args["id"] != id {
 			t.Errorf("%q → %v %v (%s), want proposal id %s", q, m.Intent, m.Args, m.Why, id)
 		}
+	}
+	if m := c.Classify("show the feemarket params"); m.Intent == nil || m.Intent.ID != "module-params" || m.Args["module"] != "feemarket" {
+		t.Errorf("module params → %v %v", m.Intent, m.Args)
+	}
+	if m := c.Classify("slashing params"); m.Intent == nil || m.Intent.ID != "slashing-params" {
+		t.Errorf("slashing params → %v", m.Intent)
 	}
 	if m := c.Classify("open proposals"); m.Intent == nil || m.Intent.ID != "proposals" {
 		t.Errorf("open proposals → %v", m.Intent)

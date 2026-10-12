@@ -97,3 +97,16 @@
     - {as: p, tool: chain.params}
   answer: |
     {{trim .p.Text}}
+
+- id: module-params
+  title: one module's params
+  scope: chain
+  patterns:
+    - '^(show |what are |list |get )?(the )?(current )?(?P<module>evm|feemarket|erc20|staking|gov|governance|mint|distribution|bank|precisebank|consensus) (module )?param(eter)?s?$'
+  examples:
+    - show the feemarket params
+    - what are the evm params
+  steps:
+    - {as: p, tool: chain.params, args: {module: "{module}"}}
+  answer: |
+    {{trim .p.Text}}

@@ -417,6 +417,9 @@ cometcli chain gov                     # proposals in voting (--status deposit|p
 cometcli val votes                     # open proposals and how this validator voted
 cometcli gov propose --kind text --title "…" --summary "…"
 cometcli gov propose --kind upgrade --title "v2" --summary "…" --name v2 --in_blocks 20000
+cometcli gov propose --kind params --module evm --set 'active_static_precompiles+=ics02' --dry_run
+cometcli gov propose --kind params --module feemarket --set 'min_gas_multiplier=0.4; base_fee_change_denominator=16'
+cometcli chain params --module feemarket   # one module's current params
 cometcli gov propose --kind messages --title "…" --summary "…" \
     --messages '[{"@type":"/cosmos.distribution.v1beta1.MsgCommunityPoolSpend", …}]'
 cometcli gov deposit --proposal 7      # tops up exactly what's missing to the minimum
@@ -429,6 +432,24 @@ The deposit defaults to the chain's minimum and is checked against its
 (voting period at the measured block time) is refused, with the earliest height that
 works. Messages are signed with whichever signer you pick (see
 [Signing transactions](#signing-transactions)).
+
+**Parameter changes (`--kind params`).** A module's `MsgUpdateParams` replaces *all* of
+its params, so a field you leave out is reset to its default. cometcli therefore builds the
+proposal from the chain's current params and changes only what `--set` names:
+
+- `field=value`, `list+=items`, `list-=items`, nested `a.b=value`, several separated by `;`.
+  EVM precompiles can be given by name (`ics02`, `bank`…) and are kept sorted.
+- Any module with `MsgUpdateParams` works: evm, feemarket, erc20, staking, slashing, gov,
+  mint, distribution… The message types come from the chain itself (gRPC reflection), so
+  no cometcli upgrade is needed when a module adds a field.
+- The approval (and `--dry_run`) shows a diff of only what changes, the full message, and
+  the deposit. Title and summary default to that diff.
+- Decimals are encoded the way the chain reads them inside a proposal, and the gas
+  simulation rejects a mismatch before anything is signed.
+
+In chat: "propose enabling the ics02 precompile", "preview feemarket params
+min_gas_multiplier=0.4", "propose staking params change: max_validators=120",
+"show the evm params".
 
 ## Transactions
 

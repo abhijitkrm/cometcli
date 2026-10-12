@@ -125,3 +125,9 @@ func (c *Conn) Account(ctx context.Context, bech32Addr string) (num, seq uint64,
 	}
 	return DecodeAccount(res.Account.TypeUrl, res.Account.Value)
 }
+
+// Invoke calls a gRPC method by its full name with any proto messages —
+// for services cometcli has no generated client for (found by reflection).
+func (c *Conn) Invoke(ctx context.Context, method string, req, resp any) error {
+	return c.cc.Invoke(ctx, method, req, resp)
+}

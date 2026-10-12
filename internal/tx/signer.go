@@ -210,6 +210,7 @@ func (b *Builder) unsignedJSON(p *Prepared) ([]byte, error) {
 			return nil, err
 		}
 		obj["@type"] = "/" + string(m.ProtoReflect().Descriptor().FullName())
+		fixJSON(obj)
 		raw, _ := json.Marshal(obj)
 		msgs = append(msgs, raw)
 	}
@@ -235,3 +236,28 @@ func (b *Builder) unsignedJSON(p *Prepared) ([]byte, error) {
 }
 
 func q(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+// JSONFixups adjust a message's JSON by its type URL where the JSON form
+// differs from the binary one: a LegacyDec is a scaled integer in binary
+// but a plain decimal in JSON, which `tx sign` re-encodes from.
+var JSONFixups = map[string]func(obj map[string]any){}
+
+// fixJSON applies the fixups to every message in v, nested ones included
+// (a proposal's messages).
+func fixJSON(v any) {
+	switch x := v.(type) {
+	case map[string]any:
+		if t, ok := x["@type"].(string); ok {
+			if f := JSONFixups[t]; f != nil {
+				f(x)
+			}
+		}
+		for _, c := range x {
+			fixJSON(c)
+		}
+	case []any:
+		for _, c := range x {
+			fixJSON(c)
+		}
+	}
+}
