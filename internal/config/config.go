@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"gopkg.in/yaml.v3"
 )
@@ -340,6 +341,69 @@ func (c *Config) UpsertProfile(p *Profile) error {
 	if p.Name == "" {
 		return errors.New("profile name required")
 	}
+	if c.Profiles == nil {
+		c.Profiles = map[string]*Profile{}
+	}
 	c.Profiles[p.Name] = p
-	return c.Save()
+	// only this profile changes on disk: another cometcli may have changed
+	// others since this one loaded the file
+	return withLock(func() error {
+		fresh, err := Load()
+		if err != nil {
+			return err
+		}
+		// this config's settings, the file's other profiles
+		merged := *c
+		merged.Profiles = fresh.Profiles
+		if merged.Profiles == nil {
+			merged.Profiles = map[string]*Profile{}
+		}
+		merged.Profiles[p.Name] = p
+		for n, q := range merged.Profiles {
+			c.Profiles[n] = q
+		}
+		return merged.Save()
+	})
+}
+
+// UpdateProfile changes one profile, in c and on disk, re-reading the file
+// under a lock first: a long-running command never writes back a stale
+// copy of what other cometcli processes changed meanwhile.
+func (c *Config) UpdateProfile(name string, fn func(p *Profile)) error {
+	if mine, ok := c.Profiles[name]; ok {
+		fn(mine)
+	}
+	return withLock(func() error {
+		fresh, err := Load()
+		if err != nil {
+			return err
+		}
+		p, ok := fresh.Profiles[name]
+		if !ok {
+			return fmt.Errorf("no profile %s", name)
+		}
+		fn(p)
+		return fresh.Save()
+	})
+}
+
+// withLock runs fn holding an exclusive lock beside the config file.
+func withLock(fn func() error) error {
+	p, err := Path(configFile + ".lock")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(p, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	defer func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }()
+	return fn()
 }

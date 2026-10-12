@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/abhijitkrm/cometcli/internal/client/host"
+	"github.com/abhijitkrm/cometcli/internal/config"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
 	"github.com/abhijitkrm/cometcli/internal/tools/common"
 )
@@ -309,6 +310,12 @@ func (buildTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error
 		return nil, fmt.Errorf("%s is the image running now — build a different tag", image)
 	}
 	dockerfile := a.String("dockerfile", "")
+	if remembered := c.Profile.Metadata["dockerfile"]; dockerfile == "" && remembered != "" {
+		// the one the last build here used
+		if _, code, _ := sh(c, "test -f "+common.ShellQ(remembered), time.Minute); code == 0 {
+			dockerfile = remembered
+		}
+	}
 	if dockerfile == "" && r.ComposeDir != "" {
 		for _, d := range []string{r.ComposeDir, path.Dir(r.ComposeDir)} {
 			p := path.Join(d, "Dockerfile.primium")
@@ -402,6 +409,15 @@ fi
 		}
 		fmt.Fprintf(&b, "\nhandler %s: in the new binary ✓", handler)
 		data["handler"] = handler
+	}
+	// remember the Dockerfile for the next build on this node
+	if c.Cfg != nil && c.Profile.Name != "" && c.Profile.Metadata["dockerfile"] != dockerfile {
+		_ = c.Cfg.UpdateProfile(c.Profile.Name, func(p *config.Profile) {
+			if p.Metadata == nil {
+				p.Metadata = map[string]string{}
+			}
+			p.Metadata["dockerfile"] = dockerfile
+		})
 	}
 	return &toolkit.Result{Text: b.String(), Data: data}, nil
 }
