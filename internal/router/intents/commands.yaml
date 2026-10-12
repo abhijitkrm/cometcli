@@ -8,6 +8,7 @@
   title: start / stop / restart the node
   patterns:
     - '^(?P<action>restart|stop|start)( the)?( node| validator| container| service)?( (?P<node>[a-z0-9][a-z0-9._-]*))?$'
+    - '^(?P<action>restart|stop|start) (?P<group>all|every)( the| of the)?( (?P<chain>[a-z0-9][a-z0-9._-]*))? (validators|validator|nodes|node)$'
   steps:
     - {tool: node.service, args: {action: "{action}"}}
 
@@ -24,6 +25,7 @@
   title: unjail
   patterns:
     - '^unjail( the)?( validator)?( (?P<node>[a-z0-9][a-z0-9._-]*))?$'
+    - '^unjail (?P<group>all|every)( the| of the)?( (?P<chain>[a-z0-9][a-z0-9._-]*))? (validators|validator|nodes|node)$'
   steps:
     - {tool: val.unjail}
 
@@ -88,6 +90,7 @@
   title: build a release image
   patterns:
     - '^build (the )?(image )?(for )?(?P<tag>v\d+\.\d+\.\d+)( (on|for) (?P<node>[a-z0-9][a-z0-9._-]*))?$'
+    - '^build (the )?(image )?(for )?(?P<tag>v\d+\.\d+\.\d+) (on|for) (?P<group>all|every)( the| of the)?( (?P<chain>[a-z0-9][a-z0-9._-]*))? (validators|validator|nodes|node)$'
   steps:
     - {tool: upgrade.build, args: {tag: "{tag}"}}
 
@@ -96,6 +99,7 @@
   title: switch to an image after the upgrade halt
   patterns:
     - '^switch (to |image )?(?P<image>[a-z0-9][a-z0-9._/-]*:?[a-z0-9._-]*)( (on|for) (?P<node>[a-z0-9][a-z0-9._-]*))?$'
+    - '^switch (to |image )?(?P<image>[a-z0-9][a-z0-9._/-]*:?[a-z0-9._-]*) (on|for) (?P<group>all|every)( the| of the)?( (?P<chain>[a-z0-9][a-z0-9._-]*))? (validators|validator|nodes|node)$'
   steps:
     - {tool: upgrade.switch, args: {image: "{image}"}}
 
@@ -112,6 +116,7 @@
   title: triage
   patterns:
     - '^(run )?triage( (on )?(?P<node>[a-z0-9][a-z0-9._-]*))?$'
+    - '^(run )?triage (on )?(?P<group>all|every)( the| of the)?( (?P<chain>[a-z0-9][a-z0-9._-]*))? (validators|validator|nodes|node)$'
   steps:
     - {tool: node.triage}
 
@@ -154,3 +159,21 @@
     - '^(preview|draft|dry run) (enabling|adding) (the )?(?P<items>[a-z0-9][a-z0-9, ]*?) (static )?precompiles?$'
   steps:
     - {tool: gov.propose, args: {kind: params, module: evm, set: "active_static_precompiles+={items}", dry_run: true}}
+
+- id: provision
+  kind: command
+  title: set up a node from the network spec
+  patterns:
+    - '^(provision|set up|setup|join) (?P<node>[a-z0-9][a-z0-9._-]*) as (an? )?(?P<role>validator|archive|rpc)( node)?( (for|on|to) (?P<chain>[a-z0-9][a-z0-9._-]*))?$'
+  steps:
+    - {tool: node.provision, args: {role: "{role}", network: "{chain}"}}
+
+
+- id: prepare-host
+  kind: command
+  title: get the host ready to run nodes
+  patterns:
+    - '^(prepare|bootstrap|set up)( the)? host( (of|for) (?P<node>[a-z0-9][a-z0-9._-]*))?$'
+    - '^(prepare|bootstrap) (?P<node>[a-z0-9][a-z0-9._-]*)( host)?$'
+  steps:
+    - {tool: host.prepare}

@@ -181,3 +181,50 @@ func TestQuestionsNamingANodeAreAnsweredLocally(t *testing.T) {
 		t.Fatalf("model calls %d, asked %v", prov.calls, asked)
 	}
 }
+
+func TestGroupCommandsAndNetworkQuestions(t *testing.T) {
+	prov := &mockProvider{}
+	var ran []string
+	refuse := false
+	svc := stubTool{name: "node.service", tier: toolkit.TierLocalChange, run: func(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
+		if refuse {
+			ran = append(ran, c.Profile.Name)
+			return nil, fmt.Errorf("not approved: the operator declined")
+		}
+		ran = append(ran, c.Profile.Name+":"+a.String("action", ""))
+		if c.Profile.Name == "v2" {
+			return nil, fmt.Errorf("ssh: connection refused")
+		}
+		return &toolkit.Result{Text: "primium-validator"}, nil
+	}}
+	fleet := stubTool{name: "fleet.status", tier: toolkit.TierObserve, run: func(_ *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
+		ran = append(ran, "fleet:"+a.String("chain", ""))
+		return &toolkit.Result{Text: "v1 ok", Data: map[string]any{"count": 1}}, nil
+	}}
+	a := routedAgent(t, prov, svc, fleet)
+	a.Ctx.Cfg = &config.Config{Profiles: map[string]*config.Profile{
+		"testp": a.Ctx.Profile,
+		"v1":    {ChainID: "primium-1", Role: "validator"}, "v2": {ChainID: "primium-1", Role: "validator"},
+		"arch": {ChainID: "primium-1", Role: "rpc"}, "p2-v1": {ChainID: "primium-2", Role: "validator"},
+	}}
+	out, err := a.Run(context.Background(), "stop all primium-1 validators")
+	if err != nil || !strings.Contains(out, "on 2 node(s) — 1 failed") || !strings.Contains(out, "**v2**: ✗") {
+		t.Fatalf("group: %v\n%s", err, out)
+	}
+	if strings.Join(ran, ",") != "v1:stop,v2:stop" {
+		t.Fatalf("ran %v (only primium-1's validators, every one even after a failure)", ran)
+	}
+	ran = nil
+	if out, _ := a.Run(context.Background(), "is primium-2 healthy"); !strings.Contains(out, "no model call") || strings.Join(ran, ",") != "fleet:primium-2" {
+		t.Fatalf("network question: %v %s", ran, out)
+	}
+	// a refused approval stops the group: the others aren't asked
+	ran, refuse = nil, true
+	if out, _ := a.Run(context.Background(), "restart all primium-1 validators"); len(ran) != 1 || !strings.Contains(out, "1 more not attempted") {
+		t.Fatalf("after a refusal: ran %v\n%s", ran, out)
+	}
+	// a word that isn't a chain: the model
+	if _, err := a.Run(context.Background(), "stop all primium-9 validators"); err != nil || prov.calls != 1 {
+		t.Fatalf("unknown chain must reach the model (calls %d)", prov.calls)
+	}
+}

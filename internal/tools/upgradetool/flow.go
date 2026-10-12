@@ -16,6 +16,7 @@ package upgradetool
 // both are checked against the binaries themselves, not the source.
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -284,7 +285,7 @@ func (buildTool) Schema() map[string]any {
 	return toolkit.ObjSchema(map[string]any{
 		"tag":        toolkit.Str("release tag to build, e.g. v0.6.1"),
 		"image":      toolkit.Str("image to produce; {tag} is the release tag, {version} the tag without v — e.g. primium-{tag} → primium-v0.7.2 (default: the profile's metadata.image, else the running image's name with the new tag)"),
-		"dockerfile": toolkit.Str("Dockerfile on the node (default: Dockerfile.primium beside the compose project, or one level up)"),
+		"dockerfile": toolkit.Str("Dockerfile on the node (default: the one the last build used, Dockerfile.primium beside the compose project or under the home dir, else cometcli's built-in one; \"builtin\" forces that)"),
 		"handler":    toolkit.Str("forks only: add a no-op upgrade handler with this plan name (official releases ship their own — leave empty)"),
 		"repo":       toolkit.Str("github owner/repo (default: the running image's source)"),
 	}, "tag")
@@ -296,8 +297,20 @@ var tagRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 func (buildTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
 	r, err := inspectRunning(c)
+	fresh := false
 	if err != nil {
-		return nil, err
+		if !strings.Contains(strings.ToLower(err.Error()), "no such") {
+			return nil, err
+		}
+		// no container yet (a new host): an official release under the
+		// naming asked for
+		r, fresh = &running{Binary: "/evmd/evmd", Repo: "cosmos/evm"}, true
+		if bin := c.Profile.Binary; bin != "" {
+			r.Binary = "/evmd/" + bin
+		}
+		if repo := c.Profile.Metadata["repo"]; repo != "" {
+			r.Repo = repo
+		}
 	}
 	tag := a.String("tag", "")
 	handler := a.String("handler", "")
@@ -306,10 +319,17 @@ func (buildTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error
 		return nil, fmt.Errorf("tag, handler and repo must be plain names (letters, digits, . _ -)")
 	}
 	image := ImageFor(c, a.String("image", ""), r.Image, tag)
+	if fresh && strings.HasPrefix(image, ":") {
+		return nil, fmt.Errorf("%s has no node container yet to take the image name from — pass image, e.g. primium-{tag}", c.Profile.Name)
+	}
 	if image == r.Image {
 		return nil, fmt.Errorf("%s is the image running now — build a different tag", image)
 	}
 	dockerfile := a.String("dockerfile", "")
+	if fresh && dockerfile == "" && c.Profile.Metadata["dockerfile"] == "" {
+		// no node here yet, so no Dockerfile that built it: cometcli's own
+		dockerfile = "builtin"
+	}
 	if remembered := c.Profile.Metadata["dockerfile"]; dockerfile == "" && remembered != "" {
 		// the one the last build here used
 		if _, code, _ := sh(c, "test -f "+common.ShellQ(remembered), time.Minute); code == 0 {
@@ -338,10 +358,31 @@ func (buildTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error
 		case 1:
 			dockerfile = found[0]
 		case 0:
-			return nil, fmt.Errorf("no Dockerfile.primium beside the compose project or under the home dir — pass dockerfile (the one that built %s)", r.Image)
+			dockerfile = "builtin"
 		default:
-			return nil, fmt.Errorf("several Dockerfile.primium on this host — pass dockerfile with the one that built %s:\n  %s", r.Image, strings.Join(found, "\n  "))
+			return nil, fmt.Errorf("several Dockerfile.primium on this host — pass dockerfile with the one that built %s (or \"builtin\" for cometcli's):\n  %s", r.Image, strings.Join(found, "\n  "))
 		}
+	}
+	builtinNote := ""
+	if dockerfile == "builtin" {
+		// none on this host: cometcli's own, written beside its builds
+		home, _, _ := sh(c, "printf %s \"$HOME\"", time.Minute)
+		h, err := c.Host()
+		if err != nil {
+			return nil, err
+		}
+		dockerfile = path.Join(strings.TrimSpace(home), ".cometcli-build", "Dockerfile.primium")
+		if _, code, _ := sh(c, "mkdir -p "+common.ShellQ(path.Dir(dockerfile)), time.Minute); code != 0 {
+			return nil, fmt.Errorf("can't create %s on %s", path.Dir(dockerfile), c.Profile.Name)
+		}
+		if err := h.WriteFile(c, dockerfile, []byte(builtinDockerfile), 0o644); err != nil {
+			return nil, err
+		}
+		why := "no Dockerfile.primium on this host"
+		if fresh {
+			why = "no node on this host yet"
+		}
+		builtinNote = "note: " + why + " — built with cometcli's built-in Dockerfile (" + dockerfile + ")\n"
 	}
 	src := "$HOME/.cometcli-build/" + path.Base(repo) + "-" + tag
 	var script strings.Builder
@@ -400,7 +441,7 @@ fi
 		return nil, fmt.Errorf("build failed (exit %d): %v\n%s", code, err, tail(out, 30))
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "built %s from %s@%s with %s\n%s", image, repo, tag, dockerfile, strings.TrimSpace(out))
+	fmt.Fprintf(&b, "%sbuilt %s from %s@%s with %s\n%s", builtinNote, image, repo, tag, dockerfile, strings.TrimSpace(out))
 	data := map[string]any{"image": image, "tag": tag}
 	if handler != "" {
 		ok, err := imageHas(c, image, r.Binary, handler)
@@ -590,6 +631,9 @@ func ImageFor(c *toolkit.Context, template, runningImage, tag string) string {
 	}
 	return strings.NewReplacer("{tag}", tag, "{version}", strings.TrimPrefix(tag, "v")).Replace(template)
 }
+
+//go:embed builtin.Dockerfile
+var builtinDockerfile string
 
 var (
 	breakingRe    = regexp.MustCompile(`(?i)\b(state|consensus)[ -]breaking\b`)

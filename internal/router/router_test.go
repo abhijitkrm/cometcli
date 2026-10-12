@@ -132,6 +132,10 @@ func TestCommands(t *testing.T) {
 		{"propose feemarket params change: min_gas_multiplier=0.4", "params-change", map[string]string{"module": "feemarket", "set": "min_gas_multiplier=0.4"}},
 		{"preview evm params access_control.create.access_type=access_type_restricted", "params-preview", map[string]string{"module": "evm"}},
 		{"check the network for production", "network-check", map[string]string{"prod": "for production"}},
+		{"stop all primium-1 validators", "service", map[string]string{"action": "stop", "group": "all", "chain": "primium-1"}},
+		{"restart all nodes", "service", map[string]string{"action": "restart", "group": "all"}},
+		{"build v0.7.2 on all validators", "build", map[string]string{"tag": "v0.7.2", "group": "all"}},
+		{"provision p2-archive as archive for primium-2", "provision", map[string]string{"node": "p2-archive", "role": "archive", "chain": "primium-2"}},
 	}
 	for _, x := range cases {
 		m := c.Classify(x.prompt)
@@ -157,6 +161,9 @@ func TestCommands(t *testing.T) {
 	}
 	if m := c.Classify("slashing params"); m.Intent == nil || m.Intent.ID != "slashing-params" {
 		t.Errorf("slashing params → %v", m.Intent)
+	}
+	if m := c.Classify("is primium-2 healthy?"); m.Intent == nil || m.Intent.ID != "network-health" || m.Args["chain"] != "primium-2" {
+		t.Errorf("network health → %v %v", m.Intent, m.Args)
 	}
 	if m := c.Classify("open proposals"); m.Intent == nil || m.Intent.ID != "proposals" {
 		t.Errorf("open proposals → %v", m.Intent)
