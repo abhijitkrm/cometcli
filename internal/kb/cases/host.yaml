@@ -136,7 +136,8 @@
   explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, node-no-peers, node-low-peers]
   severity: high
   match:
-    all: ["logs.port_in_use > 0"]
+    # the node's own log, or docker refusing to start the container
+    any: ["logs.port_in_use > 0", "proc.port_taken > 0"]
   confirm:
     - "bash: ss -ltnp | grep -E '26656|26657|9090|1317|8545'"
   causes:
@@ -145,6 +146,10 @@
     - "[change] stop the duplicate (CHECK it is not a second validator instance with the same key) or change the port"
   warnings:
     - two instances of a validator = double-sign risk; stop one immediately
+  playbook_kind: report
+  playbook:
+    - {do: bash, args: {command: "docker ps --filter publish={sig:proc.port_taken}", description: "the container holding the port"}, when: "proc.port_taken > 0", note: "who holds the port (docker refused to start the node)"}
+    - {do: bash, args: {command: "ss -ltnp 2>/dev/null | grep -E ':(26656|26657|26660|1317|9090|8545|8546) ' || true", description: "what listens on the node's ports"}, note: "what listens on the node's ports"}
   test:
     signals: {logs.port_in_use: 2}
 
@@ -206,3 +211,62 @@
     - {do: wait.until, args: {condition: in-consensus, timeout: 600}, when: "val.jailed == true", note: "check it signs again"}
   test:
     signals: {logs.permission_denied: 2, proc.running: false, logs.panic: 1}
+
+- id: host-docker-down
+  title: Docker isn't running on the node's host
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, node-no-peers, node-low-peers]
+  severity: critical
+  match:
+    all: ["proc.docker_down == true"]
+  confirm:
+    - "bash: systemctl status docker; docker info"
+  causes:
+    - the docker service stopped or crashed, or the host rebooted with docker not enabled
+  fix:
+    - "[change] sudo systemctl start docker (and enable it so a reboot brings it back); start the node"
+  playbook:
+    - {do: bash, args: {command: "sudo -n systemctl enable --now docker && docker info --format '{{.ServerVersion}}'", description: "start docker and enable it at boot"}, note: "start docker (needs passwordless sudo; otherwise the operator runs it)"}
+    - {do: node.service, args: {action: start}, note: "start the node"}
+    - {do: wait.until, args: {condition: synced, timeout: 1800}, note: "wait until it has caught up"}
+    - {do: wait.until, args: {condition: unjailable, timeout: 1800}, when: "val.jailed == true", note: "wait out the jail period"}
+    - {do: val.unjail, when: "val.jailed == true", note: "unjail (signed by the operator key — asks you)"}
+    - {do: wait.until, args: {condition: in-consensus, timeout: 600}, when: "val.jailed == true", note: "check it signs again"}
+  test:
+    signals: {proc.docker_down: true, proc.running: false}
+
+- id: node-image-missing
+  title: The node's docker image isn't on the host
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, node-no-peers, node-low-peers]
+  severity: high
+  match:
+    all: ["proc.image_present == false"]
+  confirm:
+    - "bash: docker image inspect <image>; docker inspect -f '{{.State.Error}}' <container>"
+  causes:
+    - images pruned (docker system prune -a), a new host, or a compose file pointing at a tag never built here
+  fix:
+    - "[change] upgrade.build the release the image was built from, under the same name; start the node"
+  playbook:
+    - {do: upgrade.build, args: {tag: "{sig:proc.image_version}", image: "{sig:proc.image}"}, note: "rebuild the image from its official release (asks you; several minutes)"}
+    - {do: node.service, args: {action: start}, note: "start the node"}
+    - {do: wait.until, args: {condition: synced, timeout: 1800}, note: "wait until it has caught up"}
+    - {do: wait.until, args: {condition: unjailable, timeout: 1800}, when: "val.jailed == true", note: "wait out the jail period"}
+    - {do: val.unjail, when: "val.jailed == true", note: "unjail (signed by the operator key — asks you)"}
+  test:
+    signals: {proc.image_present: false, proc.running: false, proc.image: "primium-v0.7.2", proc.image_version: "v0.7.2"}
+
+- id: node-container-missing
+  title: The node's container doesn't exist
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, node-no-peers, node-low-peers]
+  severity: critical
+  match:
+    all: ["proc.container_missing == true"]
+  confirm:
+    - "bash: docker ps -a; ls the node home for its docker-compose.yml"
+  causes:
+    - docker compose down / docker rm, or the profile names the wrong container
+  fix:
+    - "[change] docker compose up -d from the node's compose file (node.provision reconfigure=true re-renders it from the spec)"
+  test:
+    signals: {proc.container_missing: true, proc.running: false}
+

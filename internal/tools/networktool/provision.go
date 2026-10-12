@@ -24,7 +24,10 @@ import (
 )
 
 // RegisterProvision adds node.provision.
-func RegisterProvision(r *toolkit.Registry) { r.Register(provisionTool{}) }
+func RegisterProvision(r *toolkit.Registry) {
+	r.Register(provisionTool{})
+	r.Register(hostPrepareTool{})
+}
 
 type provisionTool struct{}
 
@@ -137,6 +140,13 @@ func (provisionTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, e
 			return nil, fmt.Errorf("peer %s: %w", name, err)
 		}
 		peers = append(peers, peer)
+	}
+	if len(peers) == 0 && !exists {
+		// the network's running nodes this machine already knows
+		peers = PeersOf(c, spec.Chain.ID, p.Name)
+		if len(peers) > 0 {
+			step("· peers from your %s profiles: %d", spec.Chain.ID, len(peers))
+		}
 	}
 	if len(peers) == 0 && !exists {
 		return nil, fmt.Errorf("no peers to join through — pass peers (id@host:26656) or peers_from (profiles of running nodes)")

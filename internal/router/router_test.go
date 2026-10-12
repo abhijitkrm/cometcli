@@ -128,6 +128,10 @@ func TestCommands(t *testing.T) {
 		{"build v0.7.3 on val2", "build", map[string]string{"tag": "v0.7.3", "node": "val2"}},
 		{"switch to primium-evm:v0.7.3", "switch", map[string]string{"image": "primium-evm:v0.7.3"}},
 		{"check the network for production", "network-check", map[string]string{"prod": "for production"}},
+		{"stop all primium-1 validators", "service", map[string]string{"action": "stop", "group": "all", "chain": "primium-1"}},
+		{"restart all nodes", "service", map[string]string{"action": "restart", "group": "all"}},
+		{"build v0.7.2 on all validators", "build", map[string]string{"tag": "v0.7.2", "group": "all"}},
+		{"provision p2-archive as archive for primium-2", "provision", map[string]string{"node": "p2-archive", "role": "archive", "chain": "primium-2"}},
 	}
 	for _, x := range cases {
 		m := c.Classify(x.prompt)
@@ -147,6 +151,9 @@ func TestCommands(t *testing.T) {
 		if m.Intent == nil || m.Intent.ID != "proposal" || m.Args["id"] != id {
 			t.Errorf("%q → %v %v (%s), want proposal id %s", q, m.Intent, m.Args, m.Why, id)
 		}
+	}
+	if m := c.Classify("is primium-2 healthy?"); m.Intent == nil || m.Intent.ID != "network-health" || m.Args["chain"] != "primium-2" {
+		t.Errorf("network health → %v %v", m.Intent, m.Args)
 	}
 	if m := c.Classify("open proposals"); m.Intent == nil || m.Intent.ID != "proposals" {
 		t.Errorf("open proposals → %v", m.Intent)

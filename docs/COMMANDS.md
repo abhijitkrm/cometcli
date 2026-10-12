@@ -267,7 +267,9 @@ cometcli network check --network primium-1 --nodes val1,archive1
 ```bash
 cometcli network import run-genesis/network-config.env --chain-id mychain-1     # the new network's spec
 cometcli profile add v1 --ssh-host 203.0.113.1 --service docker --unit primium-validator --role validator
-#   … one profile per genesis validator (build the image on each: upgrade build)
+#   … one profile per genesis validator
+cometcli --profile v1 host prepare                      # a fresh host: docker, compose, git, jq (asks first)
+cometcli --profile v1 upgrade build --tag v0.7.2 --image 'primium-{tag}'   # the image, on each host
 cometcli genesis create mychain-1 --validators v1,v2,v3,v4 --keyring file --accounts treasury.txt
 ```
 
@@ -288,6 +290,13 @@ coordinator:
    - configs are rendered for the validator role, with every other validator as a peer
    - compose files are written and every node starts
 6. **Wait for blocks.**
+
+`host prepare` installs only what's missing (Ubuntu/Debian or Amazon Linux/RHEL, passwordless
+sudo); without passwordless sudo it prints the commands to run instead. `upgrade build` on a
+host with no node yet, or no `Dockerfile.primium`, builds with cometcli's built-in Dockerfile
+(the one node-setup uses), and remembers the Dockerfile each host used. Before anything is
+created, `genesis create` checks that every node's host ports are free and names the container
+holding them.
 
 Mnemonics are shown only on your terminal, or written to `--mnemonics-to <dir>`
 (mode 0600). Existing node homes are never overwritten. Several validators on one machine:
@@ -673,8 +682,8 @@ can't work out what to do.
 
 | What you type | Who handles it |
 |---|---|
-| **A direct command:** "restart val3", "stop the node", "unjail", "vote yes on 6", "send 100adex to cosmos1…", "delegate 1000adex to cosmosvaloper1…", "withdraw rewards", "show last 200 logs of val4", "add peer id@host:26656", "set app mempool.max-txs 0", "build v0.7.3", "switch to primium-v0.7.3", "check the network", "triage" | cometcli runs the tool with the words as its arguments. Changes and transactions still ask, and key use always does. A name that isn't one of your nodes ("stop worrying") goes to the model. |
-| **A known question:** jailed validators, validator count, peers, sync and lag, health (from triage), fleet status, version, upgrade readiness, recent log errors, spec conformance, uptime, consensus, proposals, one proposal and its tally ("did proposal 7 pass"), votes, rewards, balance, upgrade plan, slashing params | Read-only tools and a fixed answer. A question may name the node ("is val2 healthy"); a node that doesn't answer is answered locally too. Repeats within 30s come from a cache. |
+| **A direct command:** "restart val3", "stop the node", "unjail", "vote yes on 6", "send 100adex to cosmos1…", "delegate 1000adex to cosmosvaloper1…", "withdraw rewards", "show last 200 logs of val4", "add peer id@host:26656", "set app mempool.max-txs 0", "build v0.7.3", "switch to primium-v0.7.3", "check the network", "triage", "prepare val5", "provision arch1 as archive for primium-2"; for a group: "stop all primium-1 validators", "build v0.7.2 on all validators", "triage all nodes" | cometcli runs the tool with the words as its arguments (a group: on each node in turn, stopping at the first refusal). Changes and transactions still ask, and key use always does. A name that isn't one of your nodes ("stop worrying") goes to the model. |
+| **A known question:** jailed validators, validator count, peers, sync and lag, health (from triage), fleet status, one network's nodes ("is primium-2 healthy"), version, upgrade readiness, recent log errors, spec conformance, uptime, consensus, proposals, one proposal and its tally ("did proposal 7 pass"), votes, rewards, balance, upgrade plan, slashing params | Read-only tools and a fixed answer. A question may name the node ("is val2 healthy"); a node that doesn't answer is answered locally too. Repeats within 30s come from a cache. |
 | **`/incident` where triage finds one clear root case with a playbook** (32 of 68 cases) | cometcli runs the playbook (see below). |
 | **Anything else:** why/how questions, ambiguous requests, judgement calls (config parse errors, app hash, double sign, corruption) | The model. For `/incident` it starts from cometcli's triage. |
 
