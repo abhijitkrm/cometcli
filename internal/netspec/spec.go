@@ -448,3 +448,11 @@ func (s *Spec) GasDenom() string {
 	}
 	return s.Chain.Denom
 }
+
+// Bech32 is the chain's account address prefix (default cosmos).
+func (s *Spec) Bech32() string {
+	if s.Chain.Bech32Prefix != "" {
+		return s.Chain.Bech32Prefix
+	}
+	return "cosmos"
+}

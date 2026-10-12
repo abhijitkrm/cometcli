@@ -75,7 +75,7 @@ status, cometcli doctor, cometcli tx unjail) and a tool the agent calls.`,
 
 	for _, c := range toolGroupCommands(reg) {
 		if c.Use == "network" {
-			c.AddCommand(networkImportCmd(), networkShowCmd())
+			c.AddCommand(networkImportCmd(), networkShowCmd(), networkRemoveCmd())
 		}
 		root.AddCommand(c)
 	}

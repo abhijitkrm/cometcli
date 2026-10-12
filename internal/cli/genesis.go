@@ -145,6 +145,7 @@ peer, and every node started. Mnemonics are shown only here, or written to
 	f.IntVar(&portStep, "port-step", 0, "host port offset added per further validator (several on one machine)")
 	f.BoolVar(&yes, "yes", false, "don't ask for confirmation")
 	cmd.AddCommand(create)
+	cmd.AddCommand(genesisBCmds()...)
 	return cmd
 }
 

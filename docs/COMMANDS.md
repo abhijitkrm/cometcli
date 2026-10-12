@@ -338,6 +338,49 @@ For a validator, once it's synced:
 3. Run `cometcli --profile <p> val create --amount <stake>`. The consensus key and moniker come
    from the node, and commission is encoded the way the chain's cosmos-sdk version expects.
 
+### Validators you don't run (Workflow B) and offline keys
+
+`genesis create` needs SSH to every genesis validator. For a launch with validators run
+by other organisations, they make their keys on their own machines, ideally offline.
+Only public files change hands, and each is checksummed and checked where it arrives.
+
+```bash
+# each outside validator, on their machine (or --profile <host>):
+cometcli host prepare --offline_ready            # while still online: image loaded, evmd runs with no network
+cometcli genesis join mychain-1 --moniker acme --home ~/acme-node --ip 203.0.113.9   # → acme.join.json
+
+# you, the coordinator:
+cometcli genesis base mychain-1 acme.join.json beta.join.json --own val1,val2 --kit mychain-1-kit
+#   → the kit: base genesis + spec + kit.json + README + SHA256SUMS; send it to every outside validator
+
+# each outside validator:
+cometcli genesis gentx --kit mychain-1-kit --home ~/acme-node       # → acme.gentx.json, the only file sent back
+
+# you:
+cometcli genesis collect --kit mychain-1-kit acme.gentx.json beta.gentx.json
+#   → final genesis (strictly validated), packages/<moniker>/ with every peer filled in; your validators start
+
+# each outside validator:
+cometcli genesis install --package mychain-1-packages/acme --home ~/acme-node
+```
+
+- **Keys stay on the key machine.**
+  - `join` and `gentx` run evmd in a container with `--network none`.
+  - A new operator mnemonic goes to a 0600 file on that machine (`--mnemonic-to`, default `<home>.operator.mnemonic`) and is never shown.
+  - To recover an existing key instead: `--recover-from <mnemonic file there>`.
+- **Offline is checked.** `join` and `gentx` refuse to run on a machine with a default route or a connected interface (docker's own bridges don't count). `--allow-online` overrides this, and the join and gentx files then record that the keys were made online.
+- **The coordinator checks every gentx before using it.** Each must:
+  - be signed against the same kit
+  - be from a validator in the kit
+  - stake the agreed amount, from the account the kit funds
+  - use the consensus key from its join file and that node's ID
+  - carry a signature
+
+  Then `collect-gentxs` runs, and `validate-genesis` in strict mode. A changed kit or package fails its checksum before anything is used.
+- **Your own validators** (`--own`) get their keys made on their hosts, as with `genesis create`, and are started by `collect`.
+- **Carrying the image to an offline machine:** `host prepare --offline_ready --save_image /tmp/img.tar` on a connected machine, then `--image_tar` on the offline one.
+- **Removing a test network:** `cometcli network remove <chain-id> --profiles a,b`. For each profile it stops the container and deletes the node home, but only when that home's genesis is for that chain. It also deletes the chain's genesis builder files on those hosts and the profiles, and reports free disk.
+
 ## Remote nodes over SSH
 
 Run cometcli on your laptop and manage a node on another machine. Every host
