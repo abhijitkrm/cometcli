@@ -2,6 +2,7 @@
 package chain
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -16,6 +17,7 @@ import (
 	grpcclient "github.com/abhijitkrm/cometcli/internal/client/grpc"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
 	"github.com/abhijitkrm/cometcli/internal/tools/common"
+	"github.com/abhijitkrm/cometcli/internal/tools/govtool"
 )
 
 // Register adds all chain.* tools.
@@ -217,15 +219,35 @@ type paramsTool struct{}
 
 func (paramsTool) Name() string { return "chain.params" }
 func (paramsTool) Desc() string {
-	return "Key chain params: slashing window, unbonding, inflation"
+	return "Key chain params: slashing window, unbonding, inflation — or every param of one module (module=evm, feemarket, erc20, staking, gov, …; read from the chain's own definitions, decimals plain)"
 }
-func (paramsTool) Schema() map[string]any { return toolkit.ObjSchema(nil) }
-func (paramsTool) Tier() toolkit.Tier     { return toolkit.TierObserve }
+func (paramsTool) Schema() map[string]any {
+	return toolkit.ObjSchema(map[string]any{
+		"module": toolkit.Str("one module's full params (any module with a params query on this chain)"),
+	})
+}
+func (paramsTool) Tier() toolkit.Tier { return toolkit.TierObserve }
 
-func (paramsTool) Run(c *toolkit.Context, _ toolkit.Args) (*toolkit.Result, error) {
+func (paramsTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
 	g, err := c.GRPC()
 	if err != nil {
 		return nil, err
+	}
+	if module := a.String("module", ""); module != "" {
+		files, err := govtool.ChainFiles(c, g)
+		if err != nil {
+			return nil, err
+		}
+		api, err := govtool.FindModule(files, module)
+		if err != nil {
+			return nil, err
+		}
+		params, err := govtool.CurrentParams(c, g, api)
+		if err != nil {
+			return nil, err
+		}
+		js, _ := json.MarshalIndent(params, "", "  ")
+		return &toolkit.Result{Text: fmt.Sprintf("%s params (%s):\n%s", module, api.Package, js), Data: map[string]any{"params": params}}, nil
 	}
 	var b strings.Builder
 	data := map[string]any{}

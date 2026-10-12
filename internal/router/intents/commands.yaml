@@ -120,6 +120,46 @@
   steps:
     - {tool: node.triage}
 
+- id: params-precompiles
+  kind: command
+  title: propose enabling or disabling EVM precompiles
+  patterns:
+    - '^propose (enabling|adding|activating|turning on) (the )?(?P<items>[a-z0-9][a-z0-9, ]*?) (static )?precompiles?$'
+  steps:
+    - {tool: gov.propose, args: {kind: params, module: evm, set: "active_static_precompiles+={items}"}}
+
+- id: params-precompiles-off
+  kind: command
+  title: propose disabling EVM precompiles
+  patterns:
+    - '^propose (disabling|removing|deactivating|turning off) (the )?(?P<items>[a-z0-9][a-z0-9, ]*?) (static )?precompiles?$'
+  steps:
+    - {tool: gov.propose, args: {kind: params, module: evm, set: "active_static_precompiles-={items}"}}
+
+- id: params-change
+  kind: command
+  title: propose a params change
+  patterns:
+    - '^propose( a)? (?P<module>[a-z0-9]+) params?( change)?:? (?P<set>[a-z0-9_.]+ ?(\+=|-=|=) ?.+)$'
+  steps:
+    - {tool: gov.propose, args: {kind: params, module: "{module}", set: "{set}"}}
+
+- id: params-preview
+  kind: command
+  title: preview a params change (nothing sent)
+  patterns:
+    - '^(preview|draft|dry run)( a)? (?P<module>[a-z0-9]+) params?( change)?:? (?P<set>[a-z0-9_.]+ ?(\+=|-=|=) ?.+)$'
+  steps:
+    - {tool: gov.propose, args: {kind: params, module: "{module}", set: "{set}", dry_run: true}}
+
+- id: params-precompiles-preview
+  kind: command
+  title: preview enabling EVM precompiles (nothing sent)
+  patterns:
+    - '^(preview|draft|dry run) (enabling|adding) (the )?(?P<items>[a-z0-9][a-z0-9, ]*?) (static )?precompiles?$'
+  steps:
+    - {tool: gov.propose, args: {kind: params, module: evm, set: "active_static_precompiles+={items}", dry_run: true}}
+
 - id: provision
   kind: command
   title: set up a node from the network spec

@@ -233,3 +233,19 @@ func Dec18(f float64) string {
 	}
 	return whole + "." + frac + strings.Repeat("0", 18-len(frac))
 }
+
+// PrecompileAddr is a static precompile's address by name ("staking").
+func PrecompileAddr(name string) (string, bool) {
+	a, ok := precompileAddrs[strings.ToLower(name)]
+	return a, ok
+}
+
+// PrecompileName is a static precompile's name by address ("" if unknown).
+func PrecompileName(addr string) string {
+	for n, a := range precompileAddrs {
+		if strings.EqualFold(a, addr) {
+			return n
+		}
+	}
+	return ""
+}
