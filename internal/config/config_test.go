@@ -95,3 +95,27 @@ func TestAgentForMergesAndFallsBack(t *testing.T) {
 		t.Fatalf("fallback = %+v", g)
 	}
 }
+
+func TestConcurrentProfileChangesAreKept(t *testing.T) {
+	t.Setenv("COMETCLI_HOME", t.TempDir())
+	base := &Config{Profiles: map[string]*Profile{"val3": {Name: "val3"}}}
+	if err := base.Save(); err != nil {
+		t.Fatal(err)
+	}
+	// a long-running command loaded the file before another added a profile
+	stale, _ := Load()
+	other, _ := Load()
+	if err := other.UpsertProfile(&Profile{Name: "p2-val3", ChainID: "primium-2"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := stale.UpdateProfile("val3", func(p *Profile) { p.Metadata = map[string]string{"dockerfile": "/x/Dockerfile.primium"} }); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := Load()
+	if got.Profiles["p2-val3"] == nil || got.Profiles["val3"].Metadata["dockerfile"] != "/x/Dockerfile.primium" {
+		t.Fatalf("lost an update: %+v", got.Profiles)
+	}
+	if stale.Profiles["val3"].Metadata["dockerfile"] == "" {
+		t.Error("the caller's copy should change too")
+	}
+}

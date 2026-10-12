@@ -215,6 +215,10 @@ func (provisionTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, e
 	compose := netspec.Compose{Image: image, Container: unit, HostHome: home, Command: spec.Command(role), User: user,
 		PublicRPC: a.Bool("public_rpc", role != netspec.Validator), Network: a.String("docker_network", ""),
 		Services: spec.Services, PortOffset: int(a.Int("port_offset", 0))}
+	// the ports must be free: another node on this host would take them
+	if err := portsFree(c, h, compose.HostPorts(), unit); err != nil {
+		return nil, err
+	}
 	cf := path.Join(home, "docker-compose.yml")
 	if err := h.WriteFile(c, cf, []byte(compose.YAML()), 0o644); err != nil {
 		return nil, err
@@ -409,4 +413,21 @@ func PeersOf(c *toolkit.Context, chainID, except string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// portsFree checks no other container publishes these host ports.
+func portsFree(c *toolkit.Context, h host.Host, ports []int, unit string) error {
+	var held []string
+	for _, port := range ports {
+		out, _, _ := run(c, h, fmt.Sprintf("docker ps --filter publish=%d --format '{{.Names}}'", port), time.Minute)
+		for _, name := range strings.Fields(out) {
+			if name != unit {
+				held = append(held, fmt.Sprintf("%d (%s)", port, name))
+			}
+		}
+	}
+	if len(held) > 0 {
+		return fmt.Errorf("host ports taken on %s: %s — stop that node first, or use a port offset", c.Profile.Name, strings.Join(held, ", "))
+	}
+	return nil
 }

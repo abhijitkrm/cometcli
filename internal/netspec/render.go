@@ -225,6 +225,24 @@ type Compose struct {
 	PortOffset int
 }
 
+// HostPorts are the ports the node takes on its host.
+func (c Compose) HostPorts() []int {
+	out := []int{26656, 26657, 26660}
+	sv := c.Services
+	for _, x := range []struct {
+		on   bool
+		port int
+	}{{sv.API, def(sv.APIPort, 1317)}, {sv.GRPC, def(sv.GRPCPort, 9090)}, {sv.JSONRPC, def(sv.RPCPort, 8545)}, {sv.JSONRPC && sv.WS, def(sv.WSPort, 8546)}} {
+		if x.on {
+			out = append(out, x.port)
+		}
+	}
+	for i := range out {
+		out[i] += c.PortOffset
+	}
+	return out
+}
+
 // YAML renders the compose file.
 func (c Compose) YAML() string {
 	bind := "127.0.0.1:"

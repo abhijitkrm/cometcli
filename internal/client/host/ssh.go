@@ -579,7 +579,9 @@ func (s *SSH) runStdin(ctx context.Context, cmd string, stdin *bytes.Reader) (st
 		return "", -1, err
 	}
 	defer sess.Close()
-	var out, serr bytes.Buffer
+	// locked: on a timeout the output is read while the session may
+	// still be writing it
+	var out, serr lockedBuffer
 	sess.Stdout = &out
 	sess.Stderr = &serr
 	if stdin != nil {
@@ -731,4 +733,23 @@ func endpointHost(ep string) string {
 		return h
 	}
 	return ep
+}
+
+// lockedBuffer is a bytes.Buffer safe to read while another goroutine
+// writes to it.
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *lockedBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuffer) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
 }

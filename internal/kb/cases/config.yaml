@@ -10,6 +10,14 @@
     - "node.config show config.toml / app.toml; node.logs for the exact error"
   fix:
     - "[change] fix the TOML (edit) — compare with a freshly generated config of the same version"
+  playbook:
+    - {do: node.repair-config, args: {file: config.toml}, when: "config.parse_error == true", note: "repair config.toml: disable the lines that don't parse, or restore cometcli's last copy (asks you, with the diff)"}
+    - {do: node.repair-config, args: {file: app.toml}, when: "app.parse_error == true", note: "repair app.toml the same way"}
+    - {do: node.service, args: {action: restart}, note: "restart with the repaired config"}
+    - {do: wait.until, args: {condition: synced, timeout: 1800}, note: "wait until it has caught up"}
+    - {do: wait.until, args: {condition: unjailable, timeout: 1800}, when: "val.jailed == true", note: "wait out the jail period"}
+    - {do: val.unjail, when: "val.jailed == true", note: "unjail (signed by the operator key — asks you)"}
+    - {do: wait.until, args: {condition: in-consensus, timeout: 600}, when: "val.jailed == true", note: "check it signs again"}
   test:
     signals: {config.parse_error: true, logs.config_parse: 2, proc.running: false}
 

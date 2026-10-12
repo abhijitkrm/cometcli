@@ -122,7 +122,7 @@ func TestUnknownIncidentGoesToTheModelWithTriage(t *testing.T) {
 	}
 	// a case without a playbook goes the same way
 	prov2 := &mockProvider{}
-	a2, _ := incidentAgent(t, prov2, []string{"cfg-parse-error"}, kb.Signals{}, nil)
+	a2, _ := incidentAgent(t, prov2, []string{"node-exit-config-error"}, kb.Signals{}, nil)
 	runIncidentCmd(t, a2, "")
 	if prov2.calls == 0 {
 		t.Fatal("a case without a playbook needs the model")
@@ -187,7 +187,7 @@ func TestLearnedPlaybook(t *testing.T) {
 		{Calls: []Call{{ID: "c3", Name: "node__service", Args: json.RawMessage(`{"action":"restart"}`)}}},
 		{Text: "fixed: the p2p laddr was malformed", Done: true},
 	}}
-	a, ran := incidentAgent(t, prov, []string{"cfg-parse-error"}, kb.Signals{"config.parse_error": true}, nil)
+	a, ran := incidentAgent(t, prov, []string{"node-exit-config-error"}, kb.Signals{"proc.running": false, "logs.config_parse": 1.0}, nil)
 	a.Reg.Register(stubTool{name: "node.set-config", tier: toolkit.TierLocalChange, run: func(_ *toolkit.Context, args toolkit.Args) (*toolkit.Result, error) {
 		*ran = append(*ran, "node.set-config "+args.String("key", ""))
 		return &toolkit.Result{Text: "set"}, nil

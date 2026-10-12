@@ -57,6 +57,24 @@ func CreateNetwork(ctxFor func(*config.Profile) *toolkit.Context, spec *netspec.
 		_, _, _ = h.Run(c, "docker network inspect "+o.DockerNet+" >/dev/null 2>&1 || docker network create "+o.DockerNet+" >/dev/null")
 	}
 
+	// 0. every node's ports are free, before anything is created
+	for i, p := range profiles {
+		c := ctxFor(p)
+		ctxs = append(ctxs, c)
+		h, err := c.Host()
+		if err != nil {
+			return nil, err
+		}
+		unit := p.Service.Unit
+		if unit == "" {
+			unit = "primium-validator"
+		}
+		ports := netspec.Compose{Services: spec.Services, PortOffset: o.PortBase + i*o.PortStep}.HostPorts()
+		if err := portsFree(c, h, ports, unit); err != nil {
+			return nil, err
+		}
+	}
+
 	// 1. each validator, on its own host
 	var nodes []*GenesisNode
 	for _, p := range profiles {
