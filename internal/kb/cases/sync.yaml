@@ -85,6 +85,27 @@
   test:
     signals: {node.catching_up: true, node.block_age_s: 7200}
 
+- id: chain-halted-validators-offline
+  title: Chain halted — validators holding over 1/3 of the voting power aren't voting
+  explains: [node-stalled, node-low-peers, node-p2p-port-exposure, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
+  severity: critical
+  symptoms: no new blocks on any node; the consensus state shows under 2/3 of the power voting
+  match:
+    all: ["node.stalled == true", "consensus.voted_pct < 66.67", "node.peers > 0", "consensus.absent_n > 0"]
+  confirm:
+    - "node.consensus — prevotes/precommits per round; consensus.absent names who hasn't voted"
+    - "fleet.status — are the absent validators' nodes yours, and are they down?"
+  causes:
+    - the absent validators' nodes are stopped, crashed or cut off (a third of the power or more)
+    - "an upgrade height: check upgrade.blocks_to_halt — then every node waits for the new binary, not for votes"
+  fix:
+    - "[read] the absent validators are in consensus.absent, with their share of the power"
+    - "[change] start or reconnect their nodes (one of yours: \"start <profile>\"); others: reach their operators — blocks resume once over 2/3 vote"
+  verify:
+    - "node.block_age_s < 30"
+  test:
+    signals: {node.stalled: true, node.block_age_s: 120, node.catching_up: false, node.peers: 2, consensus.voted_pct: 54.5, consensus.absent_n: 1, consensus.absent: "val1 (45.5%)"}
+
 - id: node-stalled
   title: Node stalled — not catching up but no new blocks
   explains: [val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]

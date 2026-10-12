@@ -332,6 +332,13 @@ func (editTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error)
 	if g, err := c.GRPC(); err == nil {
 		if res, err := g.Staking.Validator(c, &stakingv1beta1.QueryValidatorRequest{ValidatorAddr: valoper}); err == nil && res.Validator != nil {
 			msg.Description = res.Validator.Description
+			// the chain allows one commission change per 24h (creation counts)
+			if cm := res.Validator.Commission; a.String("commission-rate", "") != "" && cm != nil && cm.UpdateTime != nil {
+				if next := cm.UpdateTime.AsTime().Add(24 * time.Hour); time.Now().Before(next) {
+					return nil, fmt.Errorf("commission was last set %s; the chain allows one change per 24h — next possible after %s (in %s)",
+						cm.UpdateTime.AsTime().Local().Format("2006-01-02 15:04 MST"), next.Local().Format("2006-01-02 15:04 MST"), time.Until(next).Round(time.Minute))
+				}
+			}
 		}
 	}
 	if m := a.String("moniker", ""); m != "" {

@@ -1,25 +1,21 @@
 package common
 
 import (
-	"context"
 	"testing"
-
-	"github.com/abhijitkrm/cometcli/internal/config"
-	"github.com/abhijitkrm/cometcli/internal/toolkit"
 )
 
-// cosmos-sdk v0.54 decodes cosmos.Dec tx fields as plain decimals; older
-// versions as the legacy scaled integer. 5% must be sent in the right form.
-func TestTxDecFollowsTheSDK(t *testing.T) {
-	for sdk, want := range map[string]string{"v0.53.4": "50000000000000000", "v0.54.3": "0.05", "v0.55.0": "0.05"} {
-		c := &toolkit.Context{Context: context.Background(), Profile: &config.Profile{Metadata: map[string]string{"sdk_version": sdk}}}
-		got, err := TxDec(c, "0.05")
-		if err != nil || got != want {
-			t.Errorf("sdk %s: TxDec(0.05) = %q %v, want %q", sdk, got, err, want)
+// cosmos.Dec tx fields are gogoproto LegacyDec on every SDK version, v0.54
+// included: the wire form is the scaled integer, and the input is always a
+// fraction (1 is 100%, not an already-scaled 10^-18).
+func TestTxDecIsAlwaysScaled(t *testing.T) {
+	for in, want := range map[string]string{"0.05": "50000000000000000", "0.06": "60000000000000000", "1": "1000000000000000000", "0": "0"} {
+		if got, err := TxDec(nil, in); err != nil || got != want {
+			t.Errorf("TxDec(%q) = %q %v, want %q", in, got, err, want)
 		}
 	}
-	c := &toolkit.Context{Context: context.Background(), Profile: &config.Profile{Metadata: map[string]string{"sdk_version": "v0.54.3"}}}
-	if _, err := TxDec(c, "five"); err == nil {
-		t.Error("a non-decimal must be refused")
+	for _, bad := range []string{"five", "1/20", "0.0000000000000000001"} {
+		if _, err := TxDec(nil, bad); err == nil {
+			t.Errorf("TxDec(%q) must be refused", bad)
+		}
 	}
 }

@@ -134,7 +134,15 @@ func FleetFindings(nodes []NodeReport) []string {
 			}
 		}
 		if reachable >= 2 && stalled == reachable {
-			out = append(out, fmt.Sprintf("CHAIN HALT on %s: all %d reachable nodes are stalled near height %d — a chain-wide problem (upgrade height? consensus failure?), not one node", orNone(ch), reachable, int64(top)))
+			why := "a chain-wide problem (upgrade height? consensus failure?), not one node"
+			for _, n := range group {
+				if a, _ := n.Report.Signals["consensus.absent"].(string); a != "" {
+					pct, _ := f(n, "consensus.voted_pct")
+					why = fmt.Sprintf("only %.1f%% of the voting power is voting (2/3 needed) — not voting: %s", pct, a)
+					break
+				}
+			}
+			out = append(out, fmt.Sprintf("CHAIN HALT on %s: all %d reachable nodes are stalled near height %d — %s", orNone(ch), reachable, int64(top), why))
 		}
 		for _, n := range group {
 			if n.Report.Signals["node.reachable"] != true {

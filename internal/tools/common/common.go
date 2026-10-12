@@ -7,6 +7,7 @@ import (
 	query "cosmossdk.io/api/cosmos/base/query/v1beta1"
 	cmtservice "cosmossdk.io/api/cosmos/base/tendermint/v1beta1"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -116,6 +117,40 @@ func ValoperFromNode(c *toolkit.Context) (string, error) {
 		key = res.Pagination.NextKey
 	}
 	return "", fmt.Errorf("no validator on chain uses this node's consensus key — it isn't a validator (yet), or runs a different key than the one registered")
+}
+
+// MonikersByConsAddr maps each bonded validator's consensus address
+// (upper-case hex, as CometBFT reports it) to its moniker.
+func MonikersByConsAddr(c *toolkit.Context) (map[string]string, error) {
+	g, err := c.GRPC()
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	var key []byte
+	for {
+		res, err := g.Staking.Validators(c, &stakingv1beta1.QueryValidatorsRequest{Status: "BOND_STATUS_BONDED", Pagination: &query.PageRequest{Key: key, Limit: 200}})
+		if err != nil {
+			return nil, err
+		}
+		for _, v := range res.Validators {
+			if v.ConsensusPubkey == nil {
+				continue
+			}
+			if pub := protowireFieldBytes(v.ConsensusPubkey.Value, 1); pub != nil {
+				sum := sha256.Sum256(pub)
+				name := v.OperatorAddress
+				if v.Description != nil && v.Description.Moniker != "" {
+					name = v.Description.Moniker
+				}
+				out[strings.ToUpper(hex.EncodeToString(sum[:20]))] = name
+			}
+		}
+		if res.Pagination == nil || len(res.Pagination.NextKey) == 0 {
+			return out, nil
+		}
+		key = res.Pagination.NextKey
+	}
 }
 
 // Account resolves the bech32 address of the key that will sign — the
@@ -473,21 +508,19 @@ func SDKVersion(c *toolkit.Context) string {
 	return ""
 }
 
-var sdkMinorRe = regexp.MustCompile(`^v0\.(\d+)\.`)
-
-// TxDec encodes a decimal (e.g. "0.05") for a transaction field typed
-// cosmos.Dec: cosmos-sdk v0.54+ decodes txs through the protobuf v2 API,
-// where it's the plain decimal; earlier versions take the legacy scaled
-// integer (0.05 → 50000000000000000). Sending the wrong form makes 5%
-// read as 5×10^16.
-func TxDec(c *toolkit.Context, s string) (string, error) {
-	if m := sdkMinorRe.FindStringSubmatch(SDKVersion(c)); m != nil {
-		if minor, _ := strconv.Atoi(m[1]); minor >= 54 {
-			if _, ok := new(big.Rat).SetString(s); !ok {
-				return "", fmt.Errorf("%q isn't a decimal", s)
-			}
-			return s, nil
-		}
+// TxDec encodes a fraction (e.g. "0.05", or "1" for 100%) for a transaction
+// field typed cosmos.Dec. Such fields are gogoproto LegacyDec on every SDK
+// version (v0.54 too, checked live: a plain "0.06" fails with "cannot
+// unmarshal into a *big.Int"), so the wire form is always the scaled
+// integer: 0.05 → 50000000000000000.
+func TxDec(_ *toolkit.Context, s string) (string, error) {
+	r, ok := new(big.Rat).SetString(s)
+	if !ok || strings.ContainsAny(s, "/eE") {
+		return "", fmt.Errorf("%q isn't a decimal", s)
 	}
-	return DecScaled(s)
+	scaled := new(big.Rat).Mul(r, big.NewRat(1000000000000000000, 1))
+	if !scaled.IsInt() {
+		return "", fmt.Errorf("%q has more than 18 decimal places", s)
+	}
+	return scaled.Num().String(), nil
 }
