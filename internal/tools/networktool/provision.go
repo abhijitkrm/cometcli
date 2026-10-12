@@ -207,6 +207,8 @@ func (provisionTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, e
 		}
 	}
 
+	lockHome(c, h, home) // new, or one cometcli made before it did this
+
 	// configs, rendered for the role from the spec
 	version := spec.Image.Tag
 	if m := regexp.MustCompile(`v\d+\.\d+\.\d+`).FindString(image); m != "" {
@@ -468,4 +470,10 @@ func currentImage(c *toolkit.Context, h host.Host, unit, home string) string {
 	}
 	out, _, _ := run(c, h, "sed -n 's/^ *image: *//p' "+common.ShellQ(path.Join(home, "docker-compose.yml"))+" 2>/dev/null | head -1", time.Minute)
 	return strings.Trim(strings.TrimSpace(out), `"'`)
+}
+
+// lockHome makes a node's config and data dirs owner-only, as sec perms
+// expects: they hold the consensus key and the signing state.
+func lockHome(c *toolkit.Context, h host.Host, home string) {
+	_, _, _ = run(c, h, "chmod 700 "+common.ShellQ(path.Join(home, "config"))+" "+common.ShellQ(path.Join(home, "data"))+" 2>/dev/null", time.Minute)
 }

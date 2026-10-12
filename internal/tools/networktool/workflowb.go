@@ -146,6 +146,7 @@ func PrepareJoin(c *toolkit.Context, spec *netspec.Spec, o JoinOpts) (*Join, str
 	if out, code, err := run(c, h, fmt.Sprintf("%s init %s --chain-id %s --home %s >/dev/null 2>&1 && echo ok", ev, common.ShellQ(o.Moniker), common.ShellQ(spec.Chain.ID), containerHome), 3*time.Minute); err != nil || code != 0 || !strings.Contains(out, "ok") {
 		return nil, "", fmt.Errorf("init failed: %v %s", err, out)
 	}
+	lockHome(c, h, abs)
 	j := &Join{Version: FormatVersion, ChainID: spec.Chain.ID, Moniker: o.Moniker, IP: o.IP, P2PPort: o.P2PPort, Offline: off}
 	if j.P2PPort == 0 {
 		j.P2PPort = 26656

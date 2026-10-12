@@ -5,9 +5,13 @@ package sectool
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
+	"github.com/BurntSushi/toml"
+
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
+	"github.com/abhijitkrm/cometcli/internal/tools/common"
 )
 
 // Register adds all sec.* tools.
@@ -261,13 +265,55 @@ func (doubleSignTool) Run(c *toolkit.Context, _ toolkit.Args) (*toolkit.Result, 
 	var b strings.Builder
 	fmt.Fprintf(&b, "last signed: height=%s round=%d step=%d\n", st.Height, st.Round, st.Step)
 	fmt.Fprintf(&b, "signature present: %v\n", st.Signature != "")
-	// Check for a second signer risk: is the service running while we might migrate?
-	if c.Profile.Service.Unit != "" {
-		out, code, _ := h.Run(c, fmt.Sprintf("systemctl is-active %s 2>/dev/null || echo unknown", c.Profile.Service.Unit))
-		c.LogShell("is-active "+c.Profile.Service.Unit, code)
-		fmt.Fprintf(&b, "service %s: %s\n", c.Profile.Service.Unit, strings.TrimSpace(out))
+	data := map[string]any{"height": st.Height, "round": st.Round, "step": st.Step}
+	// is this signer running now? (a second copy of the key must not be)
+	if unit := c.Profile.Service.Unit; unit != "" {
+		cmd := "systemctl is-active " + common.ShellQ(unit) + " 2>/dev/null || echo unknown"
+		if c.Profile.Service.Type == "docker" {
+			cmd = "docker inspect -f '{{.State.Status}}' " + common.ShellQ(unit) + " 2>/dev/null || echo 'no container'"
+		}
+		out, code, _ := h.Run(c, cmd)
+		c.LogShell("service state "+unit, code)
+		fmt.Fprintf(&b, "service %s (%s): %s\n", unit, orDefault(c.Profile.Service.Type, "systemd"), strings.TrimSpace(out))
 	}
-	return &toolkit.Result{Text: b.String(), Data: map[string]any{
-		"height": st.Height, "round": st.Round, "step": st.Step,
-	}}, nil
+	// the signing state must not be ahead of the chain: a key restored with
+	// an older state (or a copy started elsewhere) signs twice
+	if cc, err := c.Comet(); err == nil {
+		if ns, err := cc.Status(c); err == nil {
+			h0, _ := strconv.ParseInt(st.Height, 10, 64)
+			top := ns.SyncInfo.LatestBlockHeight
+			switch {
+			case h0 > top+1:
+				fmt.Fprintf(&b, "✗ signing state is %d blocks ahead of the node (%d) — don't start another signer; let the node catch up\n", h0-top, top)
+			default:
+				fmt.Fprintf(&b, "✓ signing state matches the node (height %d)\n", top)
+			}
+			data["node_height"] = top
+		}
+	}
+	// CometBFT's own guard: refuse to sign if the key signed in the last N blocks
+	if raw, err := h.ReadFile(c, c.Profile.Home+"/config/config.toml"); err == nil {
+		var cfg struct {
+			Consensus struct {
+				DoubleSignCheckHeight int64 `toml:"double_sign_check_height"`
+			} `toml:"consensus"`
+		}
+		if _, err := toml.Decode(string(raw), &cfg); err == nil {
+			n := cfg.Consensus.DoubleSignCheckHeight
+			data["double_sign_check_height"] = n
+			if n == 0 {
+				b.WriteString("! double_sign_check_height = 0 — the node starts signing without checking that its key signed nothing recently (10 or so is a safety net when moving a validator)\n")
+			} else {
+				fmt.Fprintf(&b, "✓ double_sign_check_height = %d\n", n)
+			}
+		}
+	}
+	return &toolkit.Result{Text: b.String(), Data: data}, nil
+}
+
+func orDefault(s, d string) string {
+	if s == "" {
+		return d
+	}
+	return s
 }

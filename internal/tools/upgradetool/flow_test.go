@@ -118,3 +118,29 @@ func TestRunningNodeUsesTheSpecNaming(t *testing.T) {
 		t.Fatalf("image %q", got)
 	}
 }
+
+// A tag's recorded handler is what the chain ran: a build with another
+// handler must not take the tag's image name, and is never recorded.
+func TestOtherHandlerNeverReplacesTheRecord(t *testing.T) {
+	t.Setenv("COMETCLI_HOME", t.TempDir())
+	spec := &netspec.Spec{Chain: netspec.Chain{ID: "rec-1"}, Image: netspec.Image{Name: "x-evm", Tag: "v0.7.2", Naming: "x-{tag}"},
+		Upgrades: []netspec.UpgradeBuild{{Tag: "v0.7.3", Handler: "v0.7.2-to-v0.7.3"}}}
+	if _, err := spec.Save(); err != nil {
+		t.Fatal(err)
+	}
+	c := &toolkit.Context{Profile: &config.Profile{ChainID: "rec-1"}}
+	for _, asked := range []string{"", "x-{tag}", "x-v0.7.3"} {
+		if _, err := handlerRecord(c, asked, "x-v0.7.3", "v0.7.3", "test-plan"); err == nil {
+			t.Errorf("image %q: a different handler under the tag's own image name must be refused", asked)
+		}
+	}
+	if rec, err := handlerRecord(c, "x-v0.7.3-test", "x-v0.7.3", "v0.7.3", "test-plan"); err != nil || rec {
+		t.Errorf("own image name: allowed but not recorded, got %v %v", rec, err)
+	}
+	if rec, err := handlerRecord(c, "", "x-v0.7.3", "v0.7.3", "v0.7.2-to-v0.7.3"); err != nil || !rec {
+		t.Errorf("same handler: %v %v", rec, err)
+	}
+	if rec, err := handlerRecord(c, "", "x-v0.7.3", "v0.8.0", "v0.7.3-to-v0.8.0"); err != nil || !rec {
+		t.Errorf("new tag: %v %v", rec, err)
+	}
+}

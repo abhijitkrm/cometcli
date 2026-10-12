@@ -220,3 +220,35 @@ func TestStateDestroyingCommandsFromTheScratchTest(t *testing.T) {
 		}
 	}
 }
+
+// A consensus key moved without its file name: a whole config dir, or a
+// backup unpacked into a node's home. Both are refused in every mode;
+// single files into config/ and creating backups are not.
+func TestKeyMovedWithoutItsName(t *testing.T) {
+	for _, cmd := range []string{
+		"rsync -a val3:/home/ubuntu/.cometcli-nodes/v6-val3/config/ ~/.cometcli-nodes/v6-arch/config/",
+		"cp -r /backup/config ~/.evmd/",
+		"cp -a old/data ~/.evmd/",
+		"scp -r host:~/.evmd/config .",
+		"docker cp evmd-validator:/root/.evmd/config ./",
+		"cp -r /tmp/restore/* ~/.evmd/config/",
+		"tar xzf val3-backup.tgz -C ~/.cometcli-nodes/v6-arch",
+		"tar -xf b.tar --directory=/home/u/.evmd",
+		"unzip backup.zip -d ~/.evmd/config",
+	} {
+		if v := Classify(cmd, Opts{}); v.Forbidden == "" {
+			t.Errorf("not refused: %s", cmd)
+		}
+	}
+	for _, cmd := range []string{
+		"cp genesis.json ~/.evmd/config/",
+		"cp config/app.toml config/app.toml.bak",
+		"tar czf backup.tgz -C ~/.evmd config",
+		"tar xzf go1.23.linux-amd64.tar.gz -C /usr/local",
+		"cp -r ~/.config/foo /tmp/",
+	} {
+		if v := Classify(cmd, Opts{}); v.Forbidden != "" {
+			t.Errorf("refused: %s (%s)", cmd, v.Forbidden)
+		}
+	}
+}

@@ -297,6 +297,7 @@ func (buildTool) Timeout(toolkit.Args) time.Duration { return 50 * time.Minute }
 var tagRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 func (buildTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
+	asked := a.String("image", "") // before the spec's naming fills it in
 	r, err := inspectRunning(c)
 	fresh := false
 	if err != nil {
@@ -329,6 +330,10 @@ func (buildTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error
 				handler = spec.HandlerFor(tag)
 			}
 		}
+	}
+	record, err := handlerRecord(c, asked, r.Image, tag, handler)
+	if err != nil {
+		return nil, err
 	}
 	repo := a.String("repo", r.Repo)
 	if !tagRe.MatchString(tag) || (handler != "" && !tagRe.MatchString(handler)) || repo == "" {
@@ -471,16 +476,16 @@ fi
 				p.Metadata = map[string]string{}
 			}
 			p.Metadata["dockerfile"] = dockerfile
-			if handler != "" {
+			if record {
 				p.Metadata["handler."+tag] = handler
 			}
 		})
-		if handler != "" && c.Profile.ChainID != "" {
+		if record && c.Profile.ChainID != "" {
 			if spec, _, err := netspec.Load(c.Profile.ChainID); err == nil && spec.RecordHandler(tag, handler) {
 				_, _ = spec.Save()
 			}
 		}
-		if handler != "" {
+		if record {
 			if c.Profile.Metadata == nil {
 				c.Profile.Metadata = map[string]string{}
 			}
@@ -488,6 +493,32 @@ fi
 		}
 	}
 	return &toolkit.Result{Text: b.String(), Data: data}, nil
+}
+
+// handlerRecord says whether a build of tag with handler is recorded for
+// later rebuilds. The handler a tag was built with is what the chain ran:
+// a build with another one is a different binary, so it needs its own
+// image name and never replaces the record.
+func handlerRecord(c *toolkit.Context, asked, running, tag, handler string) (bool, error) {
+	if handler == "" {
+		return false, nil
+	}
+	recorded := c.Profile.Metadata["handler."+tag]
+	if recorded == "" && c.Profile.ChainID != "" {
+		if spec, _, err := netspec.Load(c.Profile.ChainID); err == nil {
+			recorded = spec.HandlerFor(tag)
+		}
+	}
+	if recorded == "" || recorded == handler {
+		return true, nil
+	}
+	named := toolkit.Args{}
+	specImage(c.Profile, named)
+	img := ImageFor(c, asked, running, tag)
+	if asked == "" || img == ImageFor(c, "", running, tag) || img == ImageFor(c, named.String("image", ""), running, tag) {
+		return false, fmt.Errorf("%s was built for this chain with handler %s — a rebuild of it must add the same one, or nodes replaying the upgrade diverge. To build %s with %s anyway, give it its own image name (image=…); it won't replace the record", tag, recorded, tag, handler)
+	}
+	return false, nil
 }
 
 func tail(s string, n int) string {

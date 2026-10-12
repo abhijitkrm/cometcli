@@ -94,6 +94,7 @@ func PrepareValidator(c *toolkit.Context, spec *netspec.Spec, home string, kr Ke
 	if out, code, err := run(c, h, fmt.Sprintf("%s init %s --chain-id %s --home %s >/dev/null 2>&1 && echo ok", ev, common.ShellQ(n.Moniker), common.ShellQ(spec.Chain.ID), containerHome), 3*time.Minute); err != nil || code != 0 || !strings.Contains(out, "ok") {
 		return nil, "", fmt.Errorf("init on %s failed: %v %s", c.Profile.Name, err, out)
 	}
+	lockHome(c, h, abs)
 	// the operator key, created in the node's keyring; --output json
 	// carries the mnemonic, which only the caller sees
 	res, err := host.ExecIn(c, h, fmt.Sprintf("%s keys add %s --keyring-backend %s --home %s --output json 2>/dev/null", ev, common.ShellQ(n.Moniker), kr.Backend, containerHome), kr.stdin(2), 1<<20)

@@ -44,6 +44,29 @@ var (
 	nodeDataRe = regexp.MustCompile(`(^|/)data/?(\*)?$|(^|/)data/(\*|[^/]*\.db|cs\.wal|snapshots)(/|$)|\.db/?$|(^|/)\*\.db$|(^|/)cs\.wal(/|$)|(^|/)upgrade-info\.json$|(^|/)wasm(/|$)`)
 )
 
+var (
+	// a node home's config or data dir, as a copy operand
+	nodeDirRe = regexp.MustCompile(`(^|/)(config|data)/?\*?$`)
+	// a node's home, or its config/data dirs
+	nodeHomeRe = regexp.MustCompile(`(^|/)\.cometcli-nodes(/|$)|(^|/)\.[a-z0-9]+d(/|$)|(^|/)(config|data)/?$`)
+)
+
+// tarExtracts: tar's mode is extract (x, --extract, --get).
+func tarExtracts(args []string) bool {
+	for i, x := range args {
+		switch {
+		case x == "--extract" || x == "--get":
+			return true
+		case strings.HasPrefix(x, "--"):
+		case strings.HasPrefix(x, "-") || i == 0:
+			if strings.Contains(x, "x") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (a *acc) raise(t toolkit.Tier, reason string) {
 	if t > a.v.Tier || a.v.Reason == "" && t == a.v.Tier && t >= toolkit.TierLocalChange {
 		a.v.Tier, a.v.Reason = t, reason
@@ -476,6 +499,39 @@ func (a *acc) simple(words []string) {
 	if copiers[name] {
 		if dst := lastNonFlag(args); strings.Contains(dst, "priv_validator_state.json") || (strings.HasSuffix(dst, "/data") || strings.HasSuffix(dst, "/data/")) && containsWord(args, "priv_validator_state") {
 			a.forbid("overwriting priv_validator_state.json risks double-signing")
+		}
+	}
+	// a whole node config or data dir moved between homes carries the
+	// consensus key or the signing state with it, under no file name
+	if copiers[name] || (name == "docker" && len(args) > 0 && args[0] == "cp") {
+		ops := nonFlags(args)
+		if name == "docker" {
+			ops = nonFlags(args[1:])
+		}
+		recursive := name == "rsync"
+		for _, x := range args {
+			if x == "--recursive" || x == "--archive" || strings.HasPrefix(x, "-") && !strings.HasPrefix(x, "--") && strings.ContainsAny(x, "rRa") {
+				recursive = true
+			}
+		}
+		for i, x := range ops {
+			// from a config/data dir, or recursively into one (a single
+			// file such as genesis.json into config/ is fine)
+			if nodeDirRe.MatchString(x) && (i < len(ops)-1 || recursive) {
+				a.forbid("copying a node's whole " + path.Base(strings.TrimRight(x, "/*")) + " dir carries its consensus key or signing state (double-sign risk) — copy the files you need by name")
+				break
+			}
+		}
+	}
+	// unpacking an archive into a node's home can restore a key with an
+	// older signing state
+	if (name == "tar" && tarExtracts(args)) || name == "unzip" {
+		for i, x := range args {
+			if (x == "-C" || x == "--directory" || x == "-d") && i+1 < len(args) && nodeHomeRe.MatchString(args[i+1]) ||
+				strings.HasPrefix(x, "--directory=") && nodeHomeRe.MatchString(strings.TrimPrefix(x, "--directory=")) {
+				a.forbid("unpacking an archive into a node's home can restore its consensus key with an older signing state (double-sign risk) — the operator restores backups")
+				break
+			}
 		}
 	}
 	if name == "dd" && containsWord(args, "of=") && containsWord(args, "priv_validator_state.json") {
