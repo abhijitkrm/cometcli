@@ -378,6 +378,11 @@ cometcli genesis install --package mychain-1-packages/acme --home ~/acme-node
 
   Then `collect-gentxs` runs, and `validate-genesis` in strict mode. A changed kit or package fails its checksum before anything is used.
 - **Your own validators** (`--own`) get their keys made on their hosts, as with `genesis create`, and are started by `collect`.
+- **No USB stick: QR transfer.**
+  - **On the offline machine:** `cometcli qr show acme.gentx.json` shows the file as a few QR codes, one per Enter. `--png <dir>` writes them as images instead, to show full screen.
+  - **On a connected machine:** scan them with a phone and paste each code's text into `cometcli qr read`, or pass photos of the codes: `cometcli qr read *.jpg`.
+  - Parts can be scanned in any order. The file is written only when every part is in and it matches its checksum.
+  - Files with key material are refused, so a mnemonic or `priv_validator_key.json` can't leave this way.
 - **Carrying the image to an offline machine:** `host prepare --offline_ready --save_image /tmp/img.tar` on a connected machine, then `--image_tar` on the offline one.
 - **Removing a test network:** `cometcli network remove <chain-id> --profiles a,b`. For each profile it stops the container and deletes the node home, but only when that home's genesis is for that chain. It also deletes the chain's genesis builder files on those hosts and the profiles, and reports free disk.
 
