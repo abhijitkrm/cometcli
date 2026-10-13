@@ -240,11 +240,11 @@ Every node of the chain is checked against it according to its role.
 
 ```bash
 cometcli network import run-genesis/network-config.env run-validator/network-config.env \
-    run-archive/network-config.env --image-naming 'primium-{tag}'    # from node-setup's env files
-cometcli network show primium-1
-cometcli network check --network primium-1          # spec sanity, chain drift, every node of the chain
-cometcli network check --network primium-1 --prod   # plus public-network hardening
-cometcli network check --network primium-1 --nodes val1,archive1
+    run-archive/network-config.env --image-naming 'mychain-{tag}'    # from KEY=value env files
+cometcli network show mychain-1
+cometcli network check --network mychain-1          # spec sanity, chain drift, every node of the chain
+cometcli network check --network mychain-1 --prod   # plus public-network hardening
+cometcli network check --network mychain-1 --nodes val1,archive1
 ```
 
 `network check` reports at three levels:
@@ -266,14 +266,14 @@ cometcli network check --network primium-1 --nodes val1,archive1
 
 ```bash
 cometcli network import run-genesis/network-config.env --chain-id mychain-1     # the new network's spec
-cometcli profile add v1 --ssh-host 203.0.113.1 --service docker --unit primium-validator --role validator
+cometcli profile add v1 --ssh-host 203.0.113.1 --service docker --unit mychain-1-validator --role validator
 #   … one profile per genesis validator
 cometcli --profile v1 host prepare                      # a fresh host: docker, compose, git, jq (asks first)
-cometcli --profile v1 upgrade build --tag v0.7.2 --image 'primium-{tag}'   # the image, on each host
+cometcli --profile v1 upgrade build --tag v0.7.2 --image 'mychain-{tag}'   # the image, on each host
 cometcli genesis create mychain-1 --validators v1,v2,v3,v4 --keyring file --accounts treasury.txt
 ```
 
-`genesis create` runs node-setup's distributed genesis workflow, with cometcli as the
+`genesis create` runs a distributed genesis workflow, with cometcli as the
 coordinator:
 
 1. **On each validator's own host:** `init` in the image, so the node and consensus keys
@@ -293,8 +293,8 @@ coordinator:
 
 `host prepare` installs only what's missing (Ubuntu/Debian or Amazon Linux/RHEL, passwordless
 sudo); without passwordless sudo it prints the commands to run instead. `upgrade build` on a
-host with no node yet, or no `Dockerfile.primium`, builds with cometcli's built-in Dockerfile
-(the one node-setup uses), and remembers the Dockerfile each host used. Before anything is
+host with no node yet, or no Dockerfile beside the node's compose project, builds with cometcli's built-in Dockerfile
+and remembers the Dockerfile each host used. Before anything is
 created, `genesis create` checks that every node's host ports are free and names the container
 holding them.
 
@@ -307,7 +307,7 @@ Back up each validator's `priv_validator_key.json` off-machine afterwards.
 
 ```bash
 cometcli network import --from-node val1                   # spec + genesis.json from a running node
-cometcli profile add arch1 --ssh-host 203.0.113.9 --service docker --unit primium-archive --role archive
+cometcli profile add arch1 --ssh-host 203.0.113.9 --service docker --unit mychain-1-archive --role archive
 cometcli --profile arch1 node provision --peers_from val1,val2         # init, genesis, configs, compose, start
 cometcli --profile arch1 node provision --reconfigure                  # re-render configs of an existing node
 ```
@@ -337,6 +337,67 @@ For a validator, once it's synced:
 2. Fund it.
 3. Run `cometcli --profile <p> val create --amount <stake>`. The consensus key and moniker come
    from the node, and commission is encoded the way the chain's cosmos-sdk version expects.
+
+### A validator joining a running network
+
+```bash
+cometcli --profile val3 node provision --role validator --network mychain-1 --peers_from val1,val2
+cometcli --profile val3 wait until --condition synced
+cometcli --profile val3 val operator-key            # key in the node's own keyring; mnemonic → 0600 file on that host
+cometcli --profile val1 tx send --to <val3 operator> --amount <stake+fees>
+cometcli --profile val3 val create --amount <stake> # its consensus key is read from the node
+```
+
+While a node is down, chain queries (jail status, upgrade plans, params) go to another
+node of the same chain from your profiles, through that node's own connection.
+
+### Validators you don't run (Workflow B) and offline keys
+
+`genesis create` needs SSH to every genesis validator. For a launch with validators run
+by other organisations, they make their keys on their own machines, ideally offline.
+Only public files change hands, and each is checksummed and checked where it arrives.
+
+```bash
+# each outside validator, on their machine (or --profile <host>):
+cometcli host prepare --offline_ready            # while still online: image loaded, evmd runs with no network
+cometcli genesis join mychain-1 --moniker acme --home ~/acme-node --ip 203.0.113.9   # → acme.join.json
+
+# you, the coordinator:
+cometcli genesis base mychain-1 acme.join.json beta.join.json --own val1,val2 --kit mychain-1-kit
+#   → the kit: base genesis + spec + kit.json + README + SHA256SUMS; send it to every outside validator
+
+# each outside validator:
+cometcli genesis gentx --kit mychain-1-kit --home ~/acme-node       # → acme.gentx.json, the only file sent back
+
+# you:
+cometcli genesis collect --kit mychain-1-kit acme.gentx.json beta.gentx.json
+#   → final genesis (strictly validated), packages/<moniker>/ with every peer filled in; your validators start
+
+# each outside validator:
+cometcli genesis install --package mychain-1-packages/acme --home ~/acme-node
+```
+
+- **Keys stay on the key machine.**
+  - `join` and `gentx` run evmd in a container with `--network none`.
+  - A new operator mnemonic goes to a 0600 file on that machine (`--mnemonic-to`, default `<home>.operator.mnemonic`) and is never shown.
+  - To recover an existing key instead: `--recover-from <mnemonic file there>`.
+- **Offline is checked.** `join` and `gentx` refuse to run on a machine with a default route or a connected interface (docker's own bridges don't count). `--allow-online` overrides this, and the join and gentx files then record that the keys were made online.
+- **The coordinator checks every gentx before using it.** Each must:
+  - be signed against the same kit
+  - be from a validator in the kit
+  - stake the agreed amount, from the account the kit funds
+  - use the consensus key from its join file and that node's ID
+  - carry a signature
+
+  Then `collect-gentxs` runs, and `validate-genesis` in strict mode. A changed kit or package fails its checksum before anything is used.
+- **Your own validators** (`--own`) get their keys made on their hosts, as with `genesis create`, and are started by `collect`.
+- **No USB stick: QR transfer.**
+  - **On the offline machine:** `cometcli qr show acme.gentx.json` shows the file as a few QR codes, one per Enter. `--png <dir>` writes them as images instead, to show full screen.
+  - **On a connected machine:** scan them with a phone and paste each code's text into `cometcli qr read`, or pass photos of the codes: `cometcli qr read *.jpg`.
+  - Parts can be scanned in any order. The file is written only when every part is in and it matches its checksum.
+  - Files with key material are refused, so a mnemonic or `priv_validator_key.json` can't leave this way.
+- **Carrying the image to an offline machine:** `host prepare --offline_ready --save_image /tmp/img.tar` on a connected machine, then `--image_tar` on the offline one.
+- **Removing a test network:** `cometcli network remove <chain-id> --profiles a,b`. For each profile it stops the container and deletes the node home, but only when that home's genesis is for that chain. It also deletes the chain's genesis builder files on those hosts and the profiles, and reports free disk.
 
 ## Remote nodes over SSH
 
@@ -431,6 +492,8 @@ cometcli gov propose --kind params --module feemarket --set 'min_gas_multiplier=
 cometcli chain params --module feemarket   # one module's current params
 cometcli gov propose --kind messages --title "…" --summary "…" \
     --messages '[{"@type":"/cosmos.distribution.v1beta1.MsgCommunityPoolSpend", …}]'
+cometcli gov propose --kind cancel-upgrade         # cancels the scheduled plan (refused if the vote can't pass before its height)
+cometcli upgrade ready                 # this node vs the scheduled plan: finds the image that registers it, or says to build one
 cometcli gov deposit --proposal 7      # tops up exactly what's missing to the minimum
 cometcli val vote --proposal 7 --option yes
 cometcli wait until --condition proposal-status --value 7:PASSED
@@ -568,7 +631,7 @@ approvals.
 Check how well cometcli handles real faults, on a throwaway network:
 
 ```bash
-cometcli drill testnet up --spec primium-1         # 4 local validators built like your network
+cometcli drill testnet up --spec mychain-1         # 4 local validators built like your network
 cometcli drill testnet up --image <evmd image>     # or a plain evmd network
 cometcli drill list                                # the scenarios
 cometcli drill run                                 # all of them (--scenario oom,partition to pick)
@@ -703,8 +766,8 @@ can't work out what to do.
 
 | What you type | Who handles it |
 |---|---|
-| **A direct command:** "restart val3", "stop the node", "unjail", "vote yes on 6", "send 100adex to cosmos1…", "delegate 1000adex to cosmosvaloper1…", "withdraw rewards", "show last 200 logs of val4", "add peer id@host:26656", "set app mempool.max-txs 0", "build v0.7.3", "switch to primium-v0.7.3", "check the network", "triage", "prepare val5", "provision arch1 as archive for primium-2"; for a group: "stop all primium-1 validators", "build v0.7.2 on all validators", "triage all nodes" | cometcli runs the tool with the words as its arguments (a group: on each node in turn, stopping at the first refusal). Changes and transactions still ask, and key use always does. A name that isn't one of your nodes ("stop worrying") goes to the model. |
-| **A known question:** jailed validators, validator count, peers, sync and lag, health (from triage), fleet status, one network's nodes ("is primium-2 healthy"), version, upgrade readiness, recent log errors, spec conformance, uptime, consensus, proposals, one proposal and its tally ("did proposal 7 pass"), votes, rewards, balance, upgrade plan, slashing params | Read-only tools and a fixed answer. A question may name the node ("is val2 healthy"); a node that doesn't answer is answered locally too. Repeats within 30s come from a cache. |
+| **A direct command:** "restart val3", "stop the node", "unjail", "vote yes on 6", "send 100adex to cosmos1…", "delegate 1000adex to cosmosvaloper1…", "withdraw rewards", "show last 200 logs of val4", "add peer id@host:26656", "set app mempool.max-txs 0", "build v0.7.3", "switch to mychain-v0.7.3", "check the network", "triage", "prepare val5", "provision arch1 as archive for mychain-2"; for a group: "stop all mychain-1 validators", "build v0.7.2 on all validators", "triage all nodes" | cometcli runs the tool with the words as its arguments (a group: on each node in turn, stopping at the first refusal). Changes and transactions still ask, and key use always does. A name that isn't one of your nodes ("stop worrying") goes to the model. |
+| **A known question:** jailed validators, validator count, peers, sync and lag, health (from triage), fleet status, one network's nodes ("is mychain-2 healthy"), version, upgrade readiness, recent log errors, spec conformance, uptime, consensus, proposals, one proposal and its tally ("did proposal 7 pass"), votes, rewards, balance, upgrade plan, slashing params | Read-only tools and a fixed answer. A question may name the node ("is val2 healthy"); a node that doesn't answer is answered locally too. Repeats within 30s come from a cache. |
 | **`/incident` where triage finds one clear root case with a playbook** (32 of 68 cases) | cometcli runs the playbook (see below). |
 | **Anything else:** why/how questions, ambiguous requests, judgement calls (config parse errors, app hash, double sign, corruption) | The model. For `/incident` it starts from cometcli's triage. |
 

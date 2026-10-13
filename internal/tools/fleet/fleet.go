@@ -84,7 +84,11 @@ func (statusTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, erro
 			signing = fmt.Sprintf("%d/%d missed", s.Missed, s.Window)
 		}
 		status := "ok"
+		pp := c.Cfg.Profiles[r.name]
 		switch {
+		case !s.Reachable && pp != nil && pp.Home == "" && pp.Endpoints.Comet == "":
+			// a profile made ahead of its node (node provision fills these)
+			status = "not set up yet"
 		case !s.Reachable:
 			status = "UNREACHABLE"
 		case s.Tombstoned:

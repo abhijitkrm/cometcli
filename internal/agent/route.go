@@ -311,7 +311,7 @@ func (a *Agent) knownChain(id string) bool {
 }
 
 // runCommandOnGroup runs a direct command on every node it names ("stop
-// all primium-1 validators", "build v0.7.2 on all validators"), one after
+// all mychain-1 validators", "build v0.7.2 on all validators"), one after
 // the other, each with its own approvals; a failure doesn't stop the rest.
 func (a *Agent) runCommandOnGroup(ctx context.Context, input string, m router.Match) (string, bool) {
 	in := m.Intent

@@ -84,6 +84,15 @@ func (t *target) inRoot(c *toolkit.Context) bool {
 
 var protectedRe = regexp.MustCompile(`priv_validator_key\.json$|node_key\.json$|(^|/)\.?mnemonics?(\.txt)?(/|$)|mnemonic|(^|/)keyring-(file|test|os)(/|$)|/\.ssh/id_|/\.cometcli/keys(/|$)|/\.gnupg/|(^|/)keystore(/|$)|(^|/)utc--[0-9]|(^|/)key_seed\.json$`)
 
+// forbiddenContent explains why text may never be written by the agent:
+// a node told to skip an upgrade the network applied forks from it.
+func forbiddenContent(s string) string {
+	if strings.Contains(s, "unsafe-skip-upgrades") {
+		return "--unsafe-skip-upgrades makes a node skip an upgrade the network applied — its state forks from the chain's; the operator decides that"
+	}
+	return ""
+}
+
 // forbidden explains why a path may never pass through the agent.
 func forbidden(p string, write bool) string {
 	if m := protectedRe.FindString(strings.ToLower(p)); m != "" {
@@ -236,6 +245,9 @@ func (Write) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
 		return nil, err
 	}
 	content, _ := a["content"].(string)
+	if f := forbiddenContent(content); f != "" {
+		return nil, fmt.Errorf("refused: %s", f)
+	}
 	detail := map[string]any{"path": t.path, "host": t.h.String()}
 	verb := "create"
 	if _, ok := t.exists(c); ok {
@@ -296,6 +308,9 @@ func (Edit) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error) {
 	}
 	oldS, _ := a["old_string"].(string)
 	newS, _ := a["new_string"].(string)
+	if f := forbiddenContent(newS); f != "" {
+		return nil, fmt.Errorf("refused: %s", f)
+	}
 	if oldS == "" {
 		return nil, fmt.Errorf("old_string is empty — use write to create a file")
 	}

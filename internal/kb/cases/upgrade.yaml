@@ -105,5 +105,8 @@
     - "[change] or avoid replay entirely: snap.statesync / a recent trusted snapshot"
   verify:
     - "node.height passes the upgrade height; wait.until synced"
+  playbook:
+    - {do: upgrade.switch, note: "switch to the image built for this plan — the one whose binary registers it (asks you)"}
+    - {do: wait.until, args: {condition: synced, timeout: 3600}, note: "replay on to the chain's height"}
   test:
     signals: {logs.upgrade_needed: 2, upgrade.pending: false, node.catching_up: true}

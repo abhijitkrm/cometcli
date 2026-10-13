@@ -16,9 +16,9 @@ func networkImportCmd() *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
 		Use:   "import <network-config.env> [more.env …]",
-		Short: "Create a network spec from node-setup network-config.env files",
-		Long: `Reads node-setup's network-config.env (the run-genesis one is the most
-complete; run-validator / run-archive ones fill in the rest) and writes
+		Short: "Create a network spec from network-config.env files (KEY=value)",
+		Long: `Reads network-config.env files of KEY=value lines (CHAIN_ID, DENOM,
+TIMEOUT_COMMIT, …; give the most complete first, later files fill in the rest) and writes
 ~/.cometcli/networks/<chain-id>.yaml — the spec network check compares the
 chain and every node against. Keys with no spec field are kept under extra.`,
 		Args: cobra.ArbitraryArgs,
@@ -93,7 +93,7 @@ chain and every node against. Keys with no spec field are kept under extra.`,
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&naming, "image-naming", "", "how images built from releases are named, e.g. primium-{tag}")
+	cmd.Flags().StringVar(&naming, "image-naming", "", "how images built from releases are named, e.g. mychain-{tag}")
 	cmd.Flags().StringVar(&repo, "repo", "", "official source repo (default cosmos/evm)")
 	cmd.Flags().BoolVar(&force, "force", false, "replace an existing spec")
 	cmd.Flags().StringVar(&chainID, "chain-id", "", "use this chain id (a new network with these settings)")

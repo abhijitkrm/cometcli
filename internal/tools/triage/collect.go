@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"path"
 	"regexp"
 	"sort"
 	"strconv"
@@ -214,6 +215,26 @@ func collectComet(c *toolkit.Context, r *Report, set func(string, any)) error {
 	if ni, err := cc.NetInfo(c); err == nil {
 		set("node.peers", float64(ni.NPeers))
 	}
+	// no new block for a while: who isn't voting? Under 2/3 of the power
+	// voting is a chain halt, whoever's node this is
+	if !st.SyncInfo.CatchingUp && time.Since(st.SyncInfo.LatestBlockTime) > 30*time.Second {
+		if cs, err := cc.DumpConsensusState(c); err == nil {
+			if v := ConsensusVotes(cs.RoundState); v != nil {
+				set("consensus.voted_pct", v.VotedPct)
+				names, _ := common.MonikersByConsAddr(c)
+				var absent []string
+				for _, a := range v.Absent {
+					n := names[a.Addr]
+					if n == "" {
+						n = a.Addr
+					}
+					absent = append(absent, fmt.Sprintf("%s (%.1f%%)", n, a.Pct))
+				}
+				set("consensus.absent", strings.Join(absent, ", "))
+				set("consensus.absent_n", float64(len(absent)))
+			}
+		}
+	}
 	// average block time over the last 100 blocks
 	if h := st.SyncInfo.LatestBlockHeight; h > 101 {
 		back := h - 100
@@ -224,6 +245,72 @@ func collectComet(c *toolkit.Context, r *Report, set func(string, any)) error {
 		}
 	}
 	return nil
+}
+
+// Absentee is a validator with no vote at the current height.
+type Absentee struct {
+	Addr string  // consensus address, upper-case hex
+	Pct  float64 // share of the voting power
+}
+
+// Votes is who has voted at the height a node is stuck on.
+type Votes struct {
+	VotedPct float64 // power that prevoted or precommitted in any round
+	Absent   []Absentee
+}
+
+var bitArrayRe = regexp.MustCompile(`BA\{\d+:([x_]+)\}`)
+
+// ConsensusVotes reads a dump_consensus_state round state: a validator has
+// voted if any round of the height has its prevote or precommit.
+func ConsensusVotes(raw []byte) *Votes {
+	var rs struct {
+		Validators struct {
+			Validators []struct {
+				Address     string `json:"address"`
+				VotingPower string `json:"voting_power"`
+			} `json:"validators"`
+		} `json:"validators"`
+		Votes []struct {
+			Prevotes   string `json:"prevotes_bit_array"`
+			Precommits string `json:"precommits_bit_array"`
+		} `json:"votes"`
+	}
+	if json.Unmarshal(raw, &rs) != nil || len(rs.Validators.Validators) == 0 || len(rs.Votes) == 0 {
+		return nil
+	}
+	vals := rs.Validators.Validators
+	voted := make([]bool, len(vals))
+	for _, r := range rs.Votes {
+		for _, ba := range []string{r.Prevotes, r.Precommits} {
+			if m := bitArrayRe.FindStringSubmatch(ba); m != nil {
+				for i, ch := range m[1] {
+					if ch == 'x' && i < len(voted) {
+						voted[i] = true
+					}
+				}
+			}
+		}
+	}
+	var total, in float64
+	power := make([]float64, len(vals))
+	for i, v := range vals {
+		power[i], _ = strconv.ParseFloat(v.VotingPower, 64)
+		total += power[i]
+		if voted[i] {
+			in += power[i]
+		}
+	}
+	if total == 0 {
+		return nil
+	}
+	out := &Votes{VotedPct: round2(in / total * 100)}
+	for i, v := range vals {
+		if !voted[i] {
+			out.Absent = append(out.Absent, Absentee{Addr: strings.ToUpper(v.Address), Pct: round2(power[i] / total * 100)})
+		}
+	}
+	return out
 }
 
 func round2(f float64) float64 { return float64(int64(f*100+0.5)) / 100 }
@@ -447,6 +534,7 @@ func collectProcess(c *toolkit.Context, r *Report, set func(string, any)) error 
 			case noContainerRe.MatchString(why):
 				set("proc.container_missing", true)
 				set("proc.running", false)
+				composeImage(c, h, set)
 				return nil
 			}
 			return fmt.Errorf("docker inspect %s failed: %v", svc.Unit, err)
@@ -1089,6 +1177,33 @@ var (
 	portTakenRe   = regexp.MustCompile(`(?i)(?:bind for [^:]*:(\d+) failed: port is already allocated|listen tcp4? [^:]*:(\d+): bind: address already in use)`)
 	noImageRe     = regexp.MustCompile(`(?i)no such image|pull access denied|manifest unknown|repository does not exist`)
 )
+
+var (
+	composeImageRe = regexp.MustCompile(`(?m)^\s*image:\s*["']?([^"'\s]+)`)
+	versionRe      = regexp.MustCompile(`v\d+\.\d+\.\d+`)
+)
+
+// composeImage reads, for a node whose container is gone, the image its
+// compose file runs and whether that image is still on the host.
+func composeImage(c *toolkit.Context, h host.Host, set func(string, any)) {
+	if c.Profile == nil || c.Profile.Home == "" {
+		return
+	}
+	raw, err := h.ReadFile(c, path.Join(c.Profile.Home, "docker-compose.yml"))
+	if err != nil {
+		return
+	}
+	m := composeImageRe.FindStringSubmatch(string(raw))
+	if m == nil {
+		return
+	}
+	set("proc.image", m[1])
+	_, present := runOK(c, h, "docker image inspect "+common.ShellQ(m[1])+" >/dev/null 2>&1 && echo ok")
+	set("proc.image_present", present)
+	if v := versionRe.FindString(m[1]); v != "" {
+		set("proc.image_version", v)
+	}
+}
 
 // dockerStartError reads why a stopped container didn't start: docker's
 // own error (ports, image) is in its state, not in the node's logs.

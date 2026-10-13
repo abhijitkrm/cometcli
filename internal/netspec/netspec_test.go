@@ -144,3 +144,39 @@ func TestCmdFlag(t *testing.T) {
 		t.Fatal("flag parsing")
 	}
 }
+
+func TestUpgradeHandlersAreRecordedPerTag(t *testing.T) {
+	s := &Spec{}
+	if !s.RecordHandler("v0.7.3", "v0.7.2-to-v0.7.3") || s.RecordHandler("v0.7.3", "v0.7.2-to-v0.7.3") {
+		t.Fatal("record once")
+	}
+	if s.HandlerFor("v0.7.3") != "v0.7.2-to-v0.7.3" || s.HandlerFor("v0.8.0") != "" {
+		t.Fatalf("lookup: %+v", s.Upgrades)
+	}
+}
+
+func TestContainerNameFromChain(t *testing.T) {
+	for _, c := range []struct {
+		id   string
+		role Role
+		want string
+	}{
+		{"testnet-1", Validator, "testnet-1-validator"},
+		{"evmos_9001-2", Archive, "evmos_9001-2-archive"},
+		{"weird/chain id", RPC, "weird-chain-id-rpc"},
+		{"", "", "evmd-validator"},
+	} {
+		if got := ContainerName(c.id, c.role); got != c.want {
+			t.Errorf("ContainerName(%q, %q) = %q, want %q", c.id, c.role, got, c.want)
+		}
+	}
+}
+
+func TestHostHomeFromAnyDeploymentPrefix(t *testing.T) {
+	if s := FromEnv(map[string]string{"CHAIN_ID": "x-1", "ACME_HOST_HOME": "/srv/acme"}); s.HostHome != "/srv/acme" {
+		t.Errorf("<NAME>_HOST_HOME not read: %q", s.HostHome)
+	}
+	if s := FromEnv(map[string]string{"CHAIN_ID": "x-1", "HOST_HOME": "/srv/x"}); s.HostHome != "/srv/x" || s.Extra["HOST_HOME"] != "" {
+		t.Errorf("HOST_HOME: %q extra %v", s.HostHome, s.Extra)
+	}
+}

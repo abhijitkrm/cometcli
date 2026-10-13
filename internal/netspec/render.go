@@ -22,6 +22,9 @@ type NodeParams struct {
 	ExternalAddress string // ip:port advertised to peers ("" = leave unset)
 	PersistentPeers []string
 	Prod            bool // public-network hardening
+	// InboundClosed: the node's config takes no inbound peers now (an
+	// archive or RPC node gets CometBFT's default back; other values stay)
+	InboundClosed bool
 }
 
 func q(s string) string { return strconv.Quote(s) }
@@ -59,6 +62,13 @@ func (s *Spec) Patches(role Role, version string, n NodeParams) []Patch {
 	if len(n.PersistentPeers) > 0 {
 		set("config.toml", "p2p", "persistent_peers", q(strings.Join(n.PersistentPeers, ",")))
 	}
+	if role != Validator {
+		// it serves other nodes: as network check expects
+		set("config.toml", "p2p", "pex", "true")
+		if n.InboundClosed {
+			set("config.toml", "p2p", "max_num_inbound_peers", "40")
+		}
+	}
 	if AppMempool(version) {
 		set("config.toml", "mempool", "type", q("app"))
 	}
@@ -77,7 +87,7 @@ func (s *Spec) Patches(role Role, version string, n NodeParams) []Patch {
 			}
 		}
 	}
-	open := !n.Prod && role != Validator // test networks keep archive/rpc open like node-setup does
+	open := !n.Prod && role != Validator // test networks keep archive/rpc open
 	if n.Prod || role == Validator {
 		set("config.toml", "rpc", "cors_allowed_origins", "[]")
 	} else if open {

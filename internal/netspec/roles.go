@@ -27,6 +27,22 @@ func RoleOf(profileRole string) Role {
 	return Validator
 }
 
+var containerUnsafe = regexp.MustCompile(`[^a-zA-Z0-9_.-]+`)
+
+// ContainerName is the default container for a node of a chain when its
+// profile names none: <chain id>-<role>, so two chains on one host never
+// share a name.
+func ContainerName(chainID string, role Role) string {
+	id := strings.Trim(containerUnsafe.ReplaceAllString(chainID, "-"), "-._")
+	if id == "" {
+		id = "evmd"
+	}
+	if role == "" {
+		role = Validator
+	}
+	return id + "-" + string(role)
+}
+
 // Expect is one setting a node of a role should have.
 type Expect struct {
 	File string   // config.toml | app.toml | cmd (the container command)
@@ -162,6 +178,7 @@ func (s *Spec) Expectations(role Role, version string, prod bool) []Expect {
 				Want: "without debug, personal", Why: "debug and personal namespaces don't belong on a validator"})
 		}
 	case Archive:
+		servesPeers(add, "an archive")
 		add(Expect{File: "app.toml", Key: []string{"pruning"}, Sev: Fail,
 			Check: eq("nothing"), Want: `"nothing"`, Why: "an archive keeps all historical state"})
 		add(Expect{File: "config.toml", Key: []string{"tx_index", "indexer"}, Sev: Fail, Check: eq("kv"), Want: `"kv"`,
@@ -170,6 +187,7 @@ func (s *Spec) Expectations(role Role, version string, prod bool) []Expect {
 			hardenRPC(add, "archive")
 		}
 	case RPC:
+		servesPeers(add, "an RPC node")
 		add(Expect{File: "config.toml", Key: []string{"tx_index", "indexer"}, Sev: Warn, Check: eq("kv"), Want: `"kv"`,
 			Why: "tx queries need the indexer"})
 		if prod {
@@ -177,6 +195,16 @@ func (s *Spec) Expectations(role Role, version string, prod bool) []Expect {
 		}
 	}
 	return e
+}
+
+// servesPeers: a node that exists to serve others takes inbound peers and
+// exchanges addresses (a validator behind sentries may close both).
+func servesPeers(add func(Expect), who string) {
+	add(Expect{File: "config.toml", Key: []string{"p2p", "pex"}, Sev: Warn, Check: eq(true), Want: "true",
+		Why: who + " shares peer addresses so the network finds its nodes"})
+	add(Expect{File: "config.toml", Key: []string{"p2p", "max_num_inbound_peers"}, Sev: Warn,
+		Check: func(g any) bool { n, ok := g.(int64); return g == nil || (ok && n > 0) }, Want: "> 0",
+		Why: who + " serves other nodes — with no inbound peers nobody can sync from it"})
 }
 
 // hardenRPC is the public-network CORS/unlock hardening every role needs.

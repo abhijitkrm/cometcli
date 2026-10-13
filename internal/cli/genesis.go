@@ -24,8 +24,8 @@ func genesisCmd(reg *toolkit.Registry) *cobra.Command {
 	create := &cobra.Command{
 		Use:   "create <chain-id>",
 		Short: "Create a new network from its spec on the validators' hosts and start it",
-		Long: `Runs node-setup's distributed genesis workflow with cometcli as the
-coordinator. For each validator profile (its host, local or over SSH):
+		Long: `Runs a distributed genesis workflow with cometcli as the coordinator.
+For each validator profile (its host, local or over SSH):
 init in the image — node and consensus keys stay there — and the operator
 key in the node's own keyring. Then a base genesis from the spec with every
 validator funded (and --accounts), each validator's gentx signed on its own
@@ -145,6 +145,7 @@ peer, and every node started. Mnemonics are shown only here, or written to
 	f.IntVar(&portStep, "port-step", 0, "host port offset added per further validator (several on one machine)")
 	f.BoolVar(&yes, "yes", false, "don't ask for confirmation")
 	cmd.AddCommand(create)
+	cmd.AddCommand(genesisBCmds()...)
 	return cmd
 }
 

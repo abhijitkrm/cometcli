@@ -71,6 +71,9 @@ func (a *Agent) runIncident(ctx context.Context, what string) (string, error) {
 		return handoff(triageNote)
 	}
 
+	// the evidence is what triage saw: refreshSignals updates sig in place
+	// while the playbook runs, and after a fix it matches nothing
+	_, evidence := c.Matches(sig)
 	a.emit(Event{Kind: EvText, Text: fmt.Sprintf("Known case **%s** — %s.\nRunning its playbook locally, no model call; changes and transactions still ask you.", c.ID, c.Title)})
 	var done []string
 	for i, st := range c.Playbook {
@@ -108,7 +111,7 @@ func (a *Agent) runIncident(ctx context.Context, what string) (string, error) {
 		done = append(done, fmt.Sprintf("%s: %s", label, stepOutcome(st.Do, r.Text)))
 	}
 
-	_, matched := c.Matches(sig)
+	matched := evidence
 	if c.PlaybookKind == "report" {
 		return a.reportIncident(ctx, what, c, matched, done), nil
 	}
@@ -271,9 +274,16 @@ func (a *Agent) runToolOn(ctx context.Context, t toolkit.Tool, args toolkit.Args
 // says nothing about the incident).
 func stepOutcome(tool, text string) string {
 	text = strings.TrimSpace(text)
-	switch tool {
-	case "node.logs", "bash", "read", "grep":
-		return fmt.Sprintf("%d lines of output", len(strings.Split(text, "\n")))
+	lines := strings.Split(text, "\n")
+	switch {
+	case tool == "node.logs" || tool == "read" || tool == "grep":
+		return fmt.Sprintf("%d lines of output", len(lines))
+	case tool == "bash" && len(lines) <= 4 && len(text) <= 300:
+		// a short answer is the finding itself (who holds a port, what a
+		// command printed): show it
+		return strings.Join(strings.Fields(strings.ReplaceAll(text, "\n", " · ")), " ")
+	case tool == "bash":
+		return fmt.Sprintf("%d lines of output", len(lines))
 	}
 	return firstLine(text)
 }

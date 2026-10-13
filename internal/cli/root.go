@@ -75,11 +75,14 @@ status, cometcli doctor, cometcli tx unjail) and a tool the agent calls.`,
 
 	for _, c := range toolGroupCommands(reg) {
 		if c.Use == "network" {
-			c.AddCommand(networkImportCmd(), networkShowCmd())
+			c.AddCommand(networkImportCmd(), networkShowCmd(), networkRemoveCmd())
+		}
+		if c.Use == "val" {
+			c.AddCommand(operatorKeyCmd())
 		}
 		root.AddCommand(c)
 	}
-	root.AddCommand(profileCmd(), auditCmd(), versionCmd(), initCmd(), sessionsCmd(), oneCmd(reg), configCmd(), trustCmd(), watchCmd(reg), drillCmd(reg), sshCmd(), genesisCmd(reg), routeCmd())
+	root.AddCommand(profileCmd(), auditCmd(), versionCmd(), initCmd(), sessionsCmd(), oneCmd(reg), configCmd(), trustCmd(), watchCmd(reg), drillCmd(reg), sshCmd(), genesisCmd(reg), routeCmd(), qrCmd())
 	root.AddCommand(extra...)
 	return root
 }

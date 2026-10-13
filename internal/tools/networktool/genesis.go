@@ -94,6 +94,7 @@ func PrepareValidator(c *toolkit.Context, spec *netspec.Spec, home string, kr Ke
 	if out, code, err := run(c, h, fmt.Sprintf("%s init %s --chain-id %s --home %s >/dev/null 2>&1 && echo ok", ev, common.ShellQ(n.Moniker), common.ShellQ(spec.Chain.ID), containerHome), 3*time.Minute); err != nil || code != 0 || !strings.Contains(out, "ok") {
 		return nil, "", fmt.Errorf("init on %s failed: %v %s", c.Profile.Name, err, out)
 	}
+	lockHome(c, h, abs)
 	// the operator key, created in the node's keyring; --output json
 	// carries the mnemonic, which only the caller sees
 	res, err := host.ExecIn(c, h, fmt.Sprintf("%s keys add %s --keyring-backend %s --home %s --output json 2>/dev/null", ev, common.ShellQ(n.Moniker), kr.Backend, containerHome), kr.stdin(2), 1<<20)
@@ -188,6 +189,18 @@ func BuildBase(c *toolkit.Context, spec *netspec.Spec, nodes []*GenesisNode, ext
 // Gentx signs a validator's genesis transaction on its own host, against
 // the base genesis; only the gentx comes back.
 func Gentx(n *GenesisNode, spec *netspec.Spec, base []byte, kr KeyringOpts) ([]byte, error) {
+	return gentxIn(n, evmdIn(n.User, n.Home, n.Image), spec, base, kr, "")
+}
+
+// GentxAt is Gentx with the address peers dial written into the memo.
+func GentxAt(n *GenesisNode, spec *netspec.Spec, base []byte, kr KeyringOpts, addr string) ([]byte, error) {
+	return gentxIn(n, evmdIn(n.User, n.Home, n.Image), spec, base, kr, addr)
+}
+
+// gentxIn signs with ev, the evmd command for the node's home. addr is
+// the ip:port peers dial, written into the gentx memo; "" lets evmd find
+// the machine's own IP (it can't without a network).
+func gentxIn(n *GenesisNode, ev string, spec *netspec.Spec, base []byte, kr KeyringOpts, addr string) ([]byte, error) {
 	c := n.Ctx
 	h, err := c.Host()
 	if err != nil {
@@ -204,7 +217,9 @@ func Gentx(n *GenesisNode, spec *netspec.Spec, base []byte, kr KeyringOpts) ([]b
 	if gp, ok := new(big.Int).SetString(spec.MinGasPrice, 10); ok {
 		fee = "--fees " + new(big.Int).Mul(gp, big.NewInt(200000)).String() + spec.GasDenom()
 	}
-	ev := evmdIn(n.User, n.Home, n.Image)
+	if ip, port, ok := strings.Cut(addr, ":"); ok && ip != "" {
+		fee += " --ip " + common.ShellQ(ip) + " --p2p-port " + common.ShellQ(port) + " --node-id " + common.ShellQ(n.NodeID)
+	}
 	script := fmt.Sprintf("rm -rf %[1]s/config/gentx && %[2]s genesis gentx %[3]s %[4]s%[5]s --keyring-backend %[6]s --chain-id %[7]s %[8]s --home %[9]s >/dev/null 2>&1 && cat %[1]s/config/gentx/*.json",
 		common.ShellQ(n.Home), ev, common.ShellQ(n.Moniker), stake, spec.Chain.Denom, kr.Backend, common.ShellQ(spec.Chain.ID), fee, containerHome)
 	res, err := host.ExecIn(c, h, script, kr.stdin(1), 1<<20)

@@ -50,3 +50,15 @@ func TestParseMessages(t *testing.T) {
 		t.Fatal("bad coin accepted")
 	}
 }
+
+func TestCancelUpgradeIsAKind(t *testing.T) {
+	var p proposeTool
+	kinds := p.Schema()["properties"].(map[string]any)["kind"].(map[string]any)["enum"]
+	found := false
+	for _, k := range kinds.([]string) {
+		found = found || k == "cancel-upgrade"
+	}
+	if !found {
+		t.Fatalf("kinds %v: cancel-upgrade missing", kinds)
+	}
+}

@@ -85,7 +85,7 @@ func (provisionTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, e
 	moniker := a.String("moniker", p.Name)
 	unit := p.Service.Unit
 	if unit == "" {
-		unit = "primium-" + string(role)
+		unit = netspec.ContainerName(spec.Chain.ID, role)
 	}
 	image := a.String("image", "")
 	if image == "" {
@@ -107,10 +107,6 @@ func (provisionTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, e
 		}
 	}
 
-	// the image must be on the host already (build it: upgrade build)
-	if _, code, _ := run(c, h, "docker image inspect "+common.ShellQ(image)+" >/dev/null 2>&1", time.Minute); code != 0 {
-		return nil, fmt.Errorf("image %s isn't on %s — build it there first: cometcli --profile %s upgrade build --tag %s", image, p.Name, p.Name, spec.Image.Tag)
-	}
 	// the home: absolute, writable, and never someone's existing validator
 	home := a.String("home", spec.HostHome)
 	if home == "" {
@@ -130,6 +126,18 @@ func (provisionTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, e
 	reconfigure := a.Bool("reconfigure", false)
 	if exists && !reconfigure {
 		return nil, fmt.Errorf("%s already holds a node (config/priv_validator_key.json) — re-initialising would replace its keys and state (double-sign risk). To re-render its configs only: reconfigure=true", home)
+	}
+	if exists && a.String("image", "") == "" {
+		// a node past an upgrade runs a newer image than the spec's
+		// (genesis) tag: re-rendering must not take it back to that binary
+		if cur := currentImage(c, h, unit, home); cur != "" && cur != image {
+			step("· keeping the image %s runs now: %s (the spec's is %s, for nodes starting from genesis)", unit, cur, image)
+			image = cur
+		}
+	}
+	// the image must be on the host already (build it: upgrade build)
+	if _, code, _ := run(c, h, "docker image inspect "+common.ShellQ(image)+" >/dev/null 2>&1", time.Minute); code != 0 {
+		return nil, fmt.Errorf("image %s isn't on %s — build it there first: cometcli --profile %s upgrade build --tag %s", image, p.Name, p.Name, spec.Image.Tag)
 	}
 
 	// peers and the advertised address
@@ -199,12 +207,22 @@ func (provisionTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, e
 		}
 	}
 
+	lockHome(c, h, home) // new, or one cometcli made before it did this
+
 	// configs, rendered for the role from the spec
 	version := spec.Image.Tag
 	if m := regexp.MustCompile(`v\d+\.\d+\.\d+`).FindString(image); m != "" {
 		version = m
 	}
-	patches := spec.Patches(role, version, netspec.NodeParams{Moniker: moniker, ExternalAddress: extAddr, PersistentPeers: peers, Prod: a.Bool("prod", false)})
+	inboundClosed := false
+	if raw, err := h.ReadFile(c, path.Join(home, "config", "config.toml")); err == nil {
+		var cur map[string]any
+		if _, err := toml.Decode(string(raw), &cur); err == nil {
+			n, ok := netspec.Lookup(cur, []string{"p2p", "max_num_inbound_peers"}).(int64)
+			inboundClosed = ok && n == 0
+		}
+	}
+	patches := spec.Patches(role, version, netspec.NodeParams{Moniker: moniker, ExternalAddress: extAddr, PersistentPeers: peers, Prod: a.Bool("prod", false), InboundClosed: inboundClosed})
 	for _, file := range []string{"config.toml", "app.toml", "client.toml"} {
 		fp := path.Join(home, "config", file)
 		raw, err := h.ReadFile(c, fp)
@@ -440,4 +458,22 @@ func portsFree(c *toolkit.Context, h host.Host, ports []int, unit string) error 
 		return fmt.Errorf("host ports taken on %s: %s — stop that node first, or use a port offset", c.Profile.Name, strings.Join(held, ", "))
 	}
 	return nil
+}
+
+// currentImage is the image a node runs: its container's, else the one
+// its compose file names.
+func currentImage(c *toolkit.Context, h host.Host, unit, home string) string {
+	if out, code, _ := run(c, h, "docker inspect -f '{{.Config.Image}}' "+common.ShellQ(unit)+" 2>/dev/null", time.Minute); code == 0 {
+		if img := strings.TrimSpace(out); img != "" {
+			return img
+		}
+	}
+	out, _, _ := run(c, h, "sed -n 's/^ *image: *//p' "+common.ShellQ(path.Join(home, "docker-compose.yml"))+" 2>/dev/null | head -1", time.Minute)
+	return strings.Trim(strings.TrimSpace(out), `"'`)
+}
+
+// lockHome makes a node's config and data dirs owner-only, as sec perms
+// expects: they hold the consensus key and the signing state.
+func lockHome(c *toolkit.Context, h host.Host, home string) {
+	_, _, _ = run(c, h, "chmod 700 "+common.ShellQ(path.Join(home, "config"))+" "+common.ShellQ(path.Join(home, "data"))+" 2>/dev/null", time.Minute)
 }

@@ -148,7 +148,7 @@
     - two instances of a validator = double-sign risk; stop one immediately
   playbook_kind: report
   playbook:
-    - {do: bash, args: {command: "docker ps --filter publish={sig:proc.port_taken}", description: "the container holding the port"}, when: "proc.port_taken > 0", note: "who holds the port (docker refused to start the node)"}
+    - {do: bash, args: {command: "docker ps --filter publish={sig:proc.port_taken} --format '{{.Names}} (image {{.Image}}, up {{.RunningFor}})'", description: "the container holding the port"}, when: "proc.port_taken > 0", note: "who holds the port (docker refused to start the node)"}
     - {do: bash, args: {command: "ss -ltnp 2>/dev/null | grep -E ':(26656|26657|26660|1317|9090|8545|8546) ' || true", description: "what listens on the node's ports"}, note: "what listens on the node's ports"}
   test:
     signals: {logs.port_in_use: 2}
@@ -160,7 +160,7 @@
   symptoms: restarts with no error in the logs; docker OOMKilled may be false because the node runs under a wrapper shell
   match:
     all: ["proc.mem_limit_mb < 4096"]
-    any: ["proc.oom_kills > 0", "proc.mem_used_pct_of_limit >= 90", "proc.restarts >= 3"]
+    any: ["proc.oom_kills > 0", "proc.mem_used_pct_of_limit >= 90", "proc.restarts >= 3", "proc.mem_limit_mb < 1024"]
   confirm:
     - "docker inspect -f '{{.HostConfig.Memory}}' <container> (bytes; 0 = unlimited) and docker stats --no-stream"
     - "a node needs several GB under load — a limit of a few hundred MB will always be killed"
@@ -236,7 +236,7 @@
 
 - id: node-image-missing
   title: The node's docker image isn't on the host
-  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, node-no-peers, node-low-peers]
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, node-no-peers, node-low-peers, node-container-missing]
   severity: high
   match:
     all: ["proc.image_present == false"]
@@ -248,12 +248,12 @@
     - "[change] upgrade.build the release the image was built from, under the same name; start the node"
   playbook:
     - {do: upgrade.build, args: {tag: "{sig:proc.image_version}", image: "{sig:proc.image}"}, note: "rebuild the image from its official release (asks you; several minutes)"}
-    - {do: node.service, args: {action: start}, note: "start the node"}
+    - {do: node.recreate, note: "start the node from its compose file (recreates the container if it's gone)"}
     - {do: wait.until, args: {condition: synced, timeout: 1800}, note: "wait until it has caught up"}
     - {do: wait.until, args: {condition: unjailable, timeout: 1800}, when: "val.jailed == true", note: "wait out the jail period"}
     - {do: val.unjail, when: "val.jailed == true", note: "unjail (signed by the operator key — asks you)"}
   test:
-    signals: {proc.image_present: false, proc.running: false, proc.image: "primium-v0.7.2", proc.image_version: "v0.7.2"}
+    signals: {proc.image_present: false, proc.running: false, proc.image: "mychain-v0.7.2", proc.image_version: "v0.7.2"}
 
 - id: node-container-missing
   title: The node's container doesn't exist
@@ -267,6 +267,11 @@
     - docker compose down / docker rm, or the profile names the wrong container
   fix:
     - "[change] docker compose up -d from the node's compose file (node.provision reconfigure=true re-renders it from the spec)"
+  playbook:
+    - {do: node.recreate, note: "create the container again from the node's compose file (same data dir)"}
+    - {do: wait.until, args: {condition: synced, timeout: 1800}, note: "wait until it has caught up"}
+    - {do: wait.until, args: {condition: unjailable, timeout: 1800}, when: "val.jailed == true", note: "wait out the jail period"}
+    - {do: val.unjail, when: "val.jailed == true", note: "unjail (signed by the operator key — asks you)"}
   test:
     signals: {proc.container_missing: true, proc.running: false}
 

@@ -36,6 +36,9 @@ type Spec struct {
 	FeeDenom    string `yaml:"fee_denom,omitempty"`
 	DBBackend   string `yaml:"db_backend"` // goleveldb | rocksdb
 	HostHome    string `yaml:"host_home,omitempty"`
+	// Upgrades records releases built with an added upgrade handler, so a
+	// node that loses its image (or a new node) rebuilds the same binary.
+	Upgrades []UpgradeBuild `yaml:"upgrades,omitempty"`
 	// Extra keeps imported settings with no field yet, so nothing is lost.
 	Extra map[string]string `yaml:"extra,omitempty"`
 }
@@ -49,10 +52,10 @@ type Chain struct {
 }
 
 type Image struct {
-	Name   string `yaml:"name"`             // e.g. primium-evm
+	Name   string `yaml:"name"`             // e.g. mychain-evm
 	Tag    string `yaml:"tag"`              // e.g. v0.7.2
 	Repo   string `yaml:"repo,omitempty"`   // official source, e.g. cosmos/evm
-	Naming string `yaml:"naming,omitempty"` // e.g. primium-{tag}
+	Naming string `yaml:"naming,omitempty"` // e.g. mychain-{tag}
 }
 
 type Genesis struct {
@@ -238,7 +241,7 @@ func ParseEnv(raw string) map[string]string {
 
 var envKeyRe = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 
-// FromEnv builds a spec from node-setup's network-config.env keys. Keys it
+// FromEnv builds a spec from network-config.env keys (KEY=value). Keys it
 // doesn't map are kept in Extra.
 func FromEnv(env map[string]string) *Spec {
 	used := map[string]bool{}
@@ -297,7 +300,13 @@ func FromEnv(env map[string]string) *Spec {
 	}
 	s.MinGasPrice = str("MIN_GAS_PRICE")
 	s.DBBackend = str("DB_BACKEND")
-	s.HostHome = str("PRIMIUM_HOST_HOME")
+	// HOST_HOME, or a deployment's own <NAME>_HOST_HOME
+	s.HostHome = str("HOST_HOME")
+	for k := range env {
+		if s.HostHome == "" && strings.HasSuffix(k, "_HOST_HOME") {
+			s.HostHome = str(k)
+		}
+	}
 	for k, v := range env {
 		if !used[k] {
 			if s.Extra == nil {
@@ -447,4 +456,43 @@ func (s *Spec) GasDenom() string {
 		return s.FeeDenom
 	}
 	return s.Chain.Denom
+}
+
+// Bech32 is the chain's account address prefix (default cosmos).
+func (s *Spec) Bech32() string {
+	if s.Chain.Bech32Prefix != "" {
+		return s.Chain.Bech32Prefix
+	}
+	return "cosmos"
+}
+
+// UpgradeBuild is a release tag and the handler added when building it.
+type UpgradeBuild struct {
+	Tag     string `yaml:"tag"`
+	Handler string `yaml:"handler"`
+}
+
+// HandlerFor is the handler recorded for a release tag ("" if none).
+func (s *Spec) HandlerFor(tag string) string {
+	for _, u := range s.Upgrades {
+		if u.Tag == tag {
+			return u.Handler
+		}
+	}
+	return ""
+}
+
+// RecordHandler notes that tag was built with handler (once per tag).
+func (s *Spec) RecordHandler(tag, handler string) bool {
+	for i, u := range s.Upgrades {
+		if u.Tag == tag {
+			if u.Handler == handler {
+				return false
+			}
+			s.Upgrades[i].Handler = handler
+			return true
+		}
+	}
+	s.Upgrades = append(s.Upgrades, UpgradeBuild{Tag: tag, Handler: handler})
+	return true
 }

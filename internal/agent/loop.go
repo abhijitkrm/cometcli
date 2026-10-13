@@ -551,6 +551,7 @@ func (a *Agent) logLLM(round int, resp *Response) {
 	_ = lg.Log(audit.KindLLM, a.profileName(), map[string]any{
 		"round": round, "provider": a.Provider.Name(), "model": a.Model,
 		"text": a.Redact.Text(resp.Text), "calls": calls, "done": resp.Done,
+		"tokens_in": resp.Usage.Input, "tokens_out": resp.Usage.Output, "tokens_cached": resp.Usage.CacheRead,
 	})
 }
 

@@ -292,3 +292,17 @@ func TestMempoolMismatchByVersion(t *testing.T) {
 		}
 	}
 }
+
+// A memory limit far below what a node needs is the root cause even before
+// the container has crashed often enough to look like a crash loop.
+func TestTinyMemoryLimitIsTheRootBeforeRestartsPileUp(t *testing.T) {
+	base := kb.Load("", "")
+	hits := base.Match(kb.Signals{"proc.mem_limit_mb": 150.0, "proc.restarts": 1.0, "proc.uptime_s": 20.0, "proc.running": true}, "cosmos-evm")
+	if len(hits) == 0 || hits[0].Case.ID != "container-memory-limit" {
+		var ids []string
+		for _, h := range hits {
+			ids = append(ids, h.Case.ID)
+		}
+		t.Fatalf("top case %v, want container-memory-limit first", ids)
+	}
+}
