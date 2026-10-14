@@ -73,12 +73,22 @@ type Watcher struct {
 	Out       io.Writer
 	Now       func() time.Time
 
-	state state
+	// Alerts, when set, are monitor alerts (cometduty, Alertmanager) that
+	// trigger work at once instead of at the next sweep. CollectOne
+	// triages one node for them (nil = Collect, filtered).
+	Alerts     <-chan Alert
+	CollectOne func(ctx context.Context, p *config.Profile) []triage.NodeReport
+
+	state     state
+	lastSweep time.Time
 }
 
 type state struct {
 	Active  map[string]time.Time `json:"active"`  // issues seen in the last sweep
 	Handled map[string]time.Time `json:"handled"` // when each issue was last worked
+	// Monitor maps an open monitor alert's key to the issue it raised when
+	// local triage found nothing of its own; its resolve clears the issue.
+	Monitor map[string]string `json:"monitor,omitempty"`
 }
 
 func (w *Watcher) now() time.Time {
@@ -107,6 +117,9 @@ func (w *Watcher) load() {
 	}
 	if w.state.Handled == nil {
 		w.state.Handled = map[string]time.Time{}
+	}
+	if w.state.Monitor == nil {
+		w.state.Monitor = map[string]string{}
 	}
 }
 
@@ -160,22 +173,37 @@ func (w *Watcher) Sweep(ctx context.Context) {
 	if w.state.Active == nil {
 		w.load()
 	}
+	w.lastSweep = w.now()
+	for ak, k := range w.state.Monitor {
+		// a monitor alert whose resolve never came (monitor restarted, config
+		// changed) is dropped after a day rather than kept open forever
+		if at, ok := w.state.Active[k]; !ok || w.now().Sub(at) > 24*time.Hour {
+			delete(w.state.Monitor, ak)
+			delete(w.state.Active, k)
+		}
+	}
 	nodes := w.Collect(ctx)
 	issues := Issues(nodes, triage.FleetFindings(nodes))
+	open, cleared := w.reconcile(ctx, issues, func(k string) bool { return !w.fromMonitor(k) })
+	w.logf("sweep: %d nodes, %d open issues, %d resolved", len(nodes), open, cleared)
+}
+
+// reconcile compares issues with the active ones in scope: cleared ones are
+// reported resolved, new ones worked (unless worked within the cooldown).
+func (w *Watcher) reconcile(ctx context.Context, issues []Issue, inScope func(key string) bool) (open, cleared int) {
 	now := w.now()
 	current := map[string]Issue{}
 	for _, is := range issues {
 		current[is.Key] = is
 	}
-	// recovered: active last time, gone now
-	var cleared []string
+	var gone []string
 	for k := range w.state.Active {
-		if _, still := current[k]; !still {
-			cleared = append(cleared, k)
+		if _, still := current[k]; !still && inScope(k) {
+			gone = append(gone, k)
 		}
 	}
-	sort.Strings(cleared)
-	for _, k := range cleared {
+	sort.Strings(gone)
+	for _, k := range gone {
 		delete(w.state.Active, k)
 		w.send(ctx, "✅ resolved: "+strings.Replace(k, "|", ": ", 1))
 	}
@@ -199,7 +227,87 @@ func (w *Watcher) Sweep(ctx context.Context) {
 		w.handle(ctx, is)
 	}
 	w.save()
-	w.logf("sweep: %d nodes, %d open issues, %d resolved", len(nodes), len(current), len(cleared))
+	return len(current), len(gone)
+}
+
+func (w *Watcher) fromMonitor(issueKey string) bool {
+	for _, k := range w.state.Monitor {
+		if k == issueKey {
+			return true
+		}
+	}
+	return false
+}
+
+// OnAlert works a monitor alert. One about a node triages that node now:
+// what triage finds is worked like a sweep's issues, and when triage finds
+// nothing the alert itself becomes the issue. One about no particular node
+// (a stalled chain, a validator-set change) runs a fleet sweep. Info-level
+// alerts are only logged.
+func (w *Watcher) OnAlert(ctx context.Context, a Alert) {
+	if w.state.Active == nil {
+		w.load()
+	}
+	name := ProfileFor(a, w.Profiles)
+	where := name
+	if where == "" {
+		where = orDash(a.Node)
+	}
+	w.logf("monitor alert from %s: %s on %s (%s)%s", a.Source, a.Kind, where, orDash(a.Severity), map[bool]string{true: " resolved"}[a.Resolved])
+	if a.Resolved {
+		if k, ok := w.state.Monitor[a.Key]; ok {
+			delete(w.state.Monitor, a.Key)
+			if _, open := w.state.Active[k]; open {
+				delete(w.state.Active, k)
+				w.send(ctx, "✅ resolved: "+strings.Replace(k, "|", ": ", 1)+" (per "+a.Source+")")
+			}
+			w.save()
+		}
+		if name != "" {
+			w.triageOne(ctx, name, nil) // clears what triage no longer sees
+		}
+		return
+	}
+	if a.Severity == "info" {
+		return
+	}
+	if name == "" {
+		if w.now().Sub(w.lastSweep) >= 30*time.Second {
+			w.Sweep(ctx)
+		}
+		return
+	}
+	w.triageOne(ctx, name, &a)
+}
+
+// triageOne triages one profile and reconciles its issues; with an alert,
+// an empty triage turns the alert into the issue.
+func (w *Watcher) triageOne(ctx context.Context, name string, a *Alert) {
+	p := w.Profiles[name]
+	var nodes []triage.NodeReport
+	if w.CollectOne != nil {
+		nodes = w.CollectOne(ctx, p)
+	} else {
+		for _, n := range w.Collect(ctx) {
+			if n.Profile != nil && n.Profile.Name == name {
+				nodes = append(nodes, n)
+			}
+		}
+	}
+	issues := Issues(nodes, nil)
+	if a != nil && len(issues) == 0 {
+		sev := "high"
+		if a.Severity == "critical" {
+			sev = "critical"
+		}
+		is := Issue{Key: name + "|monitor:" + a.Kind, Profile: name, Case: "monitor:" + a.Kind, Severity: sev,
+			Text: fmt.Sprintf("%s reports %s on %s; local triage found no matching problem", a.Source, a.Kind, name)}
+		w.state.Monitor[a.Key] = is.Key
+		issues = append(issues, is)
+	}
+	w.reconcile(ctx, issues, func(k string) bool {
+		return strings.HasPrefix(k, name+"|") && !w.fromMonitor(k)
+	})
 }
 
 func (w *Watcher) handle(ctx context.Context, is Issue) {
@@ -233,7 +341,8 @@ func (w *Watcher) handle(ctx context.Context, is Issue) {
 	w.send(ctx, fmt.Sprintf("📋 %s report:\n%s", is.Profile, clip(strings.TrimSpace(report), 3000)))
 }
 
-// Loop sweeps every interval until ctx ends; once runs a single sweep.
+// Loop sweeps every interval until ctx ends, working monitor alerts as
+// they arrive; once runs a single sweep.
 func (w *Watcher) Loop(ctx context.Context, interval time.Duration, once bool) {
 	w.load()
 	for {
@@ -241,10 +350,17 @@ func (w *Watcher) Loop(ctx context.Context, interval time.Duration, once bool) {
 		if once {
 			return
 		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(interval):
+		next := time.After(interval)
+	wait:
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case a := <-w.Alerts:
+				w.OnAlert(ctx, a)
+			case <-next:
+				break wait
+			}
 		}
 	}
 }

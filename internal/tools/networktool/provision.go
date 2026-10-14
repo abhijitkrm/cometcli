@@ -19,6 +19,7 @@ import (
 	"github.com/abhijitkrm/cometcli/internal/client/host"
 	"github.com/abhijitkrm/cometcli/internal/config"
 	"github.com/abhijitkrm/cometcli/internal/netspec"
+	"github.com/abhijitkrm/cometcli/internal/silence"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
 	"github.com/abhijitkrm/cometcli/internal/tools/common"
 )
@@ -181,6 +182,11 @@ func (provisionTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, e
 	}
 	if err := c.Approve(fmt.Sprintf("%s on %s (%s) for %s", verb, p.Name, home, spec.Chain.ID), toolkit.TierLocalChange, detail); err != nil {
 		return nil, err
+	}
+	if exists {
+		if note := silence.ForNode(c, c.Cfg, p, false, 15*time.Minute, "reconfigure "+p.Name); note != "" {
+			step("%s", note)
+		}
 	}
 
 	// run as the home's owner, working in the home: the image's own

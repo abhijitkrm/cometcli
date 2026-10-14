@@ -47,6 +47,27 @@ type Config struct {
 	Profiles map[string]*Profile `yaml:"profiles"`
 	// Watch configures `cometcli watch`, the autonomous fleet watcher.
 	Watch WatchConf `yaml:"watch,omitempty"`
+	// Monitor connects an external monitor (cometduty, Alertmanager). All
+	// of it is optional; cometcli works the same without one.
+	Monitor MonitorConf `yaml:"monitor,omitempty"`
+}
+
+// MonitorConf is how cometcli works alongside an external monitor.
+type MonitorConf struct {
+	// Silence lists Alertmanager-v2-compatible APIs (cometduty with
+	// api_token, or Alertmanager) beyond each node's own endpoints.monitor.
+	// Before planned work on a node cometcli silences its alerts at both,
+	// matched by the label profile=<name> (the whole chain, chain_id=<id>,
+	// for an upgrade switch). The bearer token is the MONITOR_API_TOKEN
+	// credential.
+	Silence []SilenceAPI `yaml:"silence,omitempty"`
+}
+
+// SilenceAPI is one monitor's silence API.
+type SilenceAPI struct {
+	URL string `yaml:"url"`
+	// Via reaches a URL on a node's loopback through that profile's SSH.
+	Via string `yaml:"via,omitempty"`
 }
 
 // WatchConf configures the autonomous watcher.
@@ -68,6 +89,11 @@ type WatchConf struct {
 	// TelegramUsers, when set, are the only Telegram user ids whose
 	// button presses count.
 	TelegramUsers []int64 `yaml:"telegram_users,omitempty"`
+	// Listen, when set (e.g. 127.0.0.1:9180), receives monitor alerts
+	// (cometduty's webhook, Alertmanager's) and works them at once. Needs
+	// the WATCH_WEBHOOK_SECRET (cometduty signature) or WATCH_WEBHOOK_TOKEN
+	// (bearer) credential.
+	Listen string `yaml:"listen,omitempty"`
 }
 
 // AgentFor resolves the agent settings for a profile (nil = general
@@ -167,6 +193,9 @@ type Endpoints struct {
 	GRPC  string `yaml:"grpc,omitempty"`  // host:port
 	LCD   string `yaml:"lcd,omitempty"`   // http(s)://host:1317
 	EVM   string `yaml:"evm,omitempty"`   // http(s)://host:8545 (RPC/sentry nodes only)
+	// Monitor is the Prometheus endpoint of a monitor watching this node
+	// (e.g. its cometduty sidecar, http://host:28686); optional.
+	Monitor string `yaml:"monitor,omitempty"`
 	// FallbackGRPC is another node of the same chain (sentry, RPC node,
 	// public endpoint) used for chain queries while this node is down.
 	FallbackGRPC string `yaml:"fallback_grpc,omitempty"`

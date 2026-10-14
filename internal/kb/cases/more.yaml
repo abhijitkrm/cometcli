@@ -186,3 +186,25 @@
     - "[read] kb.show the matching state/host case (apphash, db corruption, disk)"
   test:
     signals: {node.stalled: true, node.peers: 6, logs.apphash: 2}
+
+- id: monitor-unreachable
+  title: The monitor watching this node doesn't answer
+  severity: medium
+  match:
+    all: ["monitor.reachable == false"]
+  fix:
+    - "[read] nobody may be paged for this node until its monitor is back — check the monitor process (endpoints.monitor)"
+    - "[change] restart the monitor on its host; if it moved, update endpoints.monitor in the profile"
+  test:
+    signals: {monitor.reachable: false}
+
+- id: monitor-alerts-silenced
+  title: Alerts for this node are silenced at its monitor
+  kind: advisory
+  severity: low
+  match:
+    all: ["monitor.silences > 0"]
+  fix:
+    - "[read] planned work silences alerts for 15–30 min; a silence older than the work means nothing will page — list them (GET /api/v2/silences) and expire leftovers"
+  test:
+    signals: {monitor.silences: 1}

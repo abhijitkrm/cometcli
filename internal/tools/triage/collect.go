@@ -89,6 +89,7 @@ var collectors = []collector{
 	{"logs", collectLogs, []string{"logs."}},
 	{"config", collectConfig, []string{"config.", "app.", "pvs."}},
 	{"evm", collectEVM, []string{"evm."}},
+	{"monitor", collectMonitor, []string{"monitor."}},
 }
 
 // Collect runs every collector concurrently; one failing source is

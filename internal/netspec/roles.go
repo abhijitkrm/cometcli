@@ -29,11 +29,16 @@ func RoleOf(profileRole string) Role {
 
 var containerUnsafe = regexp.MustCompile(`[^a-zA-Z0-9_.-]+`)
 
+// SafeName makes a chain id usable in container and directory names.
+func SafeName(s string) string {
+	return strings.Trim(containerUnsafe.ReplaceAllString(s, "-"), "-._")
+}
+
 // ContainerName is the default container for a node of a chain when its
 // profile names none: <chain id>-<role>, so two chains on one host never
 // share a name.
 func ContainerName(chainID string, role Role) string {
-	id := strings.Trim(containerUnsafe.ReplaceAllString(chainID, "-"), "-._")
+	id := SafeName(chainID)
 	if id == "" {
 		id = "evmd"
 	}

@@ -5,9 +5,11 @@ package node
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/abhijitkrm/cometcli/internal/client/host"
 	"github.com/abhijitkrm/cometcli/internal/logscan"
+	"github.com/abhijitkrm/cometcli/internal/silence"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
 	"github.com/abhijitkrm/cometcli/internal/tools/common"
 )
@@ -212,6 +214,10 @@ func (serviceTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, err
 			return nil, err
 		}
 	}
+	note := ""
+	if action == "stop" || action == "restart" {
+		note = silence.ForNode(c, c.Cfg, c.Profile, false, 15*time.Minute, action+" "+c.Profile.Service.Unit)
+	}
 	out, code, err := svcRun(c, h, action)
 	c.LogShell("service "+action+" "+c.Profile.Service.Unit, code)
 	data := map[string]any{"action": action, "exit": code, "output": out}
@@ -242,9 +248,17 @@ func (serviceTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, err
 		}
 	}
 	if err != nil {
-		return &toolkit.Result{Text: out, Data: data}, nil
+		return &toolkit.Result{Text: withNote(out, note), Data: data}, nil
 	}
-	return &toolkit.Result{Text: text, Data: data}, nil
+	return &toolkit.Result{Text: withNote(text, note), Data: data}, nil
+}
+
+// withNote appends a line (e.g. the monitor silence) when there is one.
+func withNote(text, note string) string {
+	if note == "" {
+		return text
+	}
+	return text + "\n" + note
 }
 
 func svcRun(c *toolkit.Context, h host.Host, action string) (string, int, error) {

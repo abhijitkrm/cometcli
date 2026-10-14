@@ -3,6 +3,9 @@ package cli
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -19,7 +22,7 @@ import (
 )
 
 func watchCmd(reg *toolkit.Registry) *cobra.Command {
-	var interval, mode, cooldown string
+	var interval, mode, cooldown, listen string
 	var profiles []string
 	var once bool
 	cmd := &cobra.Command{
@@ -35,7 +38,14 @@ high problem becomes an incident:
 
 Findings, reports and recoveries go to the watch.alerts channels (Slack,
 Discord, Telegram). Transactions are refused unless watch.allow_tx is set.
-Configure under 'watch:' in ~/.cometcli/config.yaml; flags override it.`,
+Configure under 'watch:' in ~/.cometcli/config.yaml; flags override it.
+
+Optionally, --listen receives a monitor's alerts (cometduty's webhook or
+Alertmanager's) and works each at once: the node it names is triaged right
+away instead of at the next sweep. Requests must be signed with the
+WATCH_WEBHOOK_SECRET credential (cometduty's webhook.secret) or carry the
+WATCH_WEBHOOK_TOKEN bearer token (Alertmanager's http_config). Sweeps keep
+running either way.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := config.Load()
 			if err != nil {
@@ -111,6 +121,29 @@ Configure under 'watch:' in ~/.cometcli/config.yaml; flags override it.`,
 					approver = watch.RemoteApprover(tg.Ask, wc.AllowTx)
 				}
 			}
+			var alertsCh chan watch.Alert
+			addr := wc.Listen
+			if cmd.Flags().Changed("listen") {
+				addr = listen
+			}
+			if addr != "" {
+				rcv := &watch.Receiver{Secret: credential("WATCH_WEBHOOK_SECRET"), Token: credential("WATCH_WEBHOOK_TOKEN")}
+				if rcv.Secret == "" && rcv.Token == "" {
+					return fmt.Errorf("--listen needs the WATCH_WEBHOOK_SECRET or WATCH_WEBHOOK_TOKEN credential (cometcli config set-key …) so only your monitor can send alerts")
+				}
+				alertsCh = make(chan watch.Alert, 64)
+				rcv.Out = alertsCh
+				ln, err := net.Listen("tcp", addr)
+				if err != nil {
+					return fmt.Errorf("listen %s: %w", addr, err)
+				}
+				mux := http.NewServeMux()
+				mux.Handle("/alerts", rcv)
+				srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 20 * time.Second}
+				go func() { _ = srv.Serve(ln) }()
+				defer srv.Close()
+				fmt.Fprintf(cmd.OutOrStdout(), "receiving monitor alerts on http://%s/alerts\n", ln.Addr())
+			}
 			statePath, _ := config.Path("watch-state.json")
 			glog, _ := audit.Open("watch")
 			w := &watch.Watcher{
@@ -118,6 +151,10 @@ Configure under 'watch:' in ~/.cometcli/config.yaml; flags override it.`,
 				StatePath: statePath, Out: cmd.OutOrStdout(),
 				Collect: func(ctx context.Context) []triage.NodeReport {
 					return triage.CollectFleet(&toolkit.Context{Context: ctx, Cfg: cfg, Audit: glog}, list, iv)
+				},
+				Alerts: alertsCh,
+				CollectOne: func(ctx context.Context, p *config.Profile) []triage.NodeReport {
+					return triage.CollectFleet(&toolkit.Context{Context: ctx, Cfg: cfg, Audit: glog}, []*config.Profile{p}, iv)
 				},
 				Run: func(ctx context.Context, p *config.Profile, desc string, readOnly bool, approve toolkit.Approver) (string, error) {
 					lg, _ := audit.Open(p.Name)
@@ -159,7 +196,16 @@ Configure under 'watch:' in ~/.cometcli/config.yaml; flags override it.`,
 	f.StringVar(&cooldown, "cooldown", "", "before the same issue is worked again (default 1h)")
 	f.StringSliceVar(&profiles, "profiles", nil, "profiles to watch (default all, or watch.profiles)")
 	f.BoolVar(&once, "once", false, "run one sweep and exit")
+	f.StringVar(&listen, "listen", "", "also receive monitor alerts on this address, e.g. 127.0.0.1:9180 (or watch.listen)")
 	return cmd
+}
+
+// credential reads a secret from the environment, else ~/.cometcli/credentials.
+func credential(name string) string {
+	if v := os.Getenv(name); v != "" {
+		return v
+	}
+	return config.Credential(name)
 }
 
 func contains(list []string, s string) bool {
