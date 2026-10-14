@@ -1,5 +1,6 @@
 - id: node-rpc-down
   title: Node RPC unreachable (process down or RPC disabled)
+  plain: "The node's RPC isn't answering."
   explains: [evm-rpc-down, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
   severity: critical
   match:
@@ -21,6 +22,7 @@
 
 - id: node-process-down
   title: Node process/container not running
+  plain: "The node process isn't running."
   explains: [node-rpc-down, evm-rpc-down, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, node-no-peers, node-low-peers]
   severity: critical
   match:
@@ -48,6 +50,7 @@
 
 - id: node-crash-loop
   title: Node crash-looping (restarting repeatedly)
+  plain: "The node keeps crashing and restarting."
   explains: [node-process-down, node-rpc-down, evm-rpc-down, node-restarted-recently, node-killed-sigkill, node-catching-up, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, val-in-set-while-syncing, node-no-peers, node-low-peers]
   severity: critical
   match:
@@ -87,6 +90,7 @@
 
 - id: chain-halted-validators-offline
   title: Chain halted — validators holding over 1/3 of the voting power aren't voting
+  plain: "The chain has stopped: too many validators are offline to reach consensus."
   explains: [node-stalled, node-low-peers, node-p2p-port-exposure, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
   severity: critical
   symptoms: no new blocks on any node; the consensus state shows under 2/3 of the power voting
@@ -108,6 +112,7 @@
 
 - id: node-stalled
   title: Node stalled — not catching up but no new blocks
+  plain: "The node's block height has stopped moving."
   explains: [val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
   severity: critical
   symptoms: catching_up=false but latest block is minutes old
@@ -128,6 +133,7 @@
 
 - id: node-no-peers
   title: Node has no peers
+  plain: "The node has no peers, so it can't receive blocks."
   explains: [node-stalled, node-catching-up, node-blocksync-slow, node-peer-churn, node-p2p-port-exposure, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
   severity: critical
   match:
@@ -179,6 +185,7 @@
 
 - id: node-wrong-network
   title: Peers reject us — different network / genesis
+  plain: "The node is on a different network than configured."
   explains: [node-no-peers, node-low-peers, node-stalled, node-catching-up, node-p2p-port-exposure, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
   severity: critical
   match:
@@ -224,6 +231,7 @@
 
 - id: node-blocksync-slow
   title: Catching up too slowly to ever reach the tip
+  plain: "The node is syncing too slowly to catch up with the chain."
   explains: [node-catching-up, val-not-signing, val-jail-imminent]
   severity: high
   match:
@@ -238,6 +246,7 @@
 
 - id: node-network-detached
   title: Node container has no network attached
+  plain: "The node has lost its network connection to the rest of the chain."
   explains: [node-rpc-down, node-rpc-path-broken, node-no-peers, node-low-peers, node-stalled, node-catching-up, evm-rpc-down, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent]
   severity: critical
   symptoms: process running, but no peers and its published ports are gone
@@ -264,6 +273,7 @@
 
 - id: node-rpc-path-broken
   title: Node healthy inside its container but unreachable from the host
+  plain: "The RPC answers, but the path cometcli uses to reach it is broken (proxy, port or firewall)."
   explains: [node-rpc-down, evm-rpc-down]
   severity: high
   symptoms: host RPC calls fail while the node answers on localhost inside the container

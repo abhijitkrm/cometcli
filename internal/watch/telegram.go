@@ -98,8 +98,8 @@ func (t *Telegram) Ask(ctx context.Context, text string) (bool, string, error) {
 	err := t.send(ctx, "sendMessage", map[string]any{
 		"chat_id": t.ChatID,
 		"reply_markup": map[string]any{"inline_keyboard": [][]map[string]string{{
-			{"text": "✅ Approve", "callback_data": "a:" + id},
-			{"text": "❌ Deny", "callback_data": "d:" + id},
+			{"text": "Approve", "callback_data": "a:" + id},
+			{"text": "Deny", "callback_data": "d:" + id},
 		}}},
 	}, clip(text, 3500), &msg)
 	if err != nil {
@@ -153,16 +153,16 @@ func (t *Telegram) Ask(ctx context.Context, text string) (bool, string, error) {
 			if who == "" {
 				who = fmt.Sprint(cq.From.ID)
 			}
-			verdict := "❌ denied by " + who
+			verdict := "**Denied** by " + who
 			if ok {
-				verdict = "✅ approved by " + who
+				verdict = "**Approved** by " + who
 			}
 			_ = t.api(ctx, "answerCallbackQuery", map[string]any{"callback_query_id": cq.ID, "text": verdict}, nil)
 			_ = t.send(ctx, "editMessageText", map[string]any{"chat_id": t.ChatID, "message_id": msg.MessageID}, clip(text, 3500)+"\n\n"+verdict, nil)
 			return ok, who, nil
 		}
 	}
-	_ = t.send(ctx, "editMessageText", map[string]any{"chat_id": t.ChatID, "message_id": msg.MessageID}, clip(text, 3500)+"\n\n⌛ no answer in "+timeout.String()+" — denied", nil)
+	_ = t.send(ctx, "editMessageText", map[string]any{"chat_id": t.ChatID, "message_id": msg.MessageID}, clip(text, 3500)+"\n\n**Denied:** no answer in "+timeout.String(), nil)
 	return false, "", nil
 }
 

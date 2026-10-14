@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -153,31 +156,72 @@ type telegram struct{ token, chatID string }
 func (t *telegram) Name() string { return "telegram" }
 
 func (t *telegram) Send(ctx context.Context, msg string) error {
-	err := t.post(ctx, map[string]any{"chat_id": t.chatID, "text": TelegramHTML(msg), "parse_mode": "HTML", "disable_web_page_preview": true})
-	if err != nil && strings.Contains(err.Error(), "400") {
-		err = t.post(ctx, map[string]any{"chat_id": t.chatID, "text": msg}) // markup Telegram refused: plain
+	_, err := t.Post(ctx, msg)
+	return err
+}
+
+// Post sends msg and returns its message id, so watch can edit it later.
+func (t *telegram) Post(ctx context.Context, msg string) (string, error) {
+	return t.send(ctx, "sendMessage", map[string]any{"chat_id": t.chatID}, msg)
+}
+
+// Edit replaces a posted message's text.
+func (t *telegram) Edit(ctx context.Context, ref, msg string) error {
+	_, err := t.send(ctx, "editMessageText", map[string]any{"chat_id": t.chatID, "message_id": ref}, msg)
+	if err != nil && strings.Contains(err.Error(), "message is not modified") {
+		return nil
 	}
 	return err
 }
 
-func (t *telegram) post(ctx context.Context, m map[string]any) error {
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", t.token)
+// Reply posts msg as a reply to a posted message.
+func (t *telegram) Reply(ctx context.Context, ref, msg string) error {
+	_, err := t.send(ctx, "sendMessage", map[string]any{"chat_id": t.chatID, "reply_to_message_id": ref, "allow_sending_without_reply": true}, msg)
+	return err
+}
+
+// send renders msg as Telegram HTML (plain text if Telegram refuses the
+// markup) and returns the message id.
+func (t *telegram) send(ctx context.Context, method string, m map[string]any, msg string) (string, error) {
+	m["text"], m["parse_mode"], m["disable_web_page_preview"] = TelegramHTML(msg), "HTML", true
+	id, err := t.post(ctx, method, m)
+	if err != nil && strings.Contains(err.Error(), "can't parse entities") {
+		delete(m, "parse_mode")
+		m["text"] = msg
+		id, err = t.post(ctx, method, m)
+	}
+	return id, err
+}
+
+func (t *telegram) post(ctx context.Context, method string, m map[string]any) (string, error) {
+	url := fmt.Sprintf("%s/bot%s/%s", telegramAPI, t.token, method)
 	body, _ := json.Marshal(m)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := sinkHTTP.Do(req)
 	if err != nil {
-		return err
+		return "", errors.New(strings.ReplaceAll(err.Error(), t.token, "<token>"))
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		return fmt.Errorf("telegram api: %d", resp.StatusCode)
+	var env struct {
+		OK          bool   `json:"ok"`
+		Description string `json:"description"`
+		Result      struct {
+			MessageID int64 `json:"message_id"`
+		} `json:"result"`
 	}
-	return nil
+	_ = json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&env)
+	if resp.StatusCode >= 300 || !env.OK {
+		return "", fmt.Errorf("telegram %s: %d %s", method, resp.StatusCode, env.Description)
+	}
+	return strconv.FormatInt(env.Result.MessageID, 10), nil
 }
+
+// telegramAPI is the Bot API base; a var so tests can stub it.
+var telegramAPI = "https://api.telegram.org"
 
 // Watcher polls snapshots and fires sinks on rule triggers (deduped).
 type Watcher struct {

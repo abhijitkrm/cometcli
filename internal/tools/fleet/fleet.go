@@ -312,3 +312,16 @@ func (shellTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, error
 	}
 	return &toolkit.Result{Text: b.String(), Data: map[string]any{"cmd": cmd, "count": len(rows)}}, nil
 }
+
+// The call deadline must cover the per-node --timeout (nodes run in
+// parallel) plus time to answer the approval prompt; the default 90s cut
+// long commands (a docker build) off whatever --timeout said.
+func (statusTool) Timeout(a toolkit.Args) time.Duration {
+	return time.Duration(a.Int("timeout", 8))*time.Second + 15*time.Minute
+}
+func (execTool) Timeout(a toolkit.Args) time.Duration {
+	return time.Duration(a.Int("timeout", 30))*time.Second + 15*time.Minute
+}
+func (shellTool) Timeout(a toolkit.Args) time.Duration {
+	return time.Duration(a.Int("timeout", 30))*time.Second + 15*time.Minute
+}

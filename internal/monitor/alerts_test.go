@@ -182,3 +182,11 @@ func TestTelegramHTML(t *testing.T) {
 		t.Fatalf("code spans: %s", got)
 	}
 }
+
+func TestTelegramHTMLQuotes(t *testing.T) {
+	got := TelegramHTML("**Status:** done\n\n> line <1>\n> **b**\nafter")
+	want := "<b>Status:</b> done\n\n<blockquote expandable>line &lt;1&gt;\n<b>b</b></blockquote>\nafter"
+	if got != want {
+		t.Fatalf("got\n%s\nwant\n%s", got, want)
+	}
+}

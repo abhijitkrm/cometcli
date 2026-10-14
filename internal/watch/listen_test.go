@@ -133,12 +133,12 @@ func TestAlertDrivenIncidents(t *testing.T) {
 		}
 	}
 	w.Sweep(ctx) // a sweep must not 'resolve' what only the monitor sees
-	if strings.Contains(strings.Join(n.msgs, "\n"), "✅") {
+	if strings.Contains(strings.Join(n.msgs, "\n"), "resolved") {
 		t.Fatalf("sweep cleared a monitor issue:\n%s", strings.Join(n.msgs, "\n"))
 	}
 	a.Resolved = true
 	w.OnAlert(ctx, a)
-	if !strings.Contains(strings.Join(n.msgs, "\n"), "✅ **val01** · resolved: `monitor:signer-regressed` (per cometduty)") {
+	if !strings.Contains(strings.Join(n.msgs, "\n"), "**val01: cometduty alert: signer-regressed**\nresolved (per cometduty) after") {
 		t.Fatalf("resolve not reported:\n%s", strings.Join(n.msgs, "\n"))
 	}
 	jailed = true // now triage sees the cause itself
@@ -173,7 +173,7 @@ func TestStaleIssuesSummarizedOnFirstSweep(t *testing.T) {
 		Collect: func(context.Context) []triage.NodeReport { return jailedNode(false) }}
 	w.Sweep(context.Background())
 	all := strings.Join(n.msgs, "\n")
-	if !strings.Contains(all, "2 issue(s) open when the watcher last ran are gone") || strings.Contains(all, "resolved: val01") {
+	if !strings.Contains(all, "**Watcher started**\n2 issue(s) open when it last ran are gone") || strings.Contains(all, "resolved") {
 		t.Fatalf("got:\n%s", all)
 	}
 }

@@ -1,5 +1,6 @@
 - id: evm-rpc-down
   title: EVM JSON-RPC not responding
+  plain: "The node's EVM JSON-RPC isn't answering, so wallets and apps can't use it."
   severity: high
   chains: [cosmos-evm]
   match:
@@ -51,6 +52,7 @@
 
 - id: evm-chain-id-mismatch
   title: EVM chain id differs from app.toml evm-chain-id
+  plain: "The EVM chain id the node reports doesn't match the one configured."
   severity: high
   chains: [cosmos-evm]
   match:

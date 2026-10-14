@@ -1,5 +1,6 @@
 - id: val-jailed-downtime
   title: Validator jailed for downtime (missed too many blocks)
+  plain: "The validator was jailed for missing too many blocks."
   severity: critical
   symptoms: validator jailed, not tombstoned; zero voting power; signing stopped earlier
   match:
@@ -36,6 +37,7 @@
 
 - id: val-tombstoned
   title: Validator tombstoned (double sign) — permanent
+  plain: "The validator was permanently removed (tombstoned) for double-signing."
   severity: critical
   symptoms: validator jailed and tombstoned; cannot be unjailed ever
   match:
@@ -60,6 +62,7 @@
 
 - id: val-jail-imminent
   title: Downtime budget nearly exhausted — jail imminent
+  plain: "The validator is missing blocks and will be jailed soon."
   severity: critical
   symptoms: missed blocks counter close to the slashing window limit
   match:
@@ -81,6 +84,7 @@
 
 - id: val-not-signing
   title: Validator in the active set but not signing blocks
+  plain: "The validator is in the active set but isn't signing blocks."
   severity: critical
   symptoms: bonded, not jailed, voting power > 0, but absent from recent commits
   match:
@@ -106,6 +110,7 @@
 
 - id: val-key-mismatch
   title: Node runs a different consensus key than the validator registered on chain
+  plain: "The node's signing key isn't the validator's key, so its signatures don't count."
   explains: [val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, val-in-set-while-syncing]
   severity: critical
   symptoms: node status shows a consensus address different from the validator's; node is not signing
@@ -131,6 +136,7 @@
 
 - id: val-not-in-active-set
   title: Validator bonded status lost — unbonding/unbonded, not jailed
+  plain: "The validator isn't in the active set."
   severity: high
   symptoms: validator not jailed but not in the active set
   match:
@@ -156,6 +162,7 @@
 
 - id: val-self-delegation-below-min
   title: Self-delegation below min_self_delegation
+  plain: "The validator's self-delegation is below its minimum."
   explains: [val-not-in-active-set]
   severity: high
   match:
@@ -195,6 +202,7 @@
 
 - id: val-jailed-waiting-period
   title: Jailed and still inside the downtime jail period
+  plain: "The validator is jailed and waiting out the jail period before it can unjail."
   severity: high
   match:
     all: ["val.jailed == true", "val.jail_remaining_s > 0", "val.tombstoned == false"]
@@ -238,6 +246,7 @@
 
 - id: val-gov-vote-urgent
   title: Governance vote ending within 24h without our vote
+  plain: "A governance vote is closing soon and this validator hasn't voted."
   severity: high
   match:
     all: ["gov.unvoted > 0", "gov.unvoted_ends_in_h < 24"]
@@ -254,6 +263,7 @@
 
 - id: val-remote-signer-down
   title: Remote signer (tmkms/horcrux) connection failing
+  plain: "The validator's remote signer is unreachable, so it can't sign."
   explains: [val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
   severity: critical
   match:
@@ -276,6 +286,7 @@
 
 - id: val-pvs-ahead
   title: priv_validator_state height ahead of the chain — signing refused
+  plain: "The signing state is ahead of the chain; signing now could double-sign."
   explains: [val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, val-local-privval-errors]
   severity: high
   symptoms: node synced but won't sign; logs show height regression / conflicting data
@@ -300,6 +311,7 @@
 
 - id: val-double-sign-evidence
   title: Double-sign evidence in logs
+  plain: "There is evidence that this validator double-signed."
   explains: [val-tombstoned]
   severity: critical
   match:
