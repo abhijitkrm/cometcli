@@ -221,7 +221,6 @@ func dutyCompose(image, name, home string, logs bool, proxyPort int) string {
 	b.WriteString("# written by cometcli network export\nservices:\n  cometduty:\n")
 	fmt.Fprintf(&b, "    image: %s\n    container_name: %s\n    restart: unless-stopped\n    read_only: true\n    network_mode: host\n", image, name)
 	b.WriteString("    user: \"${USER_ID:-65532}\"\n")
-	b.WriteString("    command: [\"-f\", \"/config/config.yml\", \"--state\", \"/data/state.json\", \"--alert-log\", \"/data/alerts.jsonl\"]\n")
 	b.WriteString("    volumes:\n      - ./config.yml:/config/config.yml:ro\n      - ./state:/data\n")
 	if home != "" {
 		fmt.Fprintf(&b, "      - %s:/node-home:ro\n", home)
