@@ -59,6 +59,9 @@ func TestCometdutyFiles(t *testing.T) {
 	if arch := string(sets[0].Files["config.yml"]); strings.Contains(arch, "valoper_address") {
 		t.Errorf("archive watched as a validator:\n%s", arch)
 	}
+	if !strings.Contains(v1b, "prometheus_bind: 127.0.0.1") {
+		t.Error("metrics not on loopback by default")
+	}
 	if c := string(sets[2].Files["compose.yml"]); !strings.Contains(c, "/home/u/.cometcli-nodes/val1b:/node-home:ro") || !strings.Contains(c, "network_mode: host") {
 		t.Errorf("compose:\n%s", c)
 	}

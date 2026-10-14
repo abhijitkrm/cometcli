@@ -16,7 +16,7 @@ import (
 )
 
 func networkExportCmd() *cobra.Command {
-	var format, profiles, out, webhookURL, chainOn, image string
+	var format, profiles, out, webhookURL, chainOn, image, bind string
 	var silenceAPI, deploy, link bool
 	cmd := &cobra.Command{
 		Use:   "export <chain-id> --format cometduty",
@@ -72,7 +72,7 @@ cometduty doesn't need cometcli, and cometcli doesn't need cometduty.`,
 			if len(list) == 0 {
 				return fmt.Errorf("no profiles on %s", chain)
 			}
-			o := networktool.MonitorOpts{Image: image, WebhookURL: webhookURL, ChainOn: chainOn}
+			o := networktool.MonitorOpts{Image: image, WebhookURL: webhookURL, ChainOn: chainOn, MetricsBind: bind}
 			if webhookURL != "" {
 				if o.Secret = credential("WATCH_WEBHOOK_SECRET"); o.Secret == "" {
 					o.Secret = networktool.RandomSecret()
@@ -135,7 +135,11 @@ cometduty doesn't need cometcli, and cometcli doesn't need cometduty.`,
 					if err != nil {
 						return fmt.Errorf("%s: %w", p.Name, err)
 					}
-					fmt.Fprintf(w, "✓ %s: %s\n", orDash(f.Profile), msg)
+					who := f.Profile
+					if who == "" {
+						who = "chain instance on " + p.Name
+					}
+					fmt.Fprintf(w, "✓ %s: %s\n", who, msg)
 				}
 			}
 			if link {
@@ -185,6 +189,7 @@ cometduty doesn't need cometcli, and cometcli doesn't need cometduty.`,
 	f.BoolVar(&silenceAPI, "silence-api", false, "enable cometduty's silence API (token in the MONITOR_API_TOKEN credential)")
 	f.StringVar(&chainOn, "chain-on", "", "profile whose host runs the chain-role instance (default: the first)")
 	f.StringVar(&image, "image", "", "cometduty image (default "+networktool.CometdutyImage+")")
+	f.StringVar(&bind, "metrics-bind", "127.0.0.1", "where cometduty's /metrics and silence API listen (0.0.0.0 for a remote Prometheus)")
 	f.BoolVar(&deploy, "deploy", false, "copy the files to each host and start cometduty there")
 	f.BoolVar(&link, "link", false, "record the monitors in cometcli's config (endpoints.monitor, monitor.silence)")
 	return cmd

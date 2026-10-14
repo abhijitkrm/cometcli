@@ -30,6 +30,10 @@ type MonitorOpts struct {
 	APIToken    string // enables the silence API; "" = off
 	ChainOn     string // profile whose host runs the chain-role instance
 	MetricsPort int    // first sidecar's /metrics port (default 28686)
+	// MetricsBind is where /metrics and the silence API listen (default
+	// 127.0.0.1: cometcli reaches them through ssh; open it only for a
+	// Prometheus on another machine).
+	MetricsBind string
 }
 
 // MonitorFiles is what one host gets.
@@ -195,8 +199,12 @@ func sidecarAlerts(o MonitorOpts) map[string]any {
 }
 
 func dutyConfig(o MonitorOpts, port int, chains map[string]any) ([]byte, error) {
+	bind := o.MetricsBind
+	if bind == "" {
+		bind = "127.0.0.1"
+	}
 	root := map[string]any{
-		"prometheus_enabled": true, "prometheus_listen_port": port, "prometheus_bind": "0.0.0.0",
+		"prometheus_enabled": true, "prometheus_listen_port": port, "prometheus_bind": bind,
 		"node_down_alert_minutes": 3, "node_down_alert_severity": "critical",
 		"flap_suppression_minutes": 15,
 		"chains":                   chains,
