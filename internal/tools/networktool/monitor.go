@@ -13,6 +13,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/abhijitkrm/cometcli/internal/config"
+	"github.com/abhijitkrm/cometcli/internal/keys"
 	"github.com/abhijitkrm/cometcli/internal/netspec"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
 	"github.com/abhijitkrm/cometcli/internal/tools/common"
@@ -138,7 +139,7 @@ func CometdutyFiles(chainID string, profiles []*config.Profile, o MonitorOpts) (
 			"alerts": sidecarAlerts(o),
 			"nodes":  []any{node},
 		}
-		if v := p.Metadata["valoper"]; v != "" && p.IsValidator() {
+		if v := valoperOf(p); v != "" && p.IsValidator() {
 			node["validator"] = p.Name
 			chain["validators"] = []any{map[string]any{"valoper_address": v, "label": p.Name,
 				"labels": map[string]string{"profile": p.Name}}}
@@ -307,4 +308,113 @@ func DeployMonitor(c *toolkit.Context, chainID string, f MonitorFiles, home stri
 		return fmt.Sprintf("cometduty restarted with the new config in %s (as %s), metrics on :%d", dir, owner, f.Port), nil
 	}
 	return fmt.Sprintf("cometduty running in %s (as %s), metrics on :%d", dir, owner, f.Port), nil
+}
+
+// StandalonePort is the standalone instance's default /metrics port: apart
+// from the sidecars' 28686+, so both layouts can share a host.
+const StandalonePort = 28696
+
+// StandaloneFiles renders one cometduty instance in the standalone role
+// for a whole network: every validator's signing, the active set, chain
+// health, and each node it can reach. It runs on the opts.ChainOn host
+// (default: the first node); a node whose RPC is loopback-only on another
+// host can't be reached from there and is returned in skipped. rpcs are
+// extra endpoints (a public RPC) used as data sources, not paged when down.
+// It has no node home or logs: disk, signer-state and log alerts need
+// sidecars.
+func StandaloneFiles(chainID string, profiles []*config.Profile, o MonitorOpts, rpcs []string) (MonitorFiles, []string, error) {
+	if o.Image == "" {
+		o.Image = CometdutyImage
+	}
+	if o.MetricsPort == 0 {
+		o.MetricsPort = StandalonePort
+	}
+	sort.Slice(profiles, func(i, j int) bool { return profiles[i].Name < profiles[j].Name })
+	on := ChainHost(profiles, o.ChainOn)
+	if on == nil {
+		return MonitorFiles{}, nil, fmt.Errorf("--chain-on %s isn't one of the nodes", o.ChainOn)
+	}
+	reach := func(p *config.Profile, u string) bool {
+		return u != "" && (!isLoopback(u) || hostKey(p) == hostKey(on))
+	}
+	var nodes, validators []any
+	var skipped []string
+	seen := map[string]bool{}
+	for _, p := range profiles {
+		if p.ChainID != chainID {
+			return MonitorFiles{}, nil, fmt.Errorf("profile %s is on %s, not %s", p.Name, p.ChainID, chainID)
+		}
+		if v := valoperOf(p); v != "" && p.IsValidator() && !seen[v] {
+			seen[v] = true
+			validators = append(validators, map[string]any{"valoper_address": v, "label": p.Name,
+				"labels": map[string]string{"profile": p.Name}})
+		}
+		rpc := httpURL(p.Endpoints.Comet)
+		if !reach(p, rpc) {
+			skipped = append(skipped, p.Name)
+			continue
+		}
+		node := map[string]any{"url": rpc, "name": p.Name, "alert_if_down": true,
+			"labels": map[string]string{"profile": p.Name}}
+		if m := cometMetricsURL(rpc); m != "" {
+			node["metrics_url"] = m
+		}
+		if evm := httpURL(p.Endpoints.EVM); reach(p, evm) {
+			node["evm_rpc"] = evm
+		}
+		if valoperOf(p) != "" && p.IsValidator() {
+			node["validator"] = p.Name
+		}
+		nodes = append(nodes, node)
+	}
+	for i, r := range rpcs {
+		nodes = append(nodes, map[string]any{"url": httpURL(r), "name": fmt.Sprintf("rpc-%d", i+1), "alert_if_down": false})
+	}
+	if len(nodes) == 0 {
+		return MonitorFiles{}, skipped, fmt.Errorf("no node's RPC is reachable from %s (loopback-only on other hosts) — pass --rpc with an endpoint it can reach, or use the sidecar layout", on.Name)
+	}
+	alerts := sidecarAlerts(o)
+	alerts["stalled_enabled"], alerts["stalled_minutes"] = true, 2
+	alerts["alert_if_no_servers"], alerts["set_watch_enabled"] = true, true
+	delete(alerts, "disk_free_bytes_alert") // no node home here
+	delete(alerts, "signer_stall_minutes")
+	chain := map[string]any{"chain_id": chainID, "alerts": alerts, "nodes": nodes}
+	if len(validators) > 0 {
+		chain["validators"] = validators
+	}
+	cfgYAML, err := dutyConfig(o, o.MetricsPort, map[string]any{chainID: chain})
+	if err != nil {
+		return MonitorFiles{}, nil, err
+	}
+	return MonitorFiles{Dir: "standalone", Port: o.MetricsPort, Files: map[string][]byte{
+		"config.yml":  cfgYAML,
+		"compose.yml": []byte(dutyCompose(o.Image, "cometduty-"+netspec.SafeName(chainID), "", false, 0)),
+	}}, skipped, nil
+}
+
+func isLoopback(u string) bool {
+	h := hostOfURL(u)
+	return h == "127.0.0.1" || h == "localhost" || h == "::1" || h == "0.0.0.0"
+}
+
+func hostOfURL(u string) string {
+	p, err := url.Parse(u)
+	if err != nil {
+		return ""
+	}
+	return p.Hostname()
+}
+
+// valoperOf is a validator profile's operator address: metadata.valoper,
+// or derived from metadata.account (same bytes) when only that was saved.
+func valoperOf(p *config.Profile) string {
+	if v := p.Metadata["valoper"]; v != "" {
+		return v
+	}
+	if a := p.Metadata["account"]; a != "" {
+		if v, err := keys.ValoperFromAcc(a); err == nil {
+			return v
+		}
+	}
+	return ""
 }

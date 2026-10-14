@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -16,15 +17,23 @@ import (
 )
 
 func networkExportCmd() *cobra.Command {
-	var format, profiles, out, webhookURL, chainOn, image, bind, tgChat string
+	var format, layout, rpcs, profiles, out, webhookURL, chainOn, image, bind, tgChat string
 	var silenceAPI, deploy, link, telegram bool
 	cmd := &cobra.Command{
 		Use:   "export <chain-id> --format cometduty",
 		Short: "Write monitoring config for a network's nodes (cometduty), optionally deploy it",
-		Long: `Writes a cometduty sidecar for each node of <chain-id> — config and
-compose file, from what the profiles already know (RPC, EVM and metrics
-ports, node home, container, operator address) — plus the chain-role
-instance, beside one node. Every alert carries the label profile=<name>.
+		Long: `Writes cometduty monitoring for the nodes of <chain-id>, from what the
+profiles already know (RPC, EVM and metrics ports, node home, container,
+operator address). Every alert carries the label profile=<name>.
+
+  --layout sidecar     (default) a cometduty beside each node — everything,
+                       including disk, signer-state and log alerts that need
+                       the node's machine — plus a chain-role instance
+  --layout standalone  one cometduty for the whole network on the --chain-on
+                       host: every validator's signing, the active set, chain
+                       health, and each node whose RPC it can reach; no disk,
+                       signer-state or log alerts. --rpc adds endpoints it
+                       can reach (a public RPC)
 
   --webhook-url   send alerts to a receiver, e.g. cometcli watch --listen;
                   signed with a secret saved as WATCH_WEBHOOK_SECRET
@@ -106,9 +115,26 @@ cometduty doesn't need cometcli, and cometcli doesn't need cometduty.`,
 					return fmt.Errorf("--telegram needs a bot token (watch.alerts.telegram_token or the TELEGRAM_BOT_TOKEN credential) and a chat (watch.alerts.telegram_chat_id or --telegram-chat)")
 				}
 			}
-			sets, err := networktool.CometdutyFiles(chain, list, o)
-			if err != nil {
-				return err
+			var sets []networktool.MonitorFiles
+			switch layout {
+			case "sidecar":
+				if rpcs != "" {
+					return fmt.Errorf("--rpc is for --layout standalone")
+				}
+				if sets, err = networktool.CometdutyFiles(chain, list, o); err != nil {
+					return err
+				}
+			case "standalone":
+				f, skipped, err := networktool.StandaloneFiles(chain, list, o, splitCSV(rpcs))
+				if err != nil {
+					return err
+				}
+				sets = []networktool.MonitorFiles{f}
+				if len(skipped) > 0 {
+					fmt.Fprintf(w, "note: %s not watched as nodes — their RPC is loopback-only on another host (signing is still watched for validators)\n", strings.Join(skipped, ", "))
+				}
+			default:
+				return fmt.Errorf("--layout: sidecar or standalone")
 			}
 			if out == "" {
 				if out, err = config.Path(filepath.Join("monitor", netspec.SafeName(chain))); err != nil {
@@ -128,11 +154,15 @@ cometduty doesn't need cometcli, and cometcli doesn't need cometduty.`,
 				}
 				on := f.Profile
 				if on == "" {
-					on = chainHost.Name + " (chain-role instance)"
+					on = chainHost.Name + " (" + map[string]string{"sidecar": "chain-role", "standalone": "standalone"}[layout] + " instance)"
 				}
 				fmt.Fprintf(w, "  %-28s → %s  (metrics :%d)\n", on, dir, f.Port)
 			}
-			fmt.Fprintf(w, "✓ cometduty files for %d nodes of %s in %s\n", len(list), chain, out)
+			if layout == "standalone" {
+				fmt.Fprintf(w, "✓ cometduty standalone config for %s (%d profiles) in %s\n", chain, len(list), out)
+			} else {
+				fmt.Fprintf(w, "✓ cometduty files for %d nodes of %s in %s\n", len(list), chain, out)
+			}
 
 			if deploy {
 				if !flagYes && !confirm(cmd, fmt.Sprintf("start cometduty on the hosts of %d nodes (docker compose, as each node home's owner)?", len(list))) {
@@ -152,7 +182,10 @@ cometduty doesn't need cometcli, and cometcli doesn't need cometduty.`,
 					}
 					who := f.Profile
 					if who == "" {
-						who = "chain instance on " + p.Name
+						who = layout + " instance on " + p.Name
+						if layout == "sidecar" {
+							who = "chain instance on " + p.Name
+						}
 					}
 					fmt.Fprintf(w, "✓ %s: %s\n", who, msg)
 				}
@@ -175,17 +208,29 @@ cometduty doesn't need cometcli, and cometcli doesn't need cometduty.`,
 				if err := cfg.Save(); err != nil {
 					return err
 				}
-				fmt.Fprintln(w, "✓ linked: each profile's endpoints.monitor and the chain instance under monitor.silence")
+				if layout == "standalone" {
+					fmt.Fprintln(w, "✓ linked: the standalone instance under monitor.silence (planned work silences it)")
+				} else {
+					fmt.Fprintln(w, "✓ linked: each profile's endpoints.monitor and the chain instance under monitor.silence")
+				}
 			}
 			var next []string
 			if !deploy {
-				next = append(next, "copy each folder to its node's host and run `USER_ID=$(stat -c %u:%g <node home>) docker compose up -d` there — or rerun with --deploy")
+				if layout == "standalone" {
+					next = append(next, "copy the folder to any machine that reaches those RPCs and run `docker compose up -d` there — or rerun with --deploy")
+				} else {
+					next = append(next, "copy each folder to its node's host and run `USER_ID=$(stat -c %u:%g <node home>) docker compose up -d` there — or rerun with --deploy")
+				}
 			}
 			if webhookURL != "" {
 				next = append(next, "receive the alerts: cometcli watch --listen <addr> (reachable at "+webhookURL+")")
 			}
 			if !link {
-				next = append(next, "rerun with --link so triage reads each node's monitor and cometcli silences it during planned work")
+				if layout == "standalone" {
+					next = append(next, "rerun with --link so cometcli silences it during planned work")
+				} else {
+					next = append(next, "rerun with --link so triage reads each node's monitor and cometcli silences it during planned work")
+				}
 			}
 			for i, n := range next {
 				fmt.Fprintf(w, "next %d: %s\n", i+1, n)
@@ -198,13 +243,15 @@ cometduty doesn't need cometcli, and cometcli doesn't need cometduty.`,
 	}
 	f := cmd.Flags()
 	f.StringVar(&format, "format", "cometduty", "what to write (cometduty)")
+	f.StringVar(&layout, "layout", "sidecar", "sidecar (one per node + chain instance) or standalone (one for the network)")
+	f.StringVar(&rpcs, "rpc", "", "standalone: extra RPC endpoints it can reach, comma-separated (data sources, not paged)")
 	f.StringVar(&profiles, "profiles", "", "nodes to include (default: every profile on <chain-id>)")
 	f.StringVar(&out, "out", "", "where to write (default ~/.cometcli/monitor/<chain-id>)")
 	f.StringVar(&webhookURL, "webhook-url", "", "send alerts here, signed (e.g. where cometcli watch --listen is reachable)")
 	f.BoolVar(&telegram, "telegram", false, "send alerts to Telegram too (watch's bot and chat)")
 	f.StringVar(&tgChat, "telegram-chat", "", "Telegram chat id for alerts (implies --telegram)")
 	f.BoolVar(&silenceAPI, "silence-api", false, "enable cometduty's silence API (token in the MONITOR_API_TOKEN credential)")
-	f.StringVar(&chainOn, "chain-on", "", "profile whose host runs the chain-role instance (default: the first)")
+	f.StringVar(&chainOn, "chain-on", "", "profile whose host runs the chain-role (or standalone) instance (default: the first)")
 	f.StringVar(&image, "image", "", "cometduty image (default "+networktool.CometdutyImage+")")
 	f.StringVar(&bind, "metrics-bind", "127.0.0.1", "where cometduty's /metrics and silence API listen (0.0.0.0 for a remote Prometheus)")
 	f.BoolVar(&deploy, "deploy", false, "copy the files to each host and start cometduty there")

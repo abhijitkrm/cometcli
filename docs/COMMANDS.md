@@ -641,6 +641,11 @@ cometcli network export mychain-1 --format cometduty                 # files onl
 cometcli network export mychain-1 --format cometduty --silence-api --link --deploy
 cometcli network export mychain-1 --format cometduty --webhook-url https://ops.example:9180/alerts
 cometcli network export mychain-1 --format cometduty --telegram     # alerts to watch's Telegram chat too
+# one cometduty for the whole network instead of one per node: every
+# validator's signing, the active set, chain health, and the nodes whose RPC
+# it can reach from the --chain-on host (--rpc adds a public endpoint).
+# No disk, signer-state or log alerts — those need the sidecar layout.
+cometcli network export mychain-1 --format cometduty --layout standalone --chain-on val01 --deploy
 
 # work a monitor's alerts the moment they fire
 cometcli config set-key WATCH_WEBHOOK_SECRET      # cometduty's webhook.secret
