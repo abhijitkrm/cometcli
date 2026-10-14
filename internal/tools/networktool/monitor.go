@@ -284,6 +284,8 @@ func DeployMonitor(c *toolkit.Context, chainID string, f MonitorFiles, home stri
 		common.ShellQ(dir), common.ShellQ(dir), owner, common.ShellQ(dir), owner, common.ShellQ(dir))); err != nil || code != 0 {
 		return "", fmt.Errorf("create %s: %v (exit %d)", dir, err, code)
 	}
+	sum := "sha256sum " + common.ShellQ(dir) + "/config.yml 2>/dev/null | cut -c1-64"
+	before, _, _ := h.Run(c, sum)
 	for name, content := range f.Files {
 		if err := h.WriteFile(c, path.Join(dir, name), content, 0o600); err != nil {
 			return "", fmt.Errorf("write %s: %w", name, err)
@@ -294,6 +296,15 @@ func DeployMonitor(c *toolkit.Context, chainID string, f MonitorFiles, home stri
 	out, code, err := h.Run(c, fmt.Sprintf("cd %s && USER_ID=%s docker compose up -d 2>&1 | tail -3", common.ShellQ(dir), owner))
 	if err != nil || code != 0 {
 		return "", fmt.Errorf("docker compose up failed (exit %d): %v %s", code, err, strings.TrimSpace(out))
+	}
+	// compose only recreates for a changed compose file: a running
+	// cometduty must be restarted to read a new config (its state is kept)
+	after, _, _ := h.Run(c, sum)
+	if b := strings.TrimSpace(before); b != "" && b != strings.TrimSpace(after) {
+		if out, code, err := h.Run(c, fmt.Sprintf("cd %s && USER_ID=%s docker compose restart cometduty 2>&1 | tail -3", common.ShellQ(dir), owner)); err != nil || code != 0 {
+			return "", fmt.Errorf("restart cometduty for the new config (exit %d): %v %s", code, err, strings.TrimSpace(out))
+		}
+		return fmt.Sprintf("cometduty restarted with the new config in %s (as %s), metrics on :%d", dir, owner, f.Port), nil
 	}
 	return fmt.Sprintf("cometduty running in %s (as %s), metrics on :%d", dir, owner, f.Port), nil
 }
