@@ -21,7 +21,7 @@ import (
 
 // CometdutyImage is the cometduty release the generated files run; it must
 // understand labels, api_token and webhook.secret.
-const CometdutyImage = "ghcr.io/abhijitkrm/cometduty:v0.3.0"
+const CometdutyImage = "ghcr.io/abhijitkrm/cometduty:0.3.0" // goreleaser tags images without the v
 
 // MonitorOpts shape the cometduty files for a network.
 type MonitorOpts struct {
