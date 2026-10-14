@@ -666,6 +666,11 @@ watch:
   listen: 127.0.0.1:9180
 ```
 
+The chain-role instance sees the chain through the RPC of the node it runs beside
+(`--chain-on`, default the first profile): node RPCs listen on their host's loopback,
+so that is the one it can reach. When that node is down it reports `no-nodes` — it
+can't see the chain — not a halt; pick a node you restart rarely.
+
 Only `kind`, `target`, the labels and the severity of an alert steer what cometcli does.
 Its message text — which can quote node logs — never reaches the agent.
 
