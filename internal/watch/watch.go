@@ -227,7 +227,7 @@ func (w *Watcher) reconcile(ctx context.Context, issues []Issue, inScope func(ke
 			delete(w.state.Paused, k)
 			continue // cleared with the planned work: nothing was reported as broken
 		}
-		w.send(ctx, "✅ resolved: "+strings.Replace(k, "|", ": ", 1))
+		w.send(ctx, resolvedLine(k, ""))
 	}
 	keys := make([]string, 0, len(current))
 	for k := range current {
@@ -250,7 +250,7 @@ func (w *Watcher) reconcile(ctx context.Context, issues []Issue, inScope func(ke
 						w.state.Paused = map[string]bool{}
 					}
 					w.state.Paused[k] = true
-					w.send(ctx, fmt.Sprintf("🔕 %s: %s [%s] during planned work — not acting\n%s", is.Profile, orDash(is.Case), is.Severity, why))
+					w.send(ctx, fmt.Sprintf("🔕 **%s** · `%s` · %s\nplanned work — not acting: %s", is.Profile, orDash(is.Case), is.Severity, why))
 				}
 				continue
 			}
@@ -277,6 +277,20 @@ func (w *Watcher) reconcile(ctx context.Context, issues []Issue, inScope func(ke
 	return len(current), len(gone)
 }
 
+// localPath is a path on the watcher's machine (incident files): noise in
+// a chat read elsewhere.
+var localPath = regexp.MustCompile(` → (?:/|~/)\S+`)
+
+// resolvedLine announces a cleared issue ("profile|case" or "fleet|…").
+func resolvedLine(key, source string) string {
+	where, what, _ := strings.Cut(key, "|")
+	line := fmt.Sprintf("✅ **%s** · resolved: `%s`", where, what)
+	if source != "" {
+		line += " (per " + source + ")"
+	}
+	return line
+}
+
 func (w *Watcher) fromMonitor(issueKey string) bool {
 	for _, k := range w.state.Monitor {
 		if k == issueKey {
@@ -284,6 +298,43 @@ func (w *Watcher) fromMonitor(issueKey string) bool {
 		}
 	}
 	return false
+}
+
+// pending takes a and every alert queued behind it (they pile up while a
+// long piece of work runs) and keeps each condition's latest state: an
+// alert raised and resolved in the meantime is a resolve, not work.
+func (w *Watcher) pending(a Alert) []Alert {
+	batch := []Alert{a}
+	for more := true; more; {
+		select {
+		case b := <-w.Alerts:
+			batch = append(batch, b)
+		default:
+			more = false
+		}
+	}
+	last := map[string]int{}
+	raised := map[string]bool{}
+	for i, b := range batch {
+		last[b.Key] = i
+		if !b.Resolved {
+			raised[b.Key] = true
+		}
+	}
+	var out []Alert
+	for i, b := range batch {
+		if last[b.Key] != i {
+			continue
+		}
+		if b.Resolved && raised[b.Key] {
+			w.logf("monitor alert from %s: %s raised and resolved while busy — skipped", b.Source, b.Kind)
+			if _, known := w.state.Monitor[b.Key]; !known {
+				continue
+			}
+		}
+		out = append(out, b)
+	}
+	return out
 }
 
 // OnAlert works a monitor alert. One about a node triages that node now:
@@ -306,7 +357,7 @@ func (w *Watcher) OnAlert(ctx context.Context, a Alert) {
 			delete(w.state.Monitor, a.Key)
 			if _, open := w.state.Active[k]; open {
 				delete(w.state.Active, k)
-				w.send(ctx, "✅ resolved: "+strings.Replace(k, "|", ": ", 1)+" (per "+a.Source+")")
+				w.send(ctx, resolvedLine(k, a.Source))
 			}
 			w.save()
 		}
@@ -362,7 +413,7 @@ func (w *Watcher) handle(ctx context.Context, is Issue) {
 	if where == "" {
 		where = "fleet"
 	}
-	w.send(ctx, fmt.Sprintf("🚨 %s: %s [%s]\n%s", where, orDash(is.Case), is.Severity, is.Text))
+	w.send(ctx, fmt.Sprintf("🚨 **%s** · `%s` · %s\n%s", where, orDash(is.Case), is.Severity, is.Text))
 	if w.Mode == ModeNotify || is.Profile == "" || w.Run == nil {
 		return
 	}
@@ -377,15 +428,15 @@ func (w *Watcher) handle(ctx context.Context, is Issue) {
 	}
 	verb := "investigating (read-only)"
 	if !readOnly {
-		verb = "working it — approvals will be sent here"
+		verb = "working on it — approvals come here"
 	}
-	w.send(ctx, fmt.Sprintf("🔎 %s: %s", is.Profile, verb))
+	w.send(ctx, fmt.Sprintf("🔎 **%s** · %s", is.Profile, verb))
 	report, err := w.Run(ctx, p, fmt.Sprintf("%s on %s detected by the watcher: %s", orDash(is.Case), is.Profile, is.Text), readOnly, approve)
 	if err != nil {
-		w.send(ctx, fmt.Sprintf("⚠️ %s: the agent stopped: %v", is.Profile, err))
+		w.send(ctx, fmt.Sprintf("⚠️ **%s** · the agent stopped: %v", is.Profile, err))
 		return
 	}
-	w.send(ctx, fmt.Sprintf("📋 %s report:\n%s", is.Profile, clip(strings.TrimSpace(report), 3000)))
+	w.send(ctx, fmt.Sprintf("📋 **%s** · report\n\n%s", is.Profile, clip(localPath.ReplaceAllString(strings.TrimSpace(report), ""), 3000)))
 }
 
 // Loop sweeps every interval until ctx ends, working monitor alerts as
@@ -404,7 +455,9 @@ func (w *Watcher) Loop(ctx context.Context, interval time.Duration, once bool) {
 			case <-ctx.Done():
 				return
 			case a := <-w.Alerts:
-				w.OnAlert(ctx, a)
+				for _, a := range w.pending(a) {
+					w.OnAlert(ctx, a)
+				}
 			case <-next:
 				break wait
 			}

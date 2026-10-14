@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/abhijitkrm/cometcli/internal/monitor"
 )
 
 // Telegram asks for approvals with inline Approve / Deny buttons and
@@ -65,9 +67,22 @@ func (t *Telegram) api(ctx context.Context, method string, body any, out any) er
 	return nil
 }
 
-// Send posts a plain message.
+// Send posts a message (cometcli's Markdown, rendered for Telegram).
 func (t *Telegram) Send(ctx context.Context, text string) error {
-	return t.api(ctx, "sendMessage", map[string]any{"chat_id": t.ChatID, "text": clip(text, 4000)}, nil)
+	return t.send(ctx, "sendMessage", map[string]any{"chat_id": t.ChatID}, clip(text, 3500), nil)
+}
+
+// send calls method with text as Telegram HTML, or as plain text when
+// Telegram refuses the markup.
+func (t *Telegram) send(ctx context.Context, method string, m map[string]any, text string, out any) error {
+	m["text"], m["parse_mode"], m["disable_web_page_preview"] = monitor.TelegramHTML(text), "HTML", true
+	err := t.api(ctx, method, m, out)
+	if err != nil && strings.Contains(err.Error(), "can't parse entities") {
+		delete(m, "parse_mode")
+		m["text"] = text
+		err = t.api(ctx, method, m, out)
+	}
+	return err
 }
 
 // Ask posts the question with buttons and waits for the answer.
@@ -80,13 +95,13 @@ func (t *Telegram) Ask(ctx context.Context, text string) (bool, string, error) {
 	var msg struct {
 		MessageID int64 `json:"message_id"`
 	}
-	err := t.api(ctx, "sendMessage", map[string]any{
-		"chat_id": t.ChatID, "text": clip(text, 3800),
+	err := t.send(ctx, "sendMessage", map[string]any{
+		"chat_id": t.ChatID,
 		"reply_markup": map[string]any{"inline_keyboard": [][]map[string]string{{
 			{"text": "✅ Approve", "callback_data": "a:" + id},
 			{"text": "❌ Deny", "callback_data": "d:" + id},
 		}}},
-	}, &msg)
+	}, clip(text, 3500), &msg)
 	if err != nil {
 		return false, "", err
 	}
@@ -143,11 +158,11 @@ func (t *Telegram) Ask(ctx context.Context, text string) (bool, string, error) {
 				verdict = "✅ approved by " + who
 			}
 			_ = t.api(ctx, "answerCallbackQuery", map[string]any{"callback_query_id": cq.ID, "text": verdict}, nil)
-			_ = t.api(ctx, "editMessageText", map[string]any{"chat_id": t.ChatID, "message_id": msg.MessageID, "text": clip(text, 3800) + "\n\n" + verdict}, nil)
+			_ = t.send(ctx, "editMessageText", map[string]any{"chat_id": t.ChatID, "message_id": msg.MessageID}, clip(text, 3500)+"\n\n"+verdict, nil)
 			return ok, who, nil
 		}
 	}
-	_ = t.api(ctx, "editMessageText", map[string]any{"chat_id": t.ChatID, "message_id": msg.MessageID, "text": clip(text, 3800) + "\n\n⌛ no answer in " + timeout.String() + " — denied"}, nil)
+	_ = t.send(ctx, "editMessageText", map[string]any{"chat_id": t.ChatID, "message_id": msg.MessageID}, clip(text, 3500)+"\n\n⌛ no answer in "+timeout.String()+" — denied", nil)
 	return false, "", nil
 }
 

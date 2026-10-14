@@ -171,3 +171,14 @@ func TestWatcherTriageAppendsDiagnosis(t *testing.T) {
 		t.Fatalf("triage not appended: %q", got)
 	}
 }
+
+func TestTelegramHTML(t *testing.T) {
+	got := TelegramHTML("📋 **v6-arch** · report\n\n- node.service — start `primium-archive` <now>\n_worked locally · no model call_\nsnake_case_name & a_b")
+	want := "📋 <b>v6-arch</b> · report\n\n• node.service — start <code>primium-archive</code> &lt;now&gt;\n<i>worked locally · no model call</i>\nsnake_case_name &amp; a_b"
+	if got != want {
+		t.Fatalf("got\n%s\nwant\n%s", got, want)
+	}
+	if got := TelegramHTML("`a<b` and `c`"); got != "<code>a&lt;b</code> and <code>c</code>" {
+		t.Fatalf("code spans: %s", got)
+	}
+}

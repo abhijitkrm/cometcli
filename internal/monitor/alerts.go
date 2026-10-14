@@ -153,8 +153,16 @@ type telegram struct{ token, chatID string }
 func (t *telegram) Name() string { return "telegram" }
 
 func (t *telegram) Send(ctx context.Context, msg string) error {
+	err := t.post(ctx, map[string]any{"chat_id": t.chatID, "text": TelegramHTML(msg), "parse_mode": "HTML", "disable_web_page_preview": true})
+	if err != nil && strings.Contains(err.Error(), "400") {
+		err = t.post(ctx, map[string]any{"chat_id": t.chatID, "text": msg}) // markup Telegram refused: plain
+	}
+	return err
+}
+
+func (t *telegram) post(ctx context.Context, m map[string]any) error {
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", t.token)
-	body, _ := json.Marshal(map[string]any{"chat_id": t.chatID, "text": msg})
+	body, _ := json.Marshal(m)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
 		return err

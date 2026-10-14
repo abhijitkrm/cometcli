@@ -138,7 +138,7 @@ func TestAlertDrivenIncidents(t *testing.T) {
 	}
 	a.Resolved = true
 	w.OnAlert(ctx, a)
-	if !strings.Contains(strings.Join(n.msgs, "\n"), "✅ resolved: val01: monitor:signer-regressed (per cometduty)") {
+	if !strings.Contains(strings.Join(n.msgs, "\n"), "✅ **val01** · resolved: `monitor:signer-regressed` (per cometduty)") {
 		t.Fatalf("resolve not reported:\n%s", strings.Join(n.msgs, "\n"))
 	}
 	jailed = true // now triage sees the cause itself

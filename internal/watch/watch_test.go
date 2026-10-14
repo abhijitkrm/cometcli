@@ -3,6 +3,7 @@ package watch
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -53,7 +54,7 @@ func TestSweepLifecycle(t *testing.T) {
 	ctx := context.Background()
 	w.Sweep(ctx) // new incident: report + read-only investigation
 	all := strings.Join(n.msgs, "\n")
-	if len(runs) != 1 || !runs[0] || !strings.Contains(all, "🚨 val01: val-jailed-downtime [critical]") || !strings.Contains(all, "📋 val01 report:\ncause: container stopped") {
+	if len(runs) != 1 || !runs[0] || !strings.Contains(all, "🚨 **val01** · `val-jailed-downtime` · critical") || !strings.Contains(all, "📋 **val01** · report\n\ncause: container stopped") {
 		t.Fatalf("first sweep: runs=%v\n%s", runs, all)
 	}
 	w.Sweep(ctx) // still jailed: nothing new
@@ -62,7 +63,7 @@ func TestSweepLifecycle(t *testing.T) {
 	}
 	jailed = false
 	w.Sweep(ctx) // cleared
-	if !strings.Contains(n.msgs[len(n.msgs)-1], "✅ resolved: val01: val-jailed-downtime") {
+	if !strings.Contains(n.msgs[len(n.msgs)-1], "✅ **val01** · resolved: `val-jailed-downtime`") {
 		t.Fatalf("no recovery message: %v", n.msgs)
 	}
 	jailed = true
@@ -220,12 +221,12 @@ func TestPlannedWorkIsLeftAlone(t *testing.T) {
 	w.Sweep(ctx)
 	w.Sweep(ctx)
 	all := strings.Join(n.msgs, "\n")
-	if runs != 0 || strings.Count(all, "🔕 val01: val-jailed-downtime") != 1 || strings.Contains(all, "🚨") {
+	if runs != 0 || strings.Count(all, "🔕 **val01** · `val-jailed-downtime`") != 1 || strings.Contains(all, "🚨") {
 		t.Fatalf("planned work: runs=%d\n%s", runs, all)
 	}
 	planned = "" // the work ended and the issue is still there: worked now
 	w.Sweep(ctx)
-	if runs != 1 || !strings.Contains(strings.Join(n.msgs, "\n"), "🚨 val01: val-jailed-downtime") {
+	if runs != 1 || !strings.Contains(strings.Join(n.msgs, "\n"), "🚨 **val01** · `val-jailed-downtime`") {
 		t.Fatalf("not worked after the planned work: runs=%d\n%v", runs, n.msgs)
 	}
 	// an issue that clears during planned work is never reported as resolved
@@ -238,5 +239,23 @@ func TestPlannedWorkIsLeftAlone(t *testing.T) {
 	w.Sweep(ctx)
 	if all := strings.Join(n.msgs, "\n"); runs != 1 || strings.Contains(all, "✅") || strings.Count(all, "🔕") != 1 {
 		t.Fatalf("cleared during planned work: runs=%d\n%s", runs, all)
+	}
+}
+
+func TestQueuedAlertsKeepLatestState(t *testing.T) {
+	ch := make(chan Alert, 8)
+	w := &Watcher{Alerts: ch, Out: io.Discard}
+	w.state.Monitor = map[string]string{"node-down:b": "val02|monitor:node-down"}
+	ch <- Alert{Key: "evm-down:a", Kind: "evm-down", Resolved: true}   // raised and resolved while busy
+	ch <- Alert{Key: "node-down:b", Kind: "node-down"}                 // still open
+	ch <- Alert{Key: "node-down:b", Kind: "node-down", Resolved: true} // known issue: its resolve still counts
+	ch <- Alert{Key: "stalled:c", Kind: "stalled"}
+	got := w.pending(Alert{Key: "evm-down:a", Kind: "evm-down"})
+	var keys []string
+	for _, a := range got {
+		keys = append(keys, fmt.Sprintf("%s/%v", a.Key, a.Resolved))
+	}
+	if strings.Join(keys, " ") != "node-down:b/true stalled:c/false" {
+		t.Fatalf("pending = %v", keys)
 	}
 }
