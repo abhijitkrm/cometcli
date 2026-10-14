@@ -81,14 +81,17 @@ func ForNode(c *toolkit.Context, cfg *config.Config, p *config.Profile, chainWid
 	type target struct {
 		url string
 		ctx *toolkit.Context
+		// source: the monitor reads the chain through this node (via), so
+		// its chain-level "can't see the chain" alerts are this work too
+		source bool
 	}
 	var targets []target
 	if p.Endpoints.Monitor != "" {
-		targets = append(targets, target{p.Endpoints.Monitor, c})
+		targets = append(targets, target{url: p.Endpoints.Monitor, ctx: c})
 	}
 	if cfg != nil {
 		for _, s := range cfg.Monitor.Silence {
-			t := target{url: s.URL}
+			t := target{url: s.URL, source: s.Via == p.Name}
 			if vp := cfg.Profiles[s.Via]; s.Via != "" && vp != nil {
 				vp.Name = s.Via
 				if s.Via == p.Name {
@@ -125,7 +128,14 @@ func ForNode(c *toolkit.Context, cfg *config.Config, p *config.Profile, chainWid
 				continue
 			}
 		}
-		if _, err := Create(c, hc, t.url, token, m, d, "cometcli: "+why); errors.Is(err, ErrNoAPI) {
+		_, err := Create(c, hc, t.url, token, m, d, "cometcli: "+why)
+		if err == nil && t.source && !chainWide {
+			_, err = Create(c, hc, t.url, token, []Matcher{
+				{Name: "chain_id", Value: p.ChainID, IsEqual: true},
+				{Name: "alertname", Value: "no-nodes|stalled", IsRegex: true, IsEqual: true},
+			}, d, "cometcli: "+why+" (the monitor's view of the chain)")
+		}
+		if errors.Is(err, ErrNoAPI) {
 			continue
 		} else if err != nil {
 			failed = append(failed, fmt.Sprintf("%s (%v)", t.url, err))

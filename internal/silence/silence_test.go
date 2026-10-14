@@ -26,15 +26,21 @@ func TestForNodeSilencesAtEachMonitor(t *testing.T) {
 	defer api.Close()
 	t.Setenv(TokenCredential, "tok")
 	p := &config.Profile{Name: "val01", ChainID: "c-1", Endpoints: config.Endpoints{Monitor: api.URL + "/metrics"}}
-	cfg := &config.Config{Monitor: config.MonitorConf{Silence: []config.SilenceAPI{{URL: api.URL}}}}
+	cfg := &config.Config{Monitor: config.MonitorConf{Silence: []config.SilenceAPI{{URL: api.URL, Via: "val01"}}},
+		Profiles: map[string]*config.Profile{"val01": p}}
 	c := &toolkit.Context{Context: context.Background(), Profile: p, Cfg: cfg}
 	line := ForNode(c, cfg, p, false, 15*time.Minute, "restart")
-	if len(got) != 2 || auth != "Bearer tok" || !strings.Contains(line, "alerts for val01 silenced for 15m0s") {
+	// own monitor + the chain instance, which reads the chain through val01:
+	// its no-nodes/stalled are silenced too
+	if len(got) != 3 || auth != "Bearer tok" || !strings.Contains(line, "alerts for val01 silenced for 15m0s") {
 		t.Fatalf("calls %d auth %q line %q", len(got), auth, line)
 	}
 	m := got[0]["matchers"].([]any)[0].(map[string]any)
 	if m["name"] != "profile" || m["value"] != "val01" || m["isEqual"] != true {
 		t.Fatalf("matcher %v", m)
+	}
+	if m := got[2]["matchers"].([]any); len(m) != 2 || m[1].(map[string]any)["value"] != "no-nodes|stalled" {
+		t.Fatalf("source matchers %v", m)
 	}
 	got = nil
 	ForNode(c, cfg, p, true, 30*time.Minute, "upgrade")
