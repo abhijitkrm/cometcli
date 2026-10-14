@@ -1,5 +1,6 @@
 - id: state-apphash-mismatch
   title: App hash mismatch (state diverged from the network)
+  plain: "The node computed a different state than the rest of the chain and stopped."
   explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, upgrade-version-behind, node-no-peers, node-low-peers]
   severity: critical
   symptoms: wrong Block.Header.AppHash / CONSENSUS FAILURE; node halts on a block
@@ -19,6 +20,7 @@
 
 - id: state-db-locked
   title: Database locked by another process
+  plain: "The node's database is locked by another process."
   explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, node-no-peers, node-low-peers]
   severity: high
   match:
@@ -32,6 +34,7 @@
 
 - id: state-db-corrupt
   title: Database corruption
+  plain: "The node's database is corrupted."
   explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, node-no-peers, node-low-peers]
   severity: critical
   match:
@@ -50,6 +53,7 @@
 
 - id: state-statesync-failing
   title: State sync failing
+  plain: "State sync isn't completing, so the node can't bootstrap."
   severity: high
   match:
     all: ["logs.statesync_fail > 0"]
@@ -86,6 +90,7 @@
 
 - id: node-db-backend-data-mismatch
   title: The configured DB backend doesn't match the data on disk
+  plain: "The data on disk was written by a different database backend than the node uses."
   explains: [node-process-down, node-crash-loop, node-rpc-down, evm-rpc-down, node-restarted-recently, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, cfg-db-backend-mismatch, node-no-peers, node-low-peers]
   severity: critical
   symptoms: "exits at start with \"failed to initialize database: EOF\" even though config.toml and app.toml agree"

@@ -17,6 +17,7 @@
 
 - id: val-in-set-while-syncing
   title: Validator in the active set while its node is catching up
+  plain: "The validator is in the active set but still syncing, so it isn't signing."
   severity: critical
   symptoms: every block missed until synced; jail risk grows each block
   match:
@@ -46,6 +47,7 @@
 
 - id: node-killed-sigkill
   title: Node exited with 137 (SIGKILL — OOM killer or forced stop)
+  plain: "The node process was force-stopped: killed for using too much memory, or a stop that didn't finish in time."
   explains: [node-process-down, node-rpc-down, evm-rpc-down, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
   severity: high
   match:
@@ -70,6 +72,7 @@
 
 - id: node-exit-config-error
   title: Node exits at startup with a config / flag error
+  plain: "The node exits right after starting because of a configuration error."
   explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, node-no-peers, node-low-peers]
   severity: critical
   match:
@@ -82,6 +85,7 @@
 
 - id: host-disk-free-low
   title: Less than 20 GB free on the data volume
+  plain: "The disk is nearly full; the node will stop when it fills."
   severity: high
   match:
     all: ["host.disk_free_gb < 20"]
@@ -127,6 +131,7 @@
 
 - id: val-local-privval-errors
   title: Local priv_validator errors (file key)
+  plain: "The validator's signing key or its state file is failing locally."
   explains: [val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded]
   severity: high
   match:
@@ -176,6 +181,7 @@
 
 - id: node-behind-but-not-reporting
   title: Node far behind while reporting catching_up=false and peers present
+  plain: "The node is behind the chain but doesn't report itself as syncing."
   severity: high
   match:
     all: ["node.stalled == true", "node.peers > 0"]
@@ -186,3 +192,25 @@
     - "[read] kb.show the matching state/host case (apphash, db corruption, disk)"
   test:
     signals: {node.stalled: true, node.peers: 6, logs.apphash: 2}
+
+- id: monitor-unreachable
+  title: The monitor watching this node doesn't answer
+  severity: medium
+  match:
+    all: ["monitor.reachable == false"]
+  fix:
+    - "[read] nobody may be paged for this node until its monitor is back — check the monitor process (endpoints.monitor)"
+    - "[change] restart the monitor on its host; if it moved, update endpoints.monitor in the profile"
+  test:
+    signals: {monitor.reachable: false}
+
+- id: monitor-alerts-silenced
+  title: Alerts for this node are silenced at its monitor
+  kind: advisory
+  severity: low
+  match:
+    all: ["monitor.silences > 0"]
+  fix:
+    - "[read] planned work silences alerts for 15–30 min; a silence older than the work means nothing will page — list them (GET /api/v2/silences) and expire leftovers"
+  test:
+    signals: {monitor.silences: 1}

@@ -3,6 +3,7 @@ package keys
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"strings"
 	"testing"
 
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -132,5 +133,15 @@ func TestSignGolden_KAT(t *testing.T) {
 	want2 := "0b89130fcca7338d85b07f0e0b6923473ffb8d520ab347f5010939b689e1843a0fe83b6b5a6956ef9ec86633918c26b1a790662d6630f58e371411cb9432f87c"
 	if got := hex.EncodeToString(k2.Sign(msg)); got != want2 {
 		t.Fatalf("secp256k1 sig = %s, want %s", got, want2)
+	}
+}
+
+func TestValoperFromAcc(t *testing.T) {
+	v, err := ValoperFromAcc("cosmos16ma42g9rx5vdx4r90xvxf7vuszjf0fhueqj7sm")
+	if err != nil || !strings.HasPrefix(v, "cosmosvaloper1") {
+		t.Fatal(v, err)
+	}
+	if a, _ := AccFromValoper(v); a != "cosmos16ma42g9rx5vdx4r90xvxf7vuszjf0fhueqj7sm" {
+		t.Fatalf("round trip: %s", a)
 	}
 }

@@ -103,6 +103,18 @@ func AccFromValoper(valoper string) (string, error) {
 	return bech32.Encode(strings.TrimSuffix(prefix, "valoper"), data)
 }
 
+// ValoperFromAcc converts an account address to its valoper address.
+func ValoperFromAcc(acc string) (string, error) {
+	prefix, data, err := bech32.DecodeNoLimit(acc)
+	if err != nil {
+		return "", err
+	}
+	if strings.HasSuffix(prefix, "valoper") {
+		return acc, nil
+	}
+	return bech32.Encode(prefix+"valoper", data)
+}
+
 func Bech32ToHex(addr string) (string, error) {
 	_, data, err := bech32.DecodeNoLimit(addr)
 	if err != nil {

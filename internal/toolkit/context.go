@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"sort"
 	"sync"
 	"time"
@@ -110,6 +111,22 @@ func (c *Context) nodeDialLocked(endpoint string) (host.DialFunc, error) {
 		return nil, fmt.Errorf("%s is on the node, reached through ssh: %w", endpoint, err)
 	}
 	return host.NodeDialer(h, c.Profile.Transport), nil
+}
+
+// NodeHTTP is an HTTP client for an endpoint, through the node's SSH
+// connection when the endpoint is on the node (its localhost or SSH host).
+func (c *Context) NodeHTTP(endpoint string, timeout time.Duration) (*http.Client, error) {
+	c.mu.Lock()
+	dial, err := c.nodeDialLocked(endpoint)
+	c.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	tr := &http.Transport{}
+	if dial != nil {
+		tr.DialContext = dial
+	}
+	return &http.Client{Timeout: timeout, Transport: tr}, nil
 }
 
 // GRPC lazily dials the Cosmos gRPC endpoint. When the node's own

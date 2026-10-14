@@ -32,7 +32,10 @@ type Case struct {
 	// (hardening/hygiene — listed separately, never outranks an incident).
 	Kind     string `yaml:"kind,omitempty"`
 	Symptoms string `yaml:"symptoms"`
-	Match    struct {
+	// Plain says what the case means in one sentence for someone who isn't
+	// reading the evidence (alerts, chat); the title is used when empty.
+	Plain string `yaml:"plain,omitempty"`
+	Match struct {
 		All []string `yaml:"all,omitempty"`
 		Any []string `yaml:"any,omitempty"`
 	} `yaml:"match"`

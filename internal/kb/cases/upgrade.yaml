@@ -1,5 +1,6 @@
 - id: upgrade-halt-binary-missing
   title: Chain halted at an upgrade height — new binary not running
+  plain: "The chain stopped for an upgrade and the new binary isn't installed."
   explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, state-apphash-mismatch, node-no-peers, node-low-peers]
   severity: critical
   symptoms: logs show UPGRADE "<name>" NEEDED at height; node stopped or crash-looping
@@ -25,6 +26,7 @@
 
 - id: upgrade-imminent
   title: Scheduled upgrade soon — binary must be staged
+  plain: "A chain upgrade is close and this node isn't ready for it."
   severity: high
   match:
     all: ["upgrade.pending == true", "upgrade.blocks_to_halt > 0", "upgrade.blocks_to_halt < 20000"]
@@ -43,6 +45,7 @@
 
 - id: upgrade-binary-too-early
   title: New binary started before the upgrade height
+  plain: "The new binary was started before the upgrade height."
   explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, state-apphash-mismatch, node-no-peers, node-low-peers]
   severity: critical
   match:
@@ -56,6 +59,7 @@
 
 - id: upgrade-halt-height-set
   title: halt-height configured in app.toml
+  plain: "A halt height is set, so the node will stop at that block."
   explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, node-no-peers, node-low-peers]
   severity: high
   match:
@@ -77,6 +81,7 @@
 
 - id: upgrade-version-behind
   title: Upgrade passed but node still on an older version
+  plain: "The node runs an older version than the chain needs."
   severity: high
   match:
     all: ["upgrade.pending == false", "logs.apphash > 0", "node.catching_up == false"]
@@ -89,6 +94,7 @@
 
 - id: upgrade-replay-past-upgrade
   title: Node syncing from an old height halts at an upgrade the chain already passed
+  plain: "The node is replaying blocks past an upgrade with the old binary."
   explains: [upgrade-halt-binary-missing, node-crash-loop, node-process-down, node-rpc-down, node-restarted-recently, node-catching-up, node-stalled, evm-rpc-down, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, node-no-peers, node-low-peers]
   severity: critical
   symptoms: a catching-up node logs UPGRADE "x" NEEDED, but the chain has no pending plan — it is replaying history

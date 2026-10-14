@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/abhijitkrm/cometcli/internal/config"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
@@ -62,5 +63,13 @@ func TestFleetExecRefusesMutatingTools(t *testing.T) {
 	}
 	if _, err := ex.Run(c, toolkit.Args{"tool": "nope"}); err == nil {
 		t.Fatal("unknown tool accepted")
+	}
+}
+
+func TestFleetCallDeadlineCoversTimeout(t *testing.T) {
+	for _, tool := range []toolkit.Tool{statusTool{}, &execTool{}, shellTool{}} {
+		if got := toolkit.CallTimeout(tool, toolkit.Args{"timeout": float64(600)}); got < 10*time.Minute {
+			t.Errorf("%s: call deadline %s < --timeout 600s", tool.Name(), got)
+		}
 	}
 }

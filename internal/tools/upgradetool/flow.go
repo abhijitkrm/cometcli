@@ -33,6 +33,7 @@ import (
 	"github.com/abhijitkrm/cometcli/internal/client/host"
 	"github.com/abhijitkrm/cometcli/internal/config"
 	"github.com/abhijitkrm/cometcli/internal/netspec"
+	"github.com/abhijitkrm/cometcli/internal/silence"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
 	"github.com/abhijitkrm/cometcli/internal/tools/common"
 )
@@ -746,12 +747,17 @@ func (switchTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, erro
 	if err := c.Approve(fmt.Sprintf("switch %s from %s to %s (halted for %s at %s): edit %s, compose down + up -d", c.Profile.Service.Unit, r.Image, image, m[1], m[2], r.ComposeFile), toolkit.TierLocalChange, detail); err != nil {
 		return nil, err
 	}
+	// the whole chain is halted until 2/3 of the power has switched
+	note := silence.ForNode(c, c.Cfg, c.Profile, true, 30*time.Minute, "upgrade "+m[1]+" at "+m[2])
+	if note != "" {
+		note = "\n" + note
+	}
 	out, code, err := sh(c, script, 8*time.Minute)
 	if err != nil || code != 0 {
 		return nil, fmt.Errorf("switch failed (exit %d): %v\n%s\nthe compose file was backed up beside it (.pre-*)", code, err, tail(out, 20))
 	}
-	return &toolkit.Result{Text: fmt.Sprintf("%s now runs %s (compose file %s; backup kept as .pre-%s)\nnext: wait.until synced, then in-consensus",
-		c.Profile.Service.Unit, image, r.ComposeFile, strings.ReplaceAll(path.Base(image), ":", "-")),
+	return &toolkit.Result{Text: fmt.Sprintf("%s now runs %s (compose file %s; backup kept as .pre-%s)\nnext: wait.until synced, then in-consensus%s",
+		c.Profile.Service.Unit, image, r.ComposeFile, strings.ReplaceAll(path.Base(image), ":", "-"), note),
 		Data: map[string]any{"image": image, "plan": m[1], "height": m[2]}}, nil
 }
 

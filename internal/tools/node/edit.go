@@ -13,6 +13,7 @@ import (
 
 	"github.com/abhijitkrm/cometcli/internal/client/host"
 	"github.com/abhijitkrm/cometcli/internal/netspec"
+	"github.com/abhijitkrm/cometcli/internal/silence"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
 	"github.com/abhijitkrm/cometcli/internal/tools/common"
 )
@@ -137,11 +138,12 @@ func (recreateTool) Run(c *toolkit.Context, _ toolkit.Args) (*toolkit.Result, er
 		map[string]any{"compose": file, "service": svc}); err != nil {
 		return nil, err
 	}
+	note := silence.ForNode(c, c.Cfg, p, false, 15*time.Minute, "recreate "+p.Service.Unit)
 	res, err := host.Exec(c, h, fmt.Sprintf("cd %s && docker compose -f %s up -d --force-recreate %s 2>&1 | tail -3", common.ShellQ(dir), common.ShellQ(file), svcArg(svc)), 64<<10)
 	if err != nil || res.Code != 0 {
 		return nil, fmt.Errorf("recreate failed: %v %s", err, strings.TrimSpace(res.Output))
 	}
-	return &toolkit.Result{Text: fmt.Sprintf("recreated %s from %s", p.Service.Unit, file), Data: map[string]any{"compose": file}}, nil
+	return &toolkit.Result{Text: withNote(fmt.Sprintf("recreated %s from %s", p.Service.Unit, file), note), Data: map[string]any{"compose": file}}, nil
 }
 
 // repairConfigTool makes a config file that doesn't parse parse again.

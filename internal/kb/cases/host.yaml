@@ -1,5 +1,6 @@
 - id: host-disk-full
   title: Disk full or nearly full on the node data volume
+  plain: "The disk is full, so the node can't write blocks and stops."
   explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, state-db-corrupt, host-disk-high, host-disk-free-low, node-no-peers, node-low-peers]
   severity: critical
   match:
@@ -42,6 +43,7 @@
 
 - id: host-inodes-exhausted
   title: Inodes exhausted
+  plain: "The disk has run out of inodes (file slots), so the node can't create files."
   explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, node-no-peers, node-low-peers]
   severity: critical
   match:
@@ -55,6 +57,7 @@
 
 - id: host-oom-killed
   title: Node killed for out-of-memory
+  plain: "The machine ran out of memory and the kernel killed the node."
   explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, host-memory-pressure, node-no-peers, node-low-peers]
   severity: critical
   match:
@@ -102,6 +105,7 @@
 
 - id: host-clock-unsynced
   title: System clock not NTP-synchronized
+  plain: "The machine's clock isn't synced, which can break consensus timing."
   explains: [node-consensus-timeouts, val-signing-degraded, val-jail-imminent]
   severity: high
   match:
@@ -120,6 +124,7 @@
 
 - id: host-too-many-files
   title: Too many open files
+  plain: "The node hit the open-file limit and can't open more connections or files."
   explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, node-low-peers, node-no-peers]
   severity: high
   match:
@@ -133,6 +138,7 @@
 
 - id: host-port-in-use
   title: Node can't bind a port (address already in use)
+  plain: "Another process holds a port the node needs, so it can't start."
   explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, node-no-peers, node-low-peers]
   severity: high
   match:
@@ -155,6 +161,7 @@
 
 - id: container-memory-limit
   title: Container memory limit too low for the node (OOM kills inside the container)
+  plain: "The container hit its memory limit and was killed."
   explains: [node-crash-loop, node-process-down, node-rpc-down, node-restarted-recently, node-killed-sigkill, host-oom-killed, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, node-catching-up, evm-rpc-down, val-in-set-while-syncing, node-no-peers, node-low-peers]
   severity: critical
   symptoms: restarts with no error in the logs; docker OOMKilled may be false because the node runs under a wrapper shell
@@ -182,6 +189,7 @@
 
 - id: node-home-permission-denied
   title: The node can't write its home (permission denied)
+  plain: "The node can't read or write its data folder: wrong file ownership or permissions."
   explains: [node-process-down, node-crash-loop, node-rpc-down, evm-rpc-down, node-restarted-recently, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, node-no-peers, node-low-peers]
   severity: critical
   symptoms: 'exits at start with "mkdir data: permission denied" or "could not create directory"'
@@ -214,6 +222,7 @@
 
 - id: host-docker-down
   title: Docker isn't running on the node's host
+  plain: "Docker isn't running on the host, so the node's container can't run."
   explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, node-no-peers, node-low-peers]
   severity: critical
   match:
@@ -236,6 +245,7 @@
 
 - id: node-image-missing
   title: The node's docker image isn't on the host
+  plain: "The node's container image isn't on the host."
   explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, node-no-peers, node-low-peers, node-container-missing]
   severity: high
   match:
@@ -257,6 +267,7 @@
 
 - id: node-container-missing
   title: The node's container doesn't exist
+  plain: "The node's container doesn't exist on the host."
   explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-killed-sigkill, node-restarted-recently, node-blocksync-slow, evm-rpc-down, val-in-set-while-syncing, node-behind-but-not-reporting, val-jailed-downtime, val-jailed-waiting-period, val-not-signing, val-jail-imminent, val-signing-degraded, node-no-peers, node-low-peers]
   severity: critical
   match:

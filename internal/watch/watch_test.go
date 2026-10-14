@@ -3,10 +3,12 @@ package watch
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -53,7 +55,8 @@ func TestSweepLifecycle(t *testing.T) {
 	ctx := context.Background()
 	w.Sweep(ctx) // new incident: report + read-only investigation
 	all := strings.Join(n.msgs, "\n")
-	if len(runs) != 1 || !runs[0] || !strings.Contains(all, "🚨 val01: val-jailed-downtime [critical]") || !strings.Contains(all, "📋 val01 report:\ncause: container stopped") {
+	if len(runs) != 1 || !runs[0] || !strings.Contains(all, "**val01: Validator jailed**\ncritical") || !strings.Contains(all, "> raw: `val-jailed-downtime` · val.jailed == true") ||
+		!strings.Contains(all, "**Status:** worked — report below\n\n> cause: container stopped") {
 		t.Fatalf("first sweep: runs=%v\n%s", runs, all)
 	}
 	w.Sweep(ctx) // still jailed: nothing new
@@ -62,13 +65,16 @@ func TestSweepLifecycle(t *testing.T) {
 	}
 	jailed = false
 	w.Sweep(ctx) // cleared
-	if !strings.Contains(n.msgs[len(n.msgs)-1], "✅ resolved: val01: val-jailed-downtime") {
+	if !strings.Contains(n.msgs[len(n.msgs)-1], "**val01: Validator jailed**\nresolved after") {
 		t.Fatalf("no recovery message: %v", n.msgs)
 	}
 	jailed = true
-	w.Sweep(ctx) // back within the cooldown: not worked again
+	w.Sweep(ctx) // back within the cooldown: not worked again, but reported
 	if len(runs) != 1 {
 		t.Fatal("cooldown ignored")
+	}
+	if !strings.Contains(n.msgs[len(n.msgs)-1], "back again — last worked") {
+		t.Fatalf("return within the cooldown not reported: %v", n.msgs[len(n.msgs)-1])
 	}
 	now = now.Add(2 * time.Hour)
 	jailed = false
@@ -167,7 +173,7 @@ func TestTelegramApproval(t *testing.T) {
 	if len(f.answered) < 2 || !strings.Contains(f.answered[0], "can't approve") {
 		t.Fatalf("stranger's press not refused: %v", f.answered)
 	}
-	if len(f.edited) != 1 || !strings.Contains(f.edited[0], "✅ approved by user1") {
+	if len(f.edited) != 1 || !strings.Contains(f.edited[0], "<b>Approved</b> by user1") {
 		t.Fatalf("message not updated: %v", f.edited)
 	}
 	// nobody answers: denied when the timeout passes
@@ -175,7 +181,7 @@ func TestTelegramApproval(t *testing.T) {
 	srv2 := httptest.NewServer(http.HandlerFunc(f2.handler))
 	defer srv2.Close()
 	tg2 := &Telegram{Base: srv2.URL, Token: "tok", ChatID: "42", Timeout: 1500 * time.Millisecond}
-	if ok, _, _ := tg2.Ask(context.Background(), "restart?"); ok || len(f2.edited) == 0 || !strings.Contains(f2.edited[0], "denied") {
+	if ok, _, _ := tg2.Ask(context.Background(), "restart?"); ok || len(f2.edited) == 0 || !strings.Contains(f2.edited[0], "Denied") {
 		t.Fatalf("timeout: ok=%v edited=%v", ok, f2.edited)
 	}
 }
@@ -192,10 +198,124 @@ func TestRemoteKeyUseApprovalExpires(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatal(ok, err)
 	}
-	if !strings.Contains(text, "expires in 5m") || strings.Contains(text, toolkit.KeyUseMark) {
+	if !strings.Contains(text, "Expires in 5m") || strings.Contains(text, toolkit.KeyUseMark) {
 		t.Errorf("message: %q", text)
 	}
 	if time.Until(deadline) > KeyUseTimeout || time.Until(deadline) < KeyUseTimeout-time.Minute {
 		t.Errorf("key use approval should expire in %s, deadline in %s", KeyUseTimeout, time.Until(deadline))
+	}
+}
+
+func TestPlannedWorkIsLeftAlone(t *testing.T) {
+	down := true
+	planned := "node restart (until 10:15 IST)"
+	var runs int
+	n := &memNotify{}
+	w := &Watcher{
+		Mode: ModeDiagnose, Cooldown: time.Hour, StatePath: filepath.Join(t.TempDir(), "state.json"),
+		Profiles: map[string]*config.Profile{"val01": {Name: "val01"}},
+		Collect:  func(context.Context) []triage.NodeReport { return jailedNode(down) },
+		Run: func(context.Context, *config.Profile, string, bool, toolkit.Approver) (string, error) {
+			runs++
+			return "ok", nil
+		},
+		Planned: func(context.Context, *config.Profile) string { return planned },
+		Notify:  []Notifier{n},
+	}
+	ctx := context.Background()
+	w.Sweep(ctx)
+	w.Sweep(ctx)
+	all := strings.Join(n.msgs, "\n")
+	if runs != 0 || strings.Count(all, "planned work under way — not acting (node restart") != 1 || strings.Contains(all, "investigating") {
+		t.Fatalf("planned work: runs=%d\n%s", runs, all)
+	}
+	planned = "" // the work ended and the issue is still there: worked now
+	w.Sweep(ctx)
+	if runs != 1 || !strings.Contains(strings.Join(n.msgs, "\n"), "**Status:** worked — report below") {
+		t.Fatalf("not worked after the planned work: runs=%d\n%v", runs, n.msgs)
+	}
+	// an issue that clears during planned work is never reported as resolved
+	down, planned = false, "upgrade"
+	w.Sweep(ctx)
+	down = true
+	n.msgs = nil
+	w.Sweep(ctx)
+	down = false
+	w.Sweep(ctx)
+	if all := strings.Join(n.msgs, "\n"); runs != 1 || strings.Contains(all, "resolved") || strings.Count(all, "planned work under way") != 1 {
+		t.Fatalf("cleared during planned work: runs=%d\n%s", runs, all)
+	}
+}
+
+func TestQueuedAlertsKeepLatestState(t *testing.T) {
+	ch := make(chan Alert, 8)
+	w := &Watcher{Alerts: ch, Out: io.Discard}
+	w.state.Monitor = map[string]string{"node-down:b": "val02|monitor:node-down"}
+	ch <- Alert{Key: "evm-down:a", Kind: "evm-down", Resolved: true}   // raised and resolved while busy
+	ch <- Alert{Key: "node-down:b", Kind: "node-down"}                 // still open
+	ch <- Alert{Key: "node-down:b", Kind: "node-down", Resolved: true} // known issue: its resolve still counts
+	ch <- Alert{Key: "stalled:c", Kind: "stalled"}
+	got := w.pending(Alert{Key: "evm-down:a", Kind: "evm-down"})
+	var keys []string
+	for _, a := range got {
+		keys = append(keys, fmt.Sprintf("%s/%v", a.Key, a.Resolved))
+	}
+	if strings.Join(keys, " ") != "node-down:b/true stalled:c/false" {
+		t.Fatalf("pending = %v", keys)
+	}
+}
+
+type memCarder struct {
+	posts, edits, replies []string
+}
+
+func (m *memCarder) Send(_ context.Context, t string) error { m.posts = append(m.posts, t); return nil }
+func (m *memCarder) Post(_ context.Context, t string) (string, error) {
+	m.posts = append(m.posts, t)
+	return fmt.Sprint(len(m.posts)), nil
+}
+func (m *memCarder) Edit(_ context.Context, ref, t string) error {
+	m.edits = append(m.edits, ref+"|"+t)
+	return nil
+}
+func (m *memCarder) Reply(_ context.Context, ref, t string) error {
+	m.replies = append(m.replies, ref+"|"+t)
+	return nil
+}
+
+// An incident is one message edited through its stages, plus a reply when
+// it resolves — not a message per step.
+func TestIssueIsOneEditedCard(t *testing.T) {
+	jailed := true
+	m := &memCarder{}
+	w := &Watcher{
+		Mode: ModeDiagnose, Cooldown: time.Hour, StatePath: filepath.Join(t.TempDir(), "state.json"),
+		Profiles: map[string]*config.Profile{"val01": {Name: "val01"}},
+		Collect:  func(context.Context) []triage.NodeReport { return jailedNode(jailed) },
+		Run: func(context.Context, *config.Profile, string, bool, toolkit.Approver) (string, error) {
+			return "restarted → /Users/x/incidents/1.md", nil
+		},
+		Notify: []Notifier{m},
+	}
+	ctx := context.Background()
+	w.Sweep(ctx)
+	jailed = false
+	w.Sweep(ctx)
+	if len(m.posts) != 1 || len(m.replies) != 1 || len(m.edits) != 2 {
+		t.Fatalf("posts %d edits %d replies %d", len(m.posts), len(m.edits), len(m.replies))
+	}
+	if !strings.HasPrefix(m.posts[0], "**val01: Validator jailed**\ncritical\n") || !strings.Contains(m.posts[0], "**Status:** investigating") {
+		t.Fatalf("card:\n%s", m.posts[0])
+	}
+	if e := m.edits[0]; !strings.HasPrefix(e, "1|") || !strings.Contains(e, "> restarted") || strings.Contains(e, "/Users/") {
+		t.Fatalf("report edit:\n%s", e)
+	}
+	if r := m.replies[0]; !strings.HasPrefix(r, "1|**val01: Validator jailed**\nresolved after") {
+		t.Fatalf("reply:\n%s", r)
+	}
+	for _, s := range append(append(m.posts, m.edits...), m.replies...) {
+		if regexp.MustCompile(`[\x{1F300}-\x{1FAFF}\x{2600}-\x{27BF}]`).MatchString(s) {
+			t.Fatalf("emoji in %q", s)
+		}
 	}
 }

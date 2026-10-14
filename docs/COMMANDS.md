@@ -398,6 +398,7 @@ cometcli genesis install --package mychain-1-packages/acme --home ~/acme-node
   - Files with key material are refused, so a mnemonic or `priv_validator_key.json` can't leave this way.
 - **Carrying the image to an offline machine:** `host prepare --offline_ready --save_image /tmp/img.tar` on a connected machine, then `--image_tar` on the offline one.
 - **Removing a test network:** `cometcli network remove <chain-id> --profiles a,b`. For each profile it stops the container and deletes the node home, but only when that home's genesis is for that chain. It also deletes the chain's genesis builder files on those hosts and the profiles, and reports free disk.
+- **Monitoring a network:** `cometcli network export <chain-id> --format cometduty` writes a cometduty sidecar per node and the chain-role instance; `--deploy` starts them on the hosts. See [With a monitor](#with-a-monitor-optional).
 
 ## Remote nodes over SSH
 
@@ -625,6 +626,65 @@ Save the Telegram bot token with `cometcli config set-key TELEGRAM_BOT_TOKEN`, o
 in `watch.alerts.telegram_token`. Only presses from that chat, and from
 `telegram_users` if set, count. Slack and Discord get reports but can't answer
 approvals.
+
+## With a monitor (optional)
+
+cometcli works without a monitor, and a monitor works without cometcli. If you run
+one — [cometduty](https://github.com/abhijitkrm/cometduty), or Prometheus with
+Alertmanager — three optional links make them work together. Each is off until you
+set it up, and each works with either monitor.
+
+```bash
+# cometduty for every node of a network: config + compose per host, the
+# chain-role instance beside one node, every alert labeled profile=<name>
+cometcli network export mychain-1 --format cometduty                 # files only
+cometcli network export mychain-1 --format cometduty --silence-api --link --deploy
+cometcli network export mychain-1 --format cometduty --webhook-url https://ops.example:9180/alerts
+cometcli network export mychain-1 --format cometduty --telegram     # alerts to watch's Telegram chat too
+# one cometduty for the whole network instead of one per node: every
+# validator's signing, the active set, chain health, and the nodes whose RPC
+# it can reach from the --chain-on host (--rpc adds a public endpoint).
+# No disk, signer-state or log alerts — those need the sidecar layout.
+cometcli network export mychain-1 --format cometduty --layout standalone --chain-on val01 --deploy
+
+# work a monitor's alerts the moment they fire
+cometcli config set-key WATCH_WEBHOOK_SECRET      # cometduty's webhook.secret
+cometcli watch --listen 127.0.0.1:9180            # POST /alerts
+```
+
+| link | what it does | set up with |
+|---|---|---|
+| alerts → `watch` | `watch --listen` receives cometduty's webhook (verified HMAC signature, replays refused) or Alertmanager's (bearer token `WATCH_WEBHOOK_TOKEN`). The node an alert names is triaged at once: a case triage finds is worked like a sweep's; when triage finds nothing, the alert itself becomes the incident (`monitor:<kind>`), cleared by the monitor's resolve. Alerts about no single node (a stalled chain) run a fleet sweep. Sweeps keep running. | `watch.listen` or `--listen` |
+| silences during planned work | before `node service stop/restart`, `node recreate`, `node provision --reconfigure` (15 min) and `upgrade switch` (30 min, the whole chain) cometcli silences the node's alerts — matcher `profile=<name>`, or `chain_id=<id>` — through the Alertmanager v2 silence API. A monitor that can't be reached never blocks the work; the tool says it couldn't silence. | `endpoints.monitor` on the profile and/or `monitor.silence`, token `MONITOR_API_TOKEN` |
+| `watch` leaves planned work alone | an issue on a node under planned work — recorded by the commands above (in `~/.cometcli/planned.json`, so this works with no monitor), or an active silence of the node or its chain at its monitor — is posted once as 🔕 and not worked. If it's still there when the work ends, it's handled as new; if it clears, nothing is posted. | nothing (monitor silences: as above) |
+| one Telegram chat | `--telegram` sets cometduty's own Telegram notifier to the bot and chat `watch` uses (`watch.alerts`, `TELEGRAM_BOT_TOKEN`; `--telegram-chat` for another), so the monitor's alerts and watch's diagnosis and approvals land together. In Telegram each issue is **one card** edited as the work goes on — bold headline, a plain reason (the case's `plain:`), the raw evidence and the agent's report collapsed, a status line — plus a reply when it resolves; approvals are separate messages with Approve / Deny. cometduty does the same for its alerts (one card per node). | `--telegram` |
+| monitor metrics in triage | triage reads the node's monitor `/metrics` (signing streak, slashing-window %, signer height, disk, open alerts, silences) as `monitor.*` signals. Cases: `monitor-unreachable` (nobody may be paged) and `monitor-alerts-silenced`. | `endpoints.monitor` |
+
+```yaml
+# ~/.cometcli/config.yaml — what --link writes
+profiles:
+  val01:
+    endpoints:
+      monitor: http://127.0.0.1:28686    # on the node's host, reached through ssh
+monitor:
+  silence:
+    - url: http://127.0.0.1:28687        # the chain-role instance
+      via: val01                         # reached through this profile's ssh
+watch:
+  listen: 127.0.0.1:9180
+```
+
+The chain-role instance sees the chain through the RPC of the node it runs beside
+(`--chain-on`, default the first profile): node RPCs listen on their host's loopback,
+so that is the one it can reach. When that node is down it reports `no-nodes` — it
+can't see the chain — not a halt; pick a node you restart rarely.
+
+Only `kind`, `target`, the labels and the severity of an alert steer what cometcli does.
+Its message text — which can quote node logs — never reaches the agent.
+
+For Alertmanager, give your alerts a `profile` label (or a `node` or `instance` on a
+profile's host) so cometcli knows which node they are about, and point a webhook
+receiver at `/alerts` with `http_config.authorization.credentials` set to the token.
 
 ## Incident drills
 
