@@ -289,7 +289,11 @@ func (w *Watcher) reconcile(ctx context.Context, issues []Issue, inScope func(ke
 			continue // already known and being (or been) handled
 		}
 		if last, ok := w.state.Handled[k]; ok && now.Sub(last) < w.Cooldown {
-			continue // worked recently: don't loop on it
+			// worked recently: don't loop on it — but say it's back
+			c := newCard(is, now)
+			c.Status = fmt.Sprintf("back again — last worked %s ago, so not acting automatically for %s", now.Sub(last).Round(time.Minute), w.Cooldown)
+			w.showCard(ctx, k, c, true)
+			continue
 		}
 		w.state.Handled[k] = now
 		w.save()

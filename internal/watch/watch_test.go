@@ -69,9 +69,12 @@ func TestSweepLifecycle(t *testing.T) {
 		t.Fatalf("no recovery message: %v", n.msgs)
 	}
 	jailed = true
-	w.Sweep(ctx) // back within the cooldown: not worked again
+	w.Sweep(ctx) // back within the cooldown: not worked again, but reported
 	if len(runs) != 1 {
 		t.Fatal("cooldown ignored")
+	}
+	if !strings.Contains(n.msgs[len(n.msgs)-1], "back again — last worked") {
+		t.Fatalf("return within the cooldown not reported: %v", n.msgs[len(n.msgs)-1])
 	}
 	now = now.Add(2 * time.Hour)
 	jailed = false
