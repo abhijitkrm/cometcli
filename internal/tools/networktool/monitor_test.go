@@ -27,7 +27,8 @@ func monitorProfiles() []*config.Profile {
 }
 
 func TestCometdutyFiles(t *testing.T) {
-	sets, err := CometdutyFiles("c-1", monitorProfiles(), MonitorOpts{WebhookURL: "https://cc.example/alerts", Secret: "sec", APIToken: "0123456789abcdef0123", ChainOn: "arch"})
+	sets, err := CometdutyFiles("c-1", monitorProfiles(), MonitorOpts{WebhookURL: "https://cc.example/alerts", Secret: "sec", APIToken: "0123456789abcdef0123", ChainOn: "arch",
+		TelegramToken: "123:tok", TelegramChat: "-10042"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,6 +44,14 @@ func TestCometdutyFiles(t *testing.T) {
 		}
 		if cfg["api_token"] != "0123456789abcdef0123" || cfg["webhook"].(map[string]any)["secret"] != "sec" {
 			t.Errorf("%s: secrets not set: %v", s.Dir, cfg)
+		}
+		tg, _ := cfg["telegram"].(map[string]any)
+		if tg["api_key"] != "123:tok" || tg["channel"] != "-10042" || tg["enabled"] != true {
+			t.Errorf("%s: telegram not set: %v", s.Dir, tg)
+		}
+		ch := cfg["chains"].(map[string]any)["c-1"].(map[string]any)["alerts"].(map[string]any)
+		if ch["telegram"].(map[string]any)["enabled"] != true {
+			t.Errorf("%s: chain alerts don't enable telegram: %v", s.Dir, ch)
 		}
 	}
 	// two nodes on one host get different metrics ports; the chain
@@ -74,7 +83,8 @@ func TestCometdutyFilesWithoutExtras(t *testing.T) {
 	}
 	for _, s := range sets {
 		c := string(s.Files["config.yml"])
-		if strings.Contains(c, "api_token") || strings.Contains(c, "secret") || strings.Contains(c, "url: https://") {
+		if strings.Contains(c, "api_token") || strings.Contains(c, "secret") || strings.Contains(c, "url: https://") ||
+			strings.Contains(c, "api_key") {
 			t.Errorf("%s: optional parts present without being asked:\n%s", s.Dir, c)
 		}
 	}
@@ -90,7 +100,8 @@ func TestCometdutyAcceptsExport(t *testing.T) {
 	if bin == "" {
 		t.Skip("COMETDUTY_BIN not set")
 	}
-	sets, err := CometdutyFiles("c-1", monitorProfiles(), MonitorOpts{WebhookURL: "https://cc.example/alerts", Secret: "sec", APIToken: "0123456789abcdef0123"})
+	sets, err := CometdutyFiles("c-1", monitorProfiles(), MonitorOpts{WebhookURL: "https://cc.example/alerts", Secret: "sec", APIToken: "0123456789abcdef0123",
+		TelegramToken: "123:tok", TelegramChat: "-10042"})
 	if err != nil {
 		t.Fatal(err)
 	}

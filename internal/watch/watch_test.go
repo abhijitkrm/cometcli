@@ -199,3 +199,44 @@ func TestRemoteKeyUseApprovalExpires(t *testing.T) {
 		t.Errorf("key use approval should expire in %s, deadline in %s", KeyUseTimeout, time.Until(deadline))
 	}
 }
+
+func TestPlannedWorkIsLeftAlone(t *testing.T) {
+	down := true
+	planned := "node restart (until 10:15 IST)"
+	var runs int
+	n := &memNotify{}
+	w := &Watcher{
+		Mode: ModeDiagnose, Cooldown: time.Hour, StatePath: filepath.Join(t.TempDir(), "state.json"),
+		Profiles: map[string]*config.Profile{"val01": {Name: "val01"}},
+		Collect:  func(context.Context) []triage.NodeReport { return jailedNode(down) },
+		Run: func(context.Context, *config.Profile, string, bool, toolkit.Approver) (string, error) {
+			runs++
+			return "ok", nil
+		},
+		Planned: func(context.Context, *config.Profile) string { return planned },
+		Notify:  []Notifier{n},
+	}
+	ctx := context.Background()
+	w.Sweep(ctx)
+	w.Sweep(ctx)
+	all := strings.Join(n.msgs, "\n")
+	if runs != 0 || strings.Count(all, "🔕 val01: val-jailed-downtime") != 1 || strings.Contains(all, "🚨") {
+		t.Fatalf("planned work: runs=%d\n%s", runs, all)
+	}
+	planned = "" // the work ended and the issue is still there: worked now
+	w.Sweep(ctx)
+	if runs != 1 || !strings.Contains(strings.Join(n.msgs, "\n"), "🚨 val01: val-jailed-downtime") {
+		t.Fatalf("not worked after the planned work: runs=%d\n%v", runs, n.msgs)
+	}
+	// an issue that clears during planned work is never reported as resolved
+	down, planned = false, "upgrade"
+	w.Sweep(ctx)
+	down = true
+	n.msgs = nil
+	w.Sweep(ctx)
+	down = false
+	w.Sweep(ctx)
+	if all := strings.Join(n.msgs, "\n"); runs != 1 || strings.Contains(all, "✅") || strings.Count(all, "🔕") != 1 {
+		t.Fatalf("cleared during planned work: runs=%d\n%s", runs, all)
+	}
+}

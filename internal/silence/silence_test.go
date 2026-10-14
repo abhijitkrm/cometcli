@@ -14,6 +14,7 @@ import (
 )
 
 func TestForNodeSilencesAtEachMonitor(t *testing.T) {
+	t.Setenv("COMETCLI_HOME", t.TempDir())
 	var got []map[string]any
 	var auth string
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -50,6 +51,7 @@ func TestForNodeSilencesAtEachMonitor(t *testing.T) {
 }
 
 func TestForNodeQuietWithoutMonitorOrAPI(t *testing.T) {
+	t.Setenv("COMETCLI_HOME", t.TempDir())
 	p := &config.Profile{Name: "val01"}
 	c := &toolkit.Context{Context: context.Background(), Profile: p}
 	if line := ForNode(c, &config.Config{}, p, false, time.Minute, "x"); line != "" {
@@ -64,5 +66,48 @@ func TestForNodeQuietWithoutMonitorOrAPI(t *testing.T) {
 	p.Endpoints.Monitor = "http://127.0.0.1:1" // down: say so, never fail the work
 	if line := ForNode(c, &config.Config{}, p, false, time.Minute, "x"); !strings.Contains(line, "could not silence") {
 		t.Fatalf("unreachable monitor: %q", line)
+	}
+}
+
+func TestPlannedLocalAndAtMonitor(t *testing.T) {
+	t.Setenv("COMETCLI_HOME", t.TempDir())
+	t.Setenv(TokenCredential, "tok")
+	silences := `[]`
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.Header.Get("Authorization") != "Bearer tok" {
+			http.Error(w, "no", http.StatusUnauthorized)
+			return
+		}
+		_, _ = w.Write([]byte(silences))
+	}))
+	defer api.Close()
+	p := &config.Profile{Name: "val01", ChainID: "c-1", Endpoints: config.Endpoints{Monitor: api.URL}}
+	cfg := &config.Config{Profiles: map[string]*config.Profile{"val01": p}}
+	c := &toolkit.Context{Context: context.Background(), Profile: p, Cfg: cfg}
+	if why := Planned(c, cfg, p); why != "" {
+		t.Fatalf("planned with nothing recorded: %q", why)
+	}
+	// a silence of other alerts (the chain view's companion) is not work on the node
+	silences = `[{"matchers":[{"name":"chain_id","value":"c-1"},{"name":"alertname","value":"no-nodes|stalled","isRegex":true}],
+		"endsAt":"2099-01-01T00:00:00Z","status":{"state":"active"}}]`
+	if why := Planned(c, cfg, p); why != "" {
+		t.Fatalf("alert-kind silence counted as planned work: %q", why)
+	}
+	// isEqual absent = equal, as in Alertmanager; expired ones don't count
+	silences = `[{"matchers":[{"name":"profile","value":"val01"}],"endsAt":"2099-01-01T00:00:00Z","createdBy":"ops","comment":"disk swap","status":{"state":"expired"}},
+		{"matchers":[{"name":"chain_id","value":"c-.*","isRegex":true}],"endsAt":"2099-01-01T00:00:00Z","createdBy":"ops","comment":"upgrade","status":{"state":"active"}}]`
+	if why := Planned(c, cfg, p); !strings.Contains(why, "by ops: upgrade") {
+		t.Fatalf("chain silence at the monitor not seen: %q", why)
+	}
+	// recorded locally: seen with no monitor at all
+	silences = `[]`
+	q := &config.Profile{Name: "val02", ChainID: "c-1"}
+	Record(q, false, time.Minute, "node restart")
+	if why := Planned(c, cfg, q); !strings.HasPrefix(why, "node restart (until ") {
+		t.Fatalf("local record not seen: %q", why)
+	}
+	Record(q, false, -time.Second, "over")
+	if why := Planned(c, cfg, q); why != "" {
+		t.Fatalf("ended work still planned: %q", why)
 	}
 }

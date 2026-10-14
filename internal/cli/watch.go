@@ -16,6 +16,7 @@ import (
 	"github.com/abhijitkrm/cometcli/internal/audit"
 	"github.com/abhijitkrm/cometcli/internal/config"
 	"github.com/abhijitkrm/cometcli/internal/monitor"
+	"github.com/abhijitkrm/cometcli/internal/silence"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
 	"github.com/abhijitkrm/cometcli/internal/tools/triage"
 	"github.com/abhijitkrm/cometcli/internal/watch"
@@ -148,6 +149,11 @@ running either way.`,
 			glog, _ := audit.Open("watch")
 			w := &watch.Watcher{
 				Mode: m, Cooldown: cd, Profiles: selected, Notify: notify, Approver: approver,
+				Planned: func(ctx context.Context, p *config.Profile) string {
+					c := &toolkit.Context{Context: ctx, Profile: p, Cfg: cfg, Audit: glog}
+					defer c.Close()
+					return silence.Planned(c, cfg, p)
+				},
 				StatePath: statePath, Out: cmd.OutOrStdout(),
 				Collect: func(ctx context.Context) []triage.NodeReport {
 					return triage.CollectFleet(&toolkit.Context{Context: ctx, Cfg: cfg, Audit: glog}, list, iv)

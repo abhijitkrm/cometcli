@@ -62,13 +62,17 @@ type Issue struct {
 
 // Watcher runs sweeps.
 type Watcher struct {
-	Mode      Mode
-	Cooldown  time.Duration
-	Collect   func(ctx context.Context) []triage.NodeReport
-	Profiles  map[string]*config.Profile
-	Run       Runner
-	Notify    []Notifier
-	Approver  toolkit.Approver // remote approvals (fix mode); nil = none
+	Mode     Mode
+	Cooldown time.Duration
+	Collect  func(ctx context.Context) []triage.NodeReport
+	Profiles map[string]*config.Profile
+	Run      Runner
+	Notify   []Notifier
+	Approver toolkit.Approver // remote approvals (fix mode); nil = none
+	// Planned says why a node is under planned work (a restart or upgrade
+	// cometcli is doing, a silence at its monitor); the watcher reports
+	// its issues but leaves it alone. nil = never.
+	Planned   func(ctx context.Context, p *config.Profile) string
 	StatePath string
 	Out       io.Writer
 	Now       func() time.Time
@@ -90,6 +94,9 @@ type state struct {
 	// Monitor maps an open monitor alert's key to the issue it raised when
 	// local triage found nothing of its own; its resolve clears the issue.
 	Monitor map[string]string `json:"monitor,omitempty"`
+	// Paused are issues seen during planned work on their node: reported
+	// once, not worked; handled afresh if still open when the work ends.
+	Paused map[string]bool `json:"paused,omitempty"`
 }
 
 func (w *Watcher) now() time.Time {
@@ -216,6 +223,10 @@ func (w *Watcher) reconcile(ctx context.Context, issues []Issue, inScope func(ke
 	}
 	for _, k := range gone {
 		delete(w.state.Active, k)
+		if w.state.Paused[k] {
+			delete(w.state.Paused, k)
+			continue // cleared with the planned work: nothing was reported as broken
+		}
 		w.send(ctx, "✅ resolved: "+strings.Replace(k, "|", ": ", 1))
 	}
 	keys := make([]string, 0, len(current))
@@ -223,9 +234,34 @@ func (w *Watcher) reconcile(ctx context.Context, issues []Issue, inScope func(ke
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
+	planned := map[string]string{}
 	for _, k := range keys {
 		is := current[k]
+		if p := w.Profiles[is.Profile]; p != nil && w.Planned != nil {
+			why, asked := planned[is.Profile]
+			if !asked {
+				why = w.Planned(ctx, p)
+				planned[is.Profile] = why
+			}
+			if why != "" {
+				w.state.Active[k] = now
+				if !w.state.Paused[k] {
+					if w.state.Paused == nil {
+						w.state.Paused = map[string]bool{}
+					}
+					w.state.Paused[k] = true
+					w.send(ctx, fmt.Sprintf("🔕 %s: %s [%s] during planned work — not acting\n%s", is.Profile, orDash(is.Case), is.Severity, why))
+				}
+				continue
+			}
+		}
 		_, wasActive := w.state.Active[k]
+		if w.state.Paused[k] {
+			// the planned work is over and the issue is still there
+			delete(w.state.Paused, k)
+			delete(w.state.Handled, k)
+			wasActive = false
+		}
 		w.state.Active[k] = now
 		if wasActive {
 			continue // already known and being (or been) handled

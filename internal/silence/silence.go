@@ -78,33 +78,9 @@ func ForNode(c *toolkit.Context, cfg *config.Config, p *config.Profile, chainWid
 	if p == nil {
 		return ""
 	}
-	type target struct {
-		url string
-		ctx *toolkit.Context
-		// source: the monitor reads the chain through this node (via), so
-		// its chain-level "can't see the chain" alerts are this work too
-		source bool
-	}
-	var targets []target
-	if p.Endpoints.Monitor != "" {
-		targets = append(targets, target{url: p.Endpoints.Monitor, ctx: c})
-	}
-	if cfg != nil {
-		for _, s := range cfg.Monitor.Silence {
-			t := target{url: s.URL, source: s.Via == p.Name}
-			if vp := cfg.Profiles[s.Via]; s.Via != "" && vp != nil {
-				vp.Name = s.Via
-				if s.Via == p.Name {
-					t.ctx = c
-				} else {
-					vc := &toolkit.Context{Context: c, Profile: vp, Cfg: cfg}
-					defer vc.Close()
-					t.ctx = vc
-				}
-			}
-			targets = append(targets, t)
-		}
-	}
+	Record(p, chainWide, d, why)
+	targets, closeAll := monitors(c, cfg, p)
+	defer closeAll()
 	if len(targets) == 0 {
 		return ""
 	}
@@ -154,4 +130,44 @@ func ForNode(c *toolkit.Context, cfg *config.Config, p *config.Profile, chainWid
 		line += "could not silence alerts at " + strings.Join(failed, ", ") + " — expect pages for this work"
 	}
 	return line
+}
+
+// target is one monitor API, reached through ctx (ssh) when set.
+type target struct {
+	url string
+	ctx *toolkit.Context
+	// source: the monitor reads the chain through this node (via), so
+	// its chain-level "can't see the chain" alerts are this work too
+	source bool
+}
+
+// monitors lists the APIs that hold p's alerts: the node's own monitor
+// (endpoints.monitor) and every monitor.silence API.
+func monitors(c *toolkit.Context, cfg *config.Config, p *config.Profile) ([]target, func()) {
+	var targets []target
+	var closers []func()
+	if p.Endpoints.Monitor != "" {
+		targets = append(targets, target{url: p.Endpoints.Monitor, ctx: c})
+	}
+	if cfg != nil {
+		for _, s := range cfg.Monitor.Silence {
+			t := target{url: s.URL, source: s.Via == p.Name}
+			if vp := cfg.Profiles[s.Via]; s.Via != "" && vp != nil {
+				vp.Name = s.Via
+				if s.Via == p.Name {
+					t.ctx = c
+				} else {
+					vc := &toolkit.Context{Context: c, Profile: vp, Cfg: cfg}
+					closers = append(closers, vc.Close)
+					t.ctx = vc
+				}
+			}
+			targets = append(targets, t)
+		}
+	}
+	return targets, func() {
+		for _, f := range closers {
+			f()
+		}
+	}
 }

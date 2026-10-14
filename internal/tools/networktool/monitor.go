@@ -24,12 +24,16 @@ const CometdutyImage = "ghcr.io/abhijitkrm/cometduty:v0.3.0"
 
 // MonitorOpts shape the cometduty files for a network.
 type MonitorOpts struct {
-	Image       string // default CometdutyImage
-	WebhookURL  string // where alerts go (e.g. cometcli watch --listen); "" = no webhook
-	Secret      string // webhook signing secret (with WebhookURL)
-	APIToken    string // enables the silence API; "" = off
-	ChainOn     string // profile whose host runs the chain-role instance
-	MetricsPort int    // first sidecar's /metrics port (default 28686)
+	Image      string // default CometdutyImage
+	WebhookURL string // where alerts go (e.g. cometcli watch --listen); "" = no webhook
+	Secret     string // webhook signing secret (with WebhookURL)
+	APIToken   string // enables the silence API; "" = off
+	// TelegramToken and TelegramChat send every alert to a Telegram chat
+	// too (cometduty's own notifier); "" = no Telegram.
+	TelegramToken string
+	TelegramChat  string
+	ChainOn       string // profile whose host runs the chain-role instance
+	MetricsPort   int    // first sidecar's /metrics port (default 28686)
 	// MetricsBind is where /metrics and the silence API listen (default
 	// 127.0.0.1: cometcli reaches them through ssh; open it only for a
 	// Prometheus on another machine).
@@ -153,7 +157,8 @@ func CometdutyFiles(chainID string, profiles []*config.Profile, o MonitorOpts) (
 	chain := map[string]any{
 		"chain_id": chainID, "role": "chain",
 		"alerts": map[string]any{"stalled_enabled": true, "stalled_minutes": 2, "alert_if_no_servers": true,
-			"set_watch_enabled": true, "webhook": map[string]any{"enabled": o.WebhookURL != ""}},
+			"set_watch_enabled": true, "webhook": map[string]any{"enabled": o.WebhookURL != ""},
+			"telegram": map[string]any{"enabled": o.TelegramChat != ""}},
 		"nodes": []any{map[string]any{"url": httpURL(chainNode.Endpoints.Comet), "name": chainNode.Name,
 			"labels": map[string]string{"profile": chainNode.Name}}},
 	}
@@ -194,7 +199,8 @@ func sidecarAlerts(o MonitorOpts) map[string]any {
 		"evm_down_enabled": true, "evm_lag_enabled": true, "evm_lag_blocks": 30,
 		"catching_up_severity": "warning", "catching_up_grace_minutes": 2, "catching_up_stuck_minutes": 15,
 		"disk_free_bytes_alert": int64(5) << 30, "signer_stall_minutes": 5,
-		"webhook": map[string]any{"enabled": o.WebhookURL != ""},
+		"webhook":  map[string]any{"enabled": o.WebhookURL != ""},
+		"telegram": map[string]any{"enabled": o.TelegramChat != ""},
 	}
 }
 
@@ -214,6 +220,9 @@ func dutyConfig(o MonitorOpts, port int, chains map[string]any) ([]byte, error) 
 	}
 	if o.APIToken != "" {
 		root["api_token"] = o.APIToken
+	}
+	if o.TelegramChat != "" {
+		root["telegram"] = map[string]any{"enabled": true, "api_key": o.TelegramToken, "channel": o.TelegramChat}
 	}
 	b, err := yaml.Marshal(root)
 	if err != nil {

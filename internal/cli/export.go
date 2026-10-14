@@ -16,8 +16,8 @@ import (
 )
 
 func networkExportCmd() *cobra.Command {
-	var format, profiles, out, webhookURL, chainOn, image, bind string
-	var silenceAPI, deploy, link bool
+	var format, profiles, out, webhookURL, chainOn, image, bind, tgChat string
+	var silenceAPI, deploy, link, telegram bool
 	cmd := &cobra.Command{
 		Use:   "export <chain-id> --format cometduty",
 		Short: "Write monitoring config for a network's nodes (cometduty), optionally deploy it",
@@ -28,6 +28,9 @@ instance, beside one node. Every alert carries the label profile=<name>.
 
   --webhook-url   send alerts to a receiver, e.g. cometcli watch --listen;
                   signed with a secret saved as WATCH_WEBHOOK_SECRET
+  --telegram      send every alert to Telegram too, with the bot and chat
+                  watch already uses (watch.alerts, TELEGRAM_BOT_TOKEN);
+                  --telegram-chat picks another chat
   --silence-api   turn on cometduty's silence API (token saved as
                   MONITOR_API_TOKEN) so cometcli silences a node's alerts
                   during planned work
@@ -89,6 +92,18 @@ cometduty doesn't need cometcli, and cometcli doesn't need cometduty.`,
 						return err
 					}
 					fmt.Fprintf(w, "✓ new silence API token saved as the %s credential\n", silence.TokenCredential)
+				}
+			}
+			if telegram || tgChat != "" {
+				o.TelegramToken, o.TelegramChat = cfg.Watch.Alerts.TelegramToken, cfg.Watch.Alerts.TelegramChatID
+				if o.TelegramToken == "" {
+					o.TelegramToken = credential("TELEGRAM_BOT_TOKEN")
+				}
+				if tgChat != "" {
+					o.TelegramChat = tgChat
+				}
+				if o.TelegramToken == "" || o.TelegramChat == "" {
+					return fmt.Errorf("--telegram needs a bot token (watch.alerts.telegram_token or the TELEGRAM_BOT_TOKEN credential) and a chat (watch.alerts.telegram_chat_id or --telegram-chat)")
 				}
 			}
 			sets, err := networktool.CometdutyFiles(chain, list, o)
@@ -186,6 +201,8 @@ cometduty doesn't need cometcli, and cometcli doesn't need cometduty.`,
 	f.StringVar(&profiles, "profiles", "", "nodes to include (default: every profile on <chain-id>)")
 	f.StringVar(&out, "out", "", "where to write (default ~/.cometcli/monitor/<chain-id>)")
 	f.StringVar(&webhookURL, "webhook-url", "", "send alerts here, signed (e.g. where cometcli watch --listen is reachable)")
+	f.BoolVar(&telegram, "telegram", false, "send alerts to Telegram too (watch's bot and chat)")
+	f.StringVar(&tgChat, "telegram-chat", "", "Telegram chat id for alerts (implies --telegram)")
 	f.BoolVar(&silenceAPI, "silence-api", false, "enable cometduty's silence API (token in the MONITOR_API_TOKEN credential)")
 	f.StringVar(&chainOn, "chain-on", "", "profile whose host runs the chain-role instance (default: the first)")
 	f.StringVar(&image, "image", "", "cometduty image (default "+networktool.CometdutyImage+")")

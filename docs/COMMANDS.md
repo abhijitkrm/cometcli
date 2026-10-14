@@ -640,6 +640,7 @@ set it up, and each works with either monitor.
 cometcli network export mychain-1 --format cometduty                 # files only
 cometcli network export mychain-1 --format cometduty --silence-api --link --deploy
 cometcli network export mychain-1 --format cometduty --webhook-url https://ops.example:9180/alerts
+cometcli network export mychain-1 --format cometduty --telegram     # alerts to watch's Telegram chat too
 
 # work a monitor's alerts the moment they fire
 cometcli config set-key WATCH_WEBHOOK_SECRET      # cometduty's webhook.secret
@@ -650,6 +651,8 @@ cometcli watch --listen 127.0.0.1:9180            # POST /alerts
 |---|---|---|
 | alerts → `watch` | `watch --listen` receives cometduty's webhook (verified HMAC signature, replays refused) or Alertmanager's (bearer token `WATCH_WEBHOOK_TOKEN`). The node an alert names is triaged at once: a case triage finds is worked like a sweep's; when triage finds nothing, the alert itself becomes the incident (`monitor:<kind>`), cleared by the monitor's resolve. Alerts about no single node (a stalled chain) run a fleet sweep. Sweeps keep running. | `watch.listen` or `--listen` |
 | silences during planned work | before `node service stop/restart`, `node recreate`, `node provision --reconfigure` (15 min) and `upgrade switch` (30 min, the whole chain) cometcli silences the node's alerts — matcher `profile=<name>`, or `chain_id=<id>` — through the Alertmanager v2 silence API. A monitor that can't be reached never blocks the work; the tool says it couldn't silence. | `endpoints.monitor` on the profile and/or `monitor.silence`, token `MONITOR_API_TOKEN` |
+| `watch` leaves planned work alone | an issue on a node under planned work — recorded by the commands above (in `~/.cometcli/planned.json`, so this works with no monitor), or an active silence of the node or its chain at its monitor — is posted once as 🔕 and not worked. If it's still there when the work ends, it's handled as new; if it clears, nothing is posted. | nothing (monitor silences: as above) |
+| one Telegram chat | `--telegram` sets cometduty's own Telegram notifier to the bot and chat `watch` uses (`watch.alerts`, `TELEGRAM_BOT_TOKEN`; `--telegram-chat` for another), so the monitor's 🚨/💜 and watch's diagnosis and approvals land together. | `--telegram` |
 | monitor metrics in triage | triage reads the node's monitor `/metrics` (signing streak, slashing-window %, signer height, disk, open alerts, silences) as `monitor.*` signals. Cases: `monitor-unreachable` (nobody may be paged) and `monitor-alerts-silenced`. | `endpoints.monitor` |
 
 ```yaml
