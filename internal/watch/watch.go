@@ -81,6 +81,7 @@ type Watcher struct {
 
 	state     state
 	lastSweep time.Time
+	swept     bool // a sweep ran in this process
 }
 
 type state struct {
@@ -185,6 +186,7 @@ func (w *Watcher) Sweep(ctx context.Context) {
 	nodes := w.Collect(ctx)
 	issues := Issues(nodes, triage.FleetFindings(nodes))
 	open, cleared := w.reconcile(ctx, issues, func(k string) bool { return !w.fromMonitor(k) })
+	w.swept = true
 	w.logf("sweep: %d nodes, %d open issues, %d resolved", len(nodes), open, cleared)
 }
 
@@ -203,6 +205,15 @@ func (w *Watcher) reconcile(ctx context.Context, issues []Issue, inScope func(ke
 		}
 	}
 	sort.Strings(gone)
+	if !w.swept && len(gone) > 0 {
+		// issues saved by an earlier run, gone by now: one line, not a
+		// burst of stale "resolved" messages
+		for _, k := range gone {
+			delete(w.state.Active, k)
+		}
+		w.send(ctx, fmt.Sprintf("✅ %d issue(s) open when the watcher last ran are gone", len(gone)))
+		gone = nil
+	}
 	for _, k := range gone {
 		delete(w.state.Active, k)
 		w.send(ctx, "✅ resolved: "+strings.Replace(k, "|", ": ", 1))

@@ -161,3 +161,19 @@ func TestInfoAlertsAndRemindersAreQuiet(t *testing.T) {
 		t.Fatal("info alert triggered triage")
 	}
 }
+
+func TestStaleIssuesSummarizedOnFirstSweep(t *testing.T) {
+	sp := filepath.Join(t.TempDir(), "s.json")
+	n := &memNotify{}
+	old := &Watcher{StatePath: sp}
+	old.load()
+	old.state.Active["val01|a"], old.state.Active["val01|b"] = time.Now(), time.Now()
+	old.save()
+	w := &Watcher{Mode: ModeNotify, StatePath: sp, Notify: []Notifier{n},
+		Collect: func(context.Context) []triage.NodeReport { return jailedNode(false) }}
+	w.Sweep(context.Background())
+	all := strings.Join(n.msgs, "\n")
+	if !strings.Contains(all, "2 issue(s) open when the watcher last ran are gone") || strings.Contains(all, "resolved: val01") {
+		t.Fatalf("got:\n%s", all)
+	}
+}
