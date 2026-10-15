@@ -481,6 +481,7 @@ func collectHost(c *toolkit.Context, r *Report, set func(string, any)) error {
 			}
 		}
 	}
+	collectHostDisk(home, run, set)
 	if out := run("free -b 2>/dev/null | awk '/^Mem:/{print $2, $7}'"); out != "" {
 		if fs := strings.Fields(out); len(fs) == 2 {
 			total, _ := strconv.ParseFloat(fs[0], 64)
@@ -894,6 +895,7 @@ func collectConfig(c *toolkit.Context, r *Report, set func(string, any)) error {
 		}
 	}
 	if raw, err := readNodeFile(c, h, "data/priv_validator_state.json"); err == nil {
+		set("pvs.corrupt", common.ParseSignerState(raw) != "")
 		var pvs struct {
 			Height string `json:"height"`
 			Round  int64  `json:"round"`
@@ -1234,5 +1236,39 @@ func dockerStartError(c *toolkit.Context, h host.Host, unit string, set func(str
 	}
 	if noImageRe.MatchString(msg) {
 		set("proc.image_present", false)
+	}
+}
+
+// kernelDiskErr matches kernel log lines of a failing disk or filesystem.
+const kernelDiskErr = `I/O error|blk_update_request: .*error|critical medium error|EXT4-fs error|XFS .*(corruption|Internal error|I/O error)|BTRFS (error|critical)|Remounting filesystem read-only|nvme[0-9]+: (I/O .*timeout|controller is down|Device not ready)`
+
+// collectHostDisk reads what a monitor inside a container can't see: whether
+// the node home's filesystem went read-only, kernel disk errors in the last
+// hour, and the disk's own health verdict (smartctl, when installed).
+func collectHostDisk(home string, run func(string) string, set func(string, any)) {
+	q := common.ShellQ(home)
+	if opts := run("findmnt -no OPTIONS --target " + q + " 2>/dev/null"); opts != "" {
+		ro := false
+		for _, o := range strings.Split(opts, ",") {
+			ro = ro || o == "ro"
+		}
+		set("host.fs_readonly", ro)
+	}
+	// the kernel log needs root or the adm group on most hosts: try sudo
+	// (non-interactive), then the user's own view; dmesg has no time window
+	src := `{ sudo -n journalctl -k --since "-1h" -q --no-pager 2>/dev/null || journalctl -k --since "-1h" -q --no-pager 2>/dev/null; }`
+	if out := run("k=$(" + src + "); [ -n \"$k\" ] && { printf '%s\\n' \"$k\" | grep -cE '" + kernelDiskErr + "' || true; }"); out != "" {
+		if n, err := strconv.Atoi(out); err == nil {
+			set("host.kernel_disk_errors", float64(n))
+		}
+	}
+	if dev := run("findmnt -no SOURCE --target " + q + " 2>/dev/null"); strings.HasPrefix(dev, "/dev/") {
+		out := run("command -v smartctl >/dev/null && sudo -n smartctl -H " + common.ShellQ(dev) + " 2>/dev/null | grep -iE 'overall-health|health status'")
+		switch u := strings.ToUpper(out); {
+		case strings.Contains(u, "FAILED"):
+			set("host.disk_health_failed", true)
+		case strings.Contains(u, "PASSED") || strings.Contains(u, ": OK"):
+			set("host.disk_health_failed", false)
+		}
 	}
 }

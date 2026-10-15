@@ -208,6 +208,11 @@ func (serviceTool) Run(c *toolkit.Context, a toolkit.Args) (*toolkit.Result, err
 	if err != nil {
 		return nil, err
 	}
+	if action == "start" || action == "restart" {
+		if err := common.GuardSignerState(c, h, action); err != nil {
+			return nil, err
+		}
+	}
 	if action != "status" {
 		if err := c.Approve(fmt.Sprintf("%s service %s on %s", action, c.Profile.Service.Unit, h), toolkit.TierLocalChange,
 			map[string]any{"action": action, "unit": c.Profile.Service.Unit, "host": h.String()}); err != nil {

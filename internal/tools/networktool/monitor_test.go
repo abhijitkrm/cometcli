@@ -28,7 +28,7 @@ func monitorProfiles() []*config.Profile {
 
 func TestCometdutyFiles(t *testing.T) {
 	sets, err := CometdutyFiles("c-1", monitorProfiles(), MonitorOpts{WebhookURL: "https://cc.example/alerts", Secret: "sec", APIToken: "0123456789abcdef0123", ChainOn: "arch",
-		TelegramToken: "123:tok", TelegramChat: "-10042"})
+		TelegramToken: "123:tok", TelegramChat: "-10042"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestCometdutyFiles(t *testing.T) {
 }
 
 func TestCometdutyFilesWithoutExtras(t *testing.T) {
-	sets, err := CometdutyFiles("c-1", monitorProfiles(), MonitorOpts{})
+	sets, err := CometdutyFiles("c-1", monitorProfiles(), MonitorOpts{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestCometdutyFilesWithoutExtras(t *testing.T) {
 			t.Errorf("%s: optional parts present without being asked:\n%s", s.Dir, c)
 		}
 	}
-	if _, err := CometdutyFiles("other-1", monitorProfiles(), MonitorOpts{}); err == nil {
+	if _, err := CometdutyFiles("other-1", monitorProfiles(), MonitorOpts{}, nil); err == nil {
 		t.Error("profiles of another chain accepted")
 	}
 }
@@ -101,7 +101,7 @@ func TestCometdutyAcceptsExport(t *testing.T) {
 		t.Skip("COMETDUTY_BIN not set")
 	}
 	sets, err := CometdutyFiles("c-1", monitorProfiles(), MonitorOpts{WebhookURL: "https://cc.example/alerts", Secret: "sec", APIToken: "0123456789abcdef0123",
-		TelegramToken: "123:tok", TelegramChat: "-10042"})
+		TelegramToken: "123:tok", TelegramChat: "-10042"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,5 +168,71 @@ func TestStandaloneFiles(t *testing.T) {
 	ps := monitorProfiles()[:1] // val2 only, run on val2: its own loopback RPC
 	if _, _, err := StandaloneFiles("c-1", ps, MonitorOpts{}, nil); err != nil {
 		t.Errorf("own host: %v", err)
+	}
+}
+
+// A sidecar gets the host's mount table and kernel log; a host without
+// them gets files without them (and nothing that names them).
+func TestFitHost(t *testing.T) {
+	sets, err := CometdutyFiles("c-1", monitorProfiles(), MonitorOpts{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var side MonitorFiles
+	for _, s := range sets {
+		if s.Profile != "" && strings.Contains(string(s.Files["config.yml"]), "home_path") {
+			side = s
+			break
+		}
+	}
+	if side.Profile == "" {
+		t.Fatal("no sidecar with a node home")
+	}
+	cfg, comp := string(side.Files["config.yml"]), string(side.Files["compose.yml"])
+	for _, want := range []string{"mounts: /host/mounts", "kernel_log: /host/log/kern.log"} {
+		if !strings.Contains(cfg, want) {
+			t.Errorf("config lacks %q:\n%s", want, cfg)
+		}
+	}
+	for _, want := range []string{"/proc/1/mounts:/host/mounts:ro", "/var/log:/host/log:ro", "group_add"} {
+		if !strings.Contains(comp, want) {
+			t.Errorf("compose lacks %q:\n%s", want, comp)
+		}
+	}
+	all, err := fitHost(side.Files, true, true)
+	if err != nil || string(all["config.yml"]) != cfg {
+		t.Fatalf("a host with both should keep the files as they are: %v", err)
+	}
+	none, err := fitHost(side.Files, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c2, k2 := string(none["config.yml"]), string(none["compose.yml"])
+	for _, gone := range []string{"/host/", "home_path", "group_add"} {
+		if strings.Contains(c2+k2, gone) {
+			t.Errorf("%q left on a host without them:\n%s\n%s", gone, c2, k2)
+		}
+	}
+	if !strings.HasPrefix(c2, "# cometduty config written by cometcli") || !strings.Contains(c2, "home: /node-home") {
+		t.Errorf("config lost its header or node home:\n%s", c2)
+	}
+	if string(side.Files["config.yml"]) != cfg {
+		t.Error("fitHost changed its input")
+	}
+	mountsOnly, _ := fitHost(side.Files, true, false)
+	if c := string(mountsOnly["config.yml"]); !strings.Contains(c, "mounts: /host/mounts") || strings.Contains(c, "kernel_log") {
+		t.Errorf("mounts only:\n%s", c)
+	}
+}
+
+func TestChainInstanceTakesRPCs(t *testing.T) {
+	sets, err := CometdutyFiles("c-1", monitorProfiles(), MonitorOpts{}, []string{"https://rpc.example:443"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range sets {
+		if s.Profile == "" && !strings.Contains(string(s.Files["config.yml"]), "https://rpc.example:443") {
+			t.Fatalf("chain instance lacks the extra endpoint:\n%s", s.Files["config.yml"])
+		}
 	}
 }

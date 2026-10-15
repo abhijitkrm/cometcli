@@ -51,7 +51,7 @@ func TestHealthyNodeMatchesNothing(t *testing.T) {
 		"val.jailed": false, "val.tombstoned": false, "val.bonded": true, "val.status": "BONDED", "val.in_set": true,
 		"val.signed_recent_pct": 100.0, "val.missed_pct": 0.1, "val.downtime_budget_used_pct": 0.2, "val.self_below_min": false,
 		"val.fee_balance_zero": false, "upgrade.pending": false, "gov.unvoted": 0.0,
-		"host.disk_used_pct": 40.0, "host.inode_used_pct": 5.0, "host.mem_used_pct": 50.0, "host.load_per_cpu": 0.4,
+		"host.disk_used_pct": 40.0, "host.inode_used_pct": 5.0, "host.fs_readonly": false, "host.kernel_disk_errors": 0.0, "host.disk_health_failed": false, "pvs.corrupt": false, "host.mem_used_pct": 50.0, "host.load_per_cpu": 0.4,
 		"clock.ntp_synced": true, "proc.running": true, "proc.restarts": 0.0, "proc.oom_killed": false, "proc.uptime_s": 86400.0,
 		"logs.panic": 0.0, "logs.apphash": 0.0, "logs.peer_net": 12.0,
 		"config.db_backend_mismatch": false, "config.mempool_mismatch": false, "config.remote_signer": false,

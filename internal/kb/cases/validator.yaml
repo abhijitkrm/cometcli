@@ -284,6 +284,30 @@
   test:
     signals: {config.remote_signer: true, logs.privval: 40}
 
+- id: val-signer-state-corrupt
+  title: priv_validator_state.json is corrupt
+  plain: "The validator's signing state file is corrupt. Starting it could double-sign, so cometcli won't start it."
+  explains: [node-process-down, node-crash-loop, val-not-signing, val-local-privval-errors]
+  severity: critical
+  match:
+    all: ["pvs.corrupt == true"]
+  confirm:
+    - "bash: cat <home>/data/priv_validator_state.json"
+  causes:
+    - disk errors or a full disk while the file was written; a bad copy or restore
+  fix:
+    - "[read] find the last height this validator signed: its logs, or its last precommit on chain"
+    - "[change] write priv_validator_state.json with that height (or higher), round 0, step 0 — the operator writes it; never lower than what it signed"
+    - "[read] check the disk (host.kernel_disk_errors, host.fs_readonly) before trusting it again"
+  warnings:
+    - cometcli refuses to start, restart or recreate a validator on a corrupt state file
+    - never reset the file to height 0 on a validator that has signed
+  playbook_kind: report
+  playbook:
+    - {do: bash, args: {command: "f={sig:node.host_home}/data/priv_validator_state.json; ls -l $f; head -c 400 $f | od -c | head -12", description: "the state file as it is"}, note: "what's in the file"}
+  test:
+    signals: {pvs.corrupt: true}
+
 - id: val-pvs-ahead
   title: priv_validator_state height ahead of the chain — signing refused
   plain: "The signing state is ahead of the chain; signing now could double-sign."
