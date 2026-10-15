@@ -199,9 +199,10 @@ func sidecarAlerts(o MonitorOpts) map[string]any {
 		"lag_enabled": true, "lag_blocks": 100,
 		"evm_down_enabled": true, "evm_lag_enabled": true, "evm_lag_blocks": 30,
 		"catching_up_severity": "warning", "catching_up_grace_minutes": 2, "catching_up_stuck_minutes": 15,
-		"disk_free_bytes_alert": int64(5) << 30, "signer_stall_minutes": 5,
-		"webhook":  map[string]any{"enabled": o.WebhookURL != ""},
-		"telegram": map[string]any{"enabled": o.TelegramChat != ""},
+		"disk_free_bytes_alert": int64(5) << 30, "inode_free_pct_alert": 5, "disk_fill_hours_alert": 12,
+		"signer_stall_minutes": 5,
+		"webhook":              map[string]any{"enabled": o.WebhookURL != ""},
+		"telegram":             map[string]any{"enabled": o.TelegramChat != ""},
 	}
 }
 
@@ -376,8 +377,9 @@ func StandaloneFiles(chainID string, profiles []*config.Profile, o MonitorOpts, 
 	alerts := sidecarAlerts(o)
 	alerts["stalled_enabled"], alerts["stalled_minutes"] = true, 2
 	alerts["alert_if_no_servers"], alerts["set_watch_enabled"] = true, true
-	delete(alerts, "disk_free_bytes_alert") // no node home here
-	delete(alerts, "signer_stall_minutes")
+	for _, k := range []string{"disk_free_bytes_alert", "inode_free_pct_alert", "disk_fill_hours_alert", "signer_stall_minutes"} {
+		delete(alerts, k) // no node home here
+	}
 	chain := map[string]any{"chain_id": chainID, "alerts": alerts, "nodes": nodes}
 	if len(validators) > 0 {
 		chain["validators"] = validators

@@ -155,7 +155,7 @@ func TestStandaloneFiles(t *testing.T) {
 	}
 	a := ch["alerts"].(map[string]any)
 	if a["stalled_enabled"] != true || a["set_watch_enabled"] != true || a["alert_if_no_servers"] != true ||
-		a["telegram"].(map[string]any)["enabled"] != true || a["disk_free_bytes_alert"] != nil {
+		a["telegram"].(map[string]any)["enabled"] != true || a["disk_free_bytes_alert"] != nil || a["disk_fill_hours_alert"] != nil {
 		t.Errorf("alerts %v", a)
 	}
 	if c := string(f.Files["compose.yml"]); strings.Contains(c, "node-home") || strings.Contains(c, "docker-proxy") {
