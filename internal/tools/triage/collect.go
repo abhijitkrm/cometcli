@@ -750,7 +750,11 @@ func collectLogs(c *toolkit.Context, r *Report, set func(string, any)) error {
 	var cmd string
 	switch svc.Type {
 	case "docker":
-		cmd = fmt.Sprintf("docker logs --since %s %s 2>&1 | tail -n 20000", since.String(), common.ShellQ(svc.Unit))
+		// --since makes dockerd read a json-file log from its start (GBs on
+		// a node without log rotation, every sweep); --tail seeks from the
+		// end. Lines carry their time (-t), so the window is cut here.
+		cutoff := time.Now().Add(-since).UTC().Format("2006-01-02T15:04:05")
+		cmd = fmt.Sprintf("docker logs -t --tail 20000 %s 2>&1 | awk -v s=%s 'substr($0,1,19) >= s { print substr($0, index($0, \" \")+1) }'", common.ShellQ(svc.Unit), cutoff)
 	case "systemd", "":
 		unit := svc.Unit
 		if unit == "" {
@@ -1254,10 +1258,12 @@ func collectHostDisk(home string, run func(string) string, set func(string, any)
 		}
 		set("host.fs_readonly", ro)
 	}
-	// the kernel log needs root or the adm group on most hosts: try sudo
-	// (non-interactive), then the user's own view; dmesg has no time window
-	src := `{ sudo -n journalctl -k --since "-1h" -q --no-pager 2>/dev/null || journalctl -k --since "-1h" -q --no-pager 2>/dev/null; }`
-	if out := run("k=$(" + src + "); [ -n \"$k\" ] && { printf '%s\\n' \"$k\" | grep -cE '" + kernelDiskErr + "' || true; }"); out != "" {
+	// the kernel journal needs root or the adm group on most hosts: sudo
+	// (non-interactive), else the user's own view if it shows kernel lines
+	// at all — a quiet hour is 0 errors, a journal it can't read is unknown
+	// (dmesg has no time window)
+	if out := run(`if sudo -n true 2>/dev/null; then J="sudo -n journalctl"; elif [ -n "$(journalctl -k -n 1 -q --no-pager 2>/dev/null)" ]; then J=journalctl; else exit 1; fi; ` +
+		`$J -k --since "-1h" -q --no-pager 2>/dev/null | grep -cE '` + kernelDiskErr + `' || true`); out != "" {
 		if n, err := strconv.Atoi(out); err == nil {
 			set("host.kernel_disk_errors", float64(n))
 		}

@@ -282,6 +282,9 @@ func (c Compose) YAML() string {
 		fmt.Fprintf(&b, "    user: %q\n", c.User)
 	}
 	b.WriteString("    stop_grace_period: 60s\n    working_dir: /data/node0/evmd\n    environment:\n      - ID=0\n      - HOME=/data/node0/evmd\n")
+	// docker keeps a container's output forever by default: a node logging
+	// several lines a block fills GBs a day, and reading it back gets slow
+	b.WriteString("    logging:\n      driver: json-file\n      options: {max-size: \"100m\", max-file: \"5\"}\n")
 	fmt.Fprintf(&b, "    command: [%s]\n", strings.Join(cmd, ", "))
 	b.WriteString("    volumes:\n")
 	fmt.Fprintf(&b, "      - %s:/data/node0/evmd\n", c.HostHome)
