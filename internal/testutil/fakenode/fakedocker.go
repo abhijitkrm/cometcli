@@ -9,9 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
@@ -85,7 +87,15 @@ func fakeDocker(args []string) int {
 	case len(args) > 0 && args[0] == "logs":
 		if p := os.Getenv("FAKENODE_LOGS"); p != "" {
 			b, _ := os.ReadFile(p)
-			_, _ = os.Stdout.Write(b)
+			if !slices.Contains(args, "-t") {
+				_, _ = os.Stdout.Write(b)
+				return 0
+			}
+			// -t: each line with its time, as docker prints it (all "now")
+			ts := time.Now().UTC().Format(time.RFC3339Nano)
+			for _, l := range strings.Split(strings.TrimSuffix(string(b), "\n"), "\n") {
+				fmt.Println(ts + " " + l)
+			}
 		}
 		return 0
 	case len(args) > 0 && args[0] == "inspect":

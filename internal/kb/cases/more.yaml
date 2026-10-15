@@ -96,7 +96,7 @@
     - upgrades often run store migrations that need extra free space
   playbook_kind: report
   playbook:
-    - {do: bash, args: {command: "df -h / {sig:node.host_home}; du -sh {sig:node.host_home}/data/* 2>/dev/null | sort -h | tail -8", description: "what fills the disk"}, note: "where the space goes"}
+    - {do: bash, args: {command: "h={sig:node.host_home}; df -h $h; m=$(findmnt -no TARGET --target $h 2>/dev/null || echo /); if sudo -n true 2>/dev/null; then S='sudo -n'; else S=; fi; echo \"largest dirs on $m:\"; timeout 60 $S du -xh -d 3 $m 2>/dev/null | sort -h | tail -12; echo 'files over 1G:'; timeout 60 $S find $m -xdev -type f -size +1G -printf '%s\\t%p\\n' 2>/dev/null | sort -n | tail -8 | numfmt --to=iec --field=1", description: "what fills the disk (the whole filesystem, not just the node home)"}, note: "where the space goes — anything on the filesystem, not only the node data"}
     - {do: snap.prune, note: "pruning advice"}
   test:
     signals: {host.disk_free_gb: 8}

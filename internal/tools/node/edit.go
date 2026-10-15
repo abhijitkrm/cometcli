@@ -134,6 +134,9 @@ func (recreateTool) Run(c *toolkit.Context, _ toolkit.Args) (*toolkit.Result, er
 	default:
 		return nil, fmt.Errorf("%s wasn't created by docker compose — no compose file to recreate it from", p.Service.Unit)
 	}
+	if err := common.GuardSignerState(c, h, "recreate"); err != nil {
+		return nil, err
+	}
 	if err := c.Approve(fmt.Sprintf("recreate %s (docker compose up -d --force-recreate %s, %s)", p.Service.Unit, svc, file), toolkit.TierLocalChange,
 		map[string]any{"compose": file, "service": svc}); err != nil {
 		return nil, err
