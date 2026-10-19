@@ -73,7 +73,7 @@ func TestComposeFile(t *testing.T) {
 	c := Compose{Image: "primium-v0.7.2", Container: "primium-archive", HostHome: "/data/archive", User: "1000:1000",
 		Command: s.Command(Archive), Services: Services{API: true, GRPC: true, JSONRPC: true, WS: true}, PortOffset: 50}
 	y := c.YAML()
-	for _, want := range []string{`"--pruning", "nothing"`, `"--json-rpc.ws-origins=*"`, `"26706:26656"`, `"127.0.0.1:26707:26657"`, `"127.0.0.1:8595:8545"`, "/data/archive:/data/node0/evmd", `user: "1000:1000"`, "stop_grace_period: 60s"} {
+	for _, want := range []string{`"--pruning", "nothing"`, `"--json-rpc.ws-origins=*"`, `"26706:26656"`, `"127.0.0.1:26707:26657"`, `"127.0.0.1:8595:8545"`, "/data/archive:/data/node0/evmd", `user: "1000:1000"`, "stop_grace_period: 60s", `max-size: "100m"`} {
 		if !strings.Contains(y, want) {
 			t.Errorf("compose lacks %s:\n%s", want, y)
 		}

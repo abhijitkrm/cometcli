@@ -29,6 +29,9 @@ operator address). Every alert carries the label profile=<name>.
   --layout sidecar     (default) a cometduty beside each node — everything,
                        including disk, signer-state and log alerts that need
                        the node's machine — plus a chain-role instance
+                       --rpc adds endpoints the chain instance can reach (a
+                       public RPC), so it can tell a chain halt from one
+                       stuck node
   --layout standalone  one cometduty for the whole network on the --chain-on
                        host: every validator's signing, the active set, chain
                        health, and each node whose RPC it can reach; no disk,
@@ -118,11 +121,11 @@ cometduty doesn't need cometcli, and cometcli doesn't need cometduty.`,
 			var sets []networktool.MonitorFiles
 			switch layout {
 			case "sidecar":
-				if rpcs != "" {
-					return fmt.Errorf("--rpc is for --layout standalone")
-				}
-				if sets, err = networktool.CometdutyFiles(chain, list, o); err != nil {
+				if sets, err = networktool.CometdutyFiles(chain, list, o, splitCSV(rpcs)); err != nil {
 					return err
+				}
+				if rpcs == "" {
+					fmt.Fprintln(w, "note: the chain instance sees one endpoint, so a stall there is reported on that node (node-stalled) — add --rpc <a public RPC> for a chain-wide view")
 				}
 			case "standalone":
 				f, skipped, err := networktool.StandaloneFiles(chain, list, o, splitCSV(rpcs))
@@ -244,7 +247,7 @@ cometduty doesn't need cometcli, and cometcli doesn't need cometduty.`,
 	f := cmd.Flags()
 	f.StringVar(&format, "format", "cometduty", "what to write (cometduty)")
 	f.StringVar(&layout, "layout", "sidecar", "sidecar (one per node + chain instance) or standalone (one for the network)")
-	f.StringVar(&rpcs, "rpc", "", "standalone: extra RPC endpoints it can reach, comma-separated (data sources, not paged)")
+	f.StringVar(&rpcs, "rpc", "", "extra RPC endpoints the chain (or standalone) instance can reach, comma-separated (data sources, not paged)")
 	f.StringVar(&profiles, "profiles", "", "nodes to include (default: every profile on <chain-id>)")
 	f.StringVar(&out, "out", "", "where to write (default ~/.cometcli/monitor/<chain-id>)")
 	f.StringVar(&webhookURL, "webhook-url", "", "send alerts here, signed (e.g. where cometcli watch --listen is reachable)")

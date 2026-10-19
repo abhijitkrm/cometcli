@@ -6,14 +6,16 @@
   match:
     any: ["host.disk_used_pct >= 95", "logs.disk_io > 0"]
   confirm:
-    - "bash: df -h <home>; du -sh <home>/data/* (largest dirs)"
+    - "bash: df -h <home>; du -xh -d 3 of the whole filesystem and files over 1G — the space can be outside the node home"
   causes:
     - unpruned state (app.pruning=nothing/default on a validator), old snapshots, huge logs, cosmovisor backups
+    - something else on the same filesystem (docker images and logs, backups, a stray large file)
   fix:
     - "[read] snap.prune advice; snap.list"
-    - "[change] remove old snapshots / rotated logs / cosmovisor backup dirs (operator confirms each delete)"
+    - "[change] remove old snapshots / rotated logs / cosmovisor backup dirs / the large files found (operator confirms each delete)"
+    - "[change] once space is free, restart the node (node.service restart): a node that hit a full disk freezes — RPC up, no new blocks, nothing logged — and stays frozen after space returns"
     - "[change] set app.toml pruning=custom (keep-recent 100, interval 10) for validators; restart"
-    - "[change] longer-term: grow the volume"
+    - "[change] longer-term: grow the volume, or move the node home to its own volume"
   verify:
     - "host.disk_used_pct < 85"
   warnings:
@@ -21,7 +23,7 @@
     - never delete application.db/blockstore.db on a validator to free space
   playbook_kind: report
   playbook:
-    - {do: bash, args: {command: "df -h / {sig:node.host_home}; du -sh {sig:node.host_home}/data/* 2>/dev/null | sort -h | tail -8", description: "what fills the disk"}, note: "where the space goes"}
+    - {do: bash, args: {command: "h={sig:node.host_home}; df -h $h; m=$(findmnt -no TARGET --target $h 2>/dev/null || echo /); if sudo -n true 2>/dev/null; then S='sudo -n'; else S=; fi; echo \"largest dirs on $m:\"; timeout 60 $S du -xh -d 3 $m 2>/dev/null | sort -h | tail -12; echo 'files over 1G:'; timeout 60 $S find $m -xdev -type f -size +1G -printf '%s\\t%p\\n' 2>/dev/null | sort -n | tail -8 | numfmt --to=iec --field=1", description: "what fills the disk (the whole filesystem, not just the node home)"}, note: "where the space goes — anything on the filesystem, not only the node data"}
     - {do: snap.prune, note: "pruning advice"}
   test:
     signals: {host.disk_used_pct: 98}
@@ -36,7 +38,7 @@
     - "[change] plan pruning / cleanup / resize before it fills"
   playbook_kind: report
   playbook:
-    - {do: bash, args: {command: "df -h / {sig:node.host_home}; du -sh {sig:node.host_home}/data/* 2>/dev/null | sort -h | tail -8", description: "what fills the disk"}, note: "where the space goes"}
+    - {do: bash, args: {command: "h={sig:node.host_home}; df -h $h; m=$(findmnt -no TARGET --target $h 2>/dev/null || echo /); if sudo -n true 2>/dev/null; then S='sudo -n'; else S=; fi; echo \"largest dirs on $m:\"; timeout 60 $S du -xh -d 3 $m 2>/dev/null | sort -h | tail -12; echo 'files over 1G:'; timeout 60 $S find $m -xdev -type f -size +1G -printf '%s\\t%p\\n' 2>/dev/null | sort -n | tail -8 | numfmt --to=iec --field=1", description: "what fills the disk (the whole filesystem, not just the node home)"}, note: "where the space goes — anything on the filesystem, not only the node data"}
     - {do: snap.prune, note: "pruning advice"}
   test:
     signals: {host.disk_used_pct: 88}
@@ -54,6 +56,67 @@
     - "[change] remove the directory with millions of small files (often old snapshot chunks or wasm cache)"
   test:
     signals: {host.inode_used_pct: 100}
+
+- id: host-fs-readonly
+  title: Node filesystem went read-only
+  plain: "The disk holding the node switched to read-only, usually after disk errors. The node can't write and stops."
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-catching-up, node-restarted-recently, evm-rpc-down, val-not-signing, val-jail-imminent, val-signing-degraded, val-local-privval-errors, state-db-corrupt, host-disk-full]
+  severity: critical
+  match:
+    all: ["host.fs_readonly == true"]
+  confirm:
+    - "bash: findmnt --target <home>; journalctl -k | grep -iE 'I/O error|EXT4-fs error|read-only'"
+  causes:
+    - the kernel remounted the filesystem read-only after I/O or filesystem errors (errors=remount-ro)
+    - "a failing or detached volume (on a cloud VM: an impaired volume)"
+  fix:
+    - "[read] read the kernel log for the first error; check the volume's status at the provider"
+    - "[change] stop the validator so it can't restart mid-failure (node.service stop)"
+    - "[change] move the node to a healthy volume — copy the home, keep data/priv_validator_state.json at its latest — or fsck and remount read-write once the cause is fixed"
+  warnings:
+    - don't remount read-write without fsck; writes on a failing disk corrupt the databases
+    - never start a second copy of the validator elsewhere while this one may still sign
+  playbook_kind: report
+  playbook:
+    - {do: bash, args: {command: "h={sig:node.host_home}; findmnt --target $h; (sudo -n journalctl -k --since -6h -q --no-pager 2>/dev/null || journalctl -k --since -6h -q --no-pager 2>/dev/null) | grep -iE 'I/O error|EXT4-fs|XFS|BTRFS|read-only|nvme' | tail -15", description: "the mount and the kernel's disk errors"}, note: "why it went read-only"}
+  test:
+    signals: {host.fs_readonly: true}
+
+- id: host-disk-io-errors
+  title: Kernel reports disk I/O errors
+  plain: "The kernel logged disk errors in the last hour: the disk is failing or was detached."
+  explains: [node-process-down, node-rpc-down, node-crash-loop, node-stalled, node-blocksync-slow, node-restarted-recently, state-db-corrupt, val-signing-degraded, val-not-signing]
+  severity: critical
+  match:
+    all: ["host.kernel_disk_errors > 0"]
+  confirm:
+    - "bash: journalctl -k --since -1h | grep -iE 'I/O error|EXT4-fs error|nvme'"
+  causes:
+    - failing disk or controller; a cloud volume that is impaired or was detached
+    - filesystem corruption after an unclean shutdown
+  fix:
+    - "[read] which device and how often; the volume's status at the provider"
+    - "[change] move the node to a healthy volume before it fails outright (keep data/priv_validator_state.json at its latest)"
+  warnings:
+    - expect database corruption on a disk with I/O errors; restore from a snapshot rather than trusting the data
+  playbook_kind: report
+  playbook:
+    - {do: bash, args: {command: "(sudo -n journalctl -k --since -1h -q --no-pager 2>/dev/null || journalctl -k --since -1h -q --no-pager 2>/dev/null) | grep -iE 'I/O error|blk_update_request|medium error|EXT4-fs error|XFS|BTRFS|read-only|nvme' | tail -15; findmnt --target {sig:node.host_home}", description: "the kernel's disk errors"}, note: "which device is failing"}
+  test:
+    signals: {host.kernel_disk_errors: 7}
+
+- id: host-disk-failing
+  title: Disk health check failed
+  plain: "The disk's own health check (SMART) reports it is failing."
+  severity: critical
+  match:
+    all: ["host.disk_health_failed == true"]
+  confirm:
+    - "bash: sudo smartctl -a <device>"
+  fix:
+    - "[change] replace the disk: move the node to a new one while this one still reads (keep data/priv_validator_state.json at its latest)"
+  test:
+    signals: {host.disk_health_failed: true}
 
 - id: host-oom-killed
   title: Node killed for out-of-memory

@@ -20,8 +20,9 @@ import (
 )
 
 // CometdutyImage is the cometduty release the generated files run; it must
-// understand labels, api_token and webhook.secret.
-const CometdutyImage = "ghcr.io/abhijitkrm/cometduty:0.3.0" // goreleaser tags images without the v
+// understand labels, api_token, webhook.secret, the inode and fill-rate
+// alerts and the node host: block (0.4.0).
+const CometdutyImage = "ghcr.io/abhijitkrm/cometduty:0.4.0" // goreleaser tags images without the v
 
 // MonitorOpts shape the cometduty files for a network.
 type MonitorOpts struct {
@@ -89,7 +90,7 @@ func cometMetricsURL(rpc string) string {
 // CometdutyFiles renders a cometduty sidecar (config + compose) for each
 // profile, plus the chain-role instance beside opts.ChainOn. Profiles must
 // be on one chain. Nothing is written or run here.
-func CometdutyFiles(chainID string, profiles []*config.Profile, o MonitorOpts) ([]MonitorFiles, error) {
+func CometdutyFiles(chainID string, profiles []*config.Profile, o MonitorOpts, rpcs []string) ([]MonitorFiles, error) {
 	if len(profiles) == 0 {
 		return nil, fmt.Errorf("no nodes of %s", chainID)
 	}
@@ -129,6 +130,9 @@ func CometdutyFiles(chainID string, profiles []*config.Profile, o MonitorOpts) (
 		docker := p.Service.Type == "docker" && p.Service.Unit != ""
 		if p.Home != "" {
 			node["home"] = "/node-home"
+			// what a container can't see: the host's mount table and kernel
+			// log (DeployMonitor drops whichever the host doesn't have)
+			node["host"] = map[string]any{"mounts": hostMounts, "home_path": p.Home, "kernel_log": hostKernelLog}
 		}
 		if docker {
 			node["logs"] = map[string]any{"enabled": true, "source": "docker",
@@ -153,15 +157,21 @@ func CometdutyFiles(chainID string, profiles []*config.Profile, o MonitorOpts) (
 			"compose.yml": []byte(dutyCompose(o.Image, "cometduty-"+p.Name, p.Home, docker, 2375+i)),
 		}})
 	}
-	// the chain-role instance: chain-wide alerts from one node's RPC
+	// the chain-role instance: chain-wide alerts from one node's RPC, plus
+	// any endpoints given (a public RPC) — with one endpoint a stall can't
+	// be told from that node being stuck, and cometduty says so
 	port := o.MetricsPort + perHost[hostKey(chainNode)]
+	nodes := []any{map[string]any{"url": httpURL(chainNode.Endpoints.Comet), "name": chainNode.Name,
+		"labels": map[string]string{"profile": chainNode.Name}}}
+	for i, r := range rpcs {
+		nodes = append(nodes, map[string]any{"url": httpURL(r), "name": fmt.Sprintf("rpc-%d", i+1), "alert_if_down": false})
+	}
 	chain := map[string]any{
 		"chain_id": chainID, "role": "chain",
 		"alerts": map[string]any{"stalled_enabled": true, "stalled_minutes": 2, "alert_if_no_servers": true,
 			"set_watch_enabled": true, "webhook": map[string]any{"enabled": o.WebhookURL != ""},
 			"telegram": map[string]any{"enabled": o.TelegramChat != ""}},
-		"nodes": []any{map[string]any{"url": httpURL(chainNode.Endpoints.Comet), "name": chainNode.Name,
-			"labels": map[string]string{"profile": chainNode.Name}}},
+		"nodes": nodes,
 	}
 	cfgYAML, err := dutyConfig(o, port, map[string]any{chainID: chain})
 	if err != nil {
@@ -199,9 +209,10 @@ func sidecarAlerts(o MonitorOpts) map[string]any {
 		"lag_enabled": true, "lag_blocks": 100,
 		"evm_down_enabled": true, "evm_lag_enabled": true, "evm_lag_blocks": 30,
 		"catching_up_severity": "warning", "catching_up_grace_minutes": 2, "catching_up_stuck_minutes": 15,
-		"disk_free_bytes_alert": int64(5) << 30, "signer_stall_minutes": 5,
-		"webhook":  map[string]any{"enabled": o.WebhookURL != ""},
-		"telegram": map[string]any{"enabled": o.TelegramChat != ""},
+		"disk_free_bytes_alert": int64(5) << 30, "inode_free_pct_alert": 5, "disk_fill_hours_alert": 12,
+		"signer_stall_minutes": 5,
+		"webhook":              map[string]any{"enabled": o.WebhookURL != ""},
+		"telegram":             map[string]any{"enabled": o.TelegramChat != ""},
 	}
 }
 
@@ -242,6 +253,10 @@ func dutyCompose(image, name, home string, logs bool, proxyPort int) string {
 	b.WriteString("    volumes:\n      - ./config.yml:/config/config.yml:ro\n      - ./state:/data\n")
 	if home != "" {
 		fmt.Fprintf(&b, "      - %s:/node-home:ro\n", home)
+		// the host's mount table and log dir (the dir, so a rotated
+		// kern.log is seen); the adm-style group that reads kern.log
+		fmt.Fprintf(&b, "      - /proc/1/mounts:%s:ro\n      - /var/log:%s:ro\n", hostMounts, path.Dir(hostKernelLog))
+		b.WriteString("    group_add: [\"${LOG_GID:-0}\"]\n")
 	}
 	if logs {
 		b.WriteString("  docker-proxy:\n    image: tecnativa/docker-socket-proxy:0.3.0\n")
@@ -277,6 +292,26 @@ func DeployMonitor(c *toolkit.Context, chainID string, f MonitorFiles, home stri
 			owner = strings.TrimSpace(o)
 		}
 	}
+	// which host views this host has: a Linux mount table, a kern.log
+	// (and the group that reads it)
+	logGID := "0"
+	if f.Profile != "" {
+		caps, _, _ := h.Run(c, "test -r /proc/1/mounts && echo mounts; test -f /var/log/kern.log && echo kern=$(stat -c %g /var/log/kern.log 2>/dev/null)")
+		kern := ""
+		for _, l := range strings.Fields(caps) {
+			if v, ok := strings.CutPrefix(l, "kern="); ok {
+				kern = v
+			}
+		}
+		if kern != "" {
+			logGID = kern
+		}
+		files, err := fitHost(f.Files, strings.Contains(caps, "mounts"), kern != "")
+		if err != nil {
+			return "", err
+		}
+		f.Files = files
+	}
 	if err := c.Approve(fmt.Sprintf("start cometduty on %s (%s, /metrics on :%d)", h, dir, f.Port), toolkit.TierLocalChange,
 		map[string]any{"dir": dir, "image": CometdutyImage, "runs_as": owner, "metrics_port": f.Port}); err != nil {
 		return "", err
@@ -294,7 +329,7 @@ func DeployMonitor(c *toolkit.Context, chainID string, f MonitorFiles, home stri
 	}
 	// the container user must read config.yml
 	_, _, _ = h.Run(c, fmt.Sprintf("chown %s %s/config.yml 2>/dev/null || sudo -n chown %s %s/config.yml", owner, common.ShellQ(dir), owner, common.ShellQ(dir)))
-	out, code, err := h.Run(c, fmt.Sprintf("cd %s && USER_ID=%s docker compose up -d 2>&1 | tail -3", common.ShellQ(dir), owner))
+	out, code, err := h.Run(c, fmt.Sprintf("cd %s && USER_ID=%s LOG_GID=%s docker compose up -d 2>&1 | tail -3", common.ShellQ(dir), owner, logGID))
 	if err != nil || code != 0 {
 		return "", fmt.Errorf("docker compose up failed (exit %d): %v %s", code, err, strings.TrimSpace(out))
 	}
@@ -302,7 +337,7 @@ func DeployMonitor(c *toolkit.Context, chainID string, f MonitorFiles, home stri
 	// cometduty must be restarted to read a new config (its state is kept)
 	after, _, _ := h.Run(c, sum)
 	if b := strings.TrimSpace(before); b != "" && b != strings.TrimSpace(after) {
-		if out, code, err := h.Run(c, fmt.Sprintf("cd %s && USER_ID=%s docker compose restart cometduty 2>&1 | tail -3", common.ShellQ(dir), owner)); err != nil || code != 0 {
+		if out, code, err := h.Run(c, fmt.Sprintf("cd %s && USER_ID=%s LOG_GID=%s docker compose restart cometduty 2>&1 | tail -3", common.ShellQ(dir), owner, logGID)); err != nil || code != 0 {
 			return "", fmt.Errorf("restart cometduty for the new config (exit %d): %v %s", code, err, strings.TrimSpace(out))
 		}
 		return fmt.Sprintf("cometduty restarted with the new config in %s (as %s), metrics on :%d", dir, owner, f.Port), nil
@@ -376,8 +411,9 @@ func StandaloneFiles(chainID string, profiles []*config.Profile, o MonitorOpts, 
 	alerts := sidecarAlerts(o)
 	alerts["stalled_enabled"], alerts["stalled_minutes"] = true, 2
 	alerts["alert_if_no_servers"], alerts["set_watch_enabled"] = true, true
-	delete(alerts, "disk_free_bytes_alert") // no node home here
-	delete(alerts, "signer_stall_minutes")
+	for _, k := range []string{"disk_free_bytes_alert", "inode_free_pct_alert", "disk_fill_hours_alert", "signer_stall_minutes"} {
+		delete(alerts, k) // no node home here
+	}
 	chain := map[string]any{"chain_id": chainID, "alerts": alerts, "nodes": nodes}
 	if len(validators) > 0 {
 		chain["validators"] = validators
@@ -417,4 +453,68 @@ func valoperOf(p *config.Profile) string {
 		}
 	}
 	return ""
+}
+
+// Where a sidecar sees its host (node host: in cometduty's config).
+const (
+	hostMounts    = "/host/mounts"
+	hostKernelLog = "/host/log/kern.log"
+)
+
+// fitHost drops the host views a host doesn't offer from a sidecar's files:
+// no /proc/1/mounts (not Linux), or no readable /var/log/kern.log (a
+// journald-only host — cometcli's triage reads the kernel journal there).
+func fitHost(files map[string][]byte, mounts, kernLog bool) (map[string][]byte, error) {
+	out := map[string][]byte{}
+	for k, v := range files {
+		out[k] = v
+	}
+	if mounts && kernLog {
+		return out, nil
+	}
+	if raw, ok := out["config.yml"]; ok {
+		var root map[string]any
+		if err := yaml.Unmarshal(raw, &root); err != nil {
+			return nil, err
+		}
+		chains, _ := root["chains"].(map[string]any)
+		for _, ch := range chains {
+			nodes, _ := ch.(map[string]any)["nodes"].([]any)
+			for _, n := range nodes {
+				nm, _ := n.(map[string]any)
+				hc, _ := nm["host"].(map[string]any)
+				if hc == nil {
+					continue
+				}
+				if !mounts {
+					delete(hc, "mounts")
+				}
+				if !kernLog {
+					delete(hc, "kernel_log")
+				}
+				if hc["mounts"] == nil && hc["kernel_log"] == nil {
+					delete(nm, "host")
+				}
+			}
+		}
+		b, err := yaml.Marshal(root)
+		if err != nil {
+			return nil, err
+		}
+		head, _, _ := strings.Cut(string(raw), "\n")
+		out["config.yml"] = append([]byte(head+"\n"), b...)
+	}
+	if raw, ok := out["compose.yml"]; ok {
+		var keep []string
+		for _, l := range strings.Split(string(raw), "\n") {
+			switch {
+			case !mounts && strings.Contains(l, ":"+hostMounts+":"),
+				!kernLog && (strings.Contains(l, ":"+path.Dir(hostKernelLog)+":") || strings.Contains(l, "group_add:")):
+				continue
+			}
+			keep = append(keep, l)
+		}
+		out["compose.yml"] = []byte(strings.Join(keep, "\n"))
+	}
+	return out, nil
 }
