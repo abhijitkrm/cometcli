@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/abhijitkrm/cometcli/internal/config"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
 )
 
@@ -35,11 +36,29 @@ func num(v any) int64 {
 	return 0
 }
 
+// signsBlocks reports whether doctor should check signing and jailing: a
+// validator, a profile with no role set, or any node saved with a valoper.
+// Archive, RPC and sentry nodes don't sign, so those checks don't apply.
+func signsBlocks(p *config.Profile) bool {
+	return p.IsValidator() || p.Role == "" || p.Metadata["valoper"] != ""
+}
+
+// icon is a check's mark: a warning is "!" even when it has detail text.
+func icon(ch Check) string {
+	switch {
+	case ch.Warn:
+		return "!"
+	case !ch.OK:
+		return "✗"
+	}
+	return "✓"
+}
+
 // DoctorCmd runs the full node health checklist.
 func DoctorCmd(reg *toolkit.Registry) *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
-		Short: "Full validator health checklist",
+		Short: "Full node health checklist",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c, err := NewCtx(cmd, true)
 			if err != nil {
@@ -101,31 +120,33 @@ func DoctorCmd(reg *toolkit.Registry) *cobra.Command {
 				bad := num(r.Data["bad"])
 				return Check{OK: bad == 0, Detail: fmt.Sprintf("%d problems", bad)}
 			})
-			run("signing health", "val.signing", nil, func(r *toolkit.Result, err error) Check {
-				if err != nil {
-					return Check{Warn: true, Detail: "skipped: " + err.Error()}
-				}
-				missed := num(r.Data["missed"])
-				window := num(r.Data["window"])
-				tomb, _ := r.Data["tombstoned"].(bool)
-				if tomb {
-					return Check{OK: false, Detail: "TOMBSTONED — double-sign slashed"}
-				}
-				if window > 0 && missed > window/10 {
-					return Check{OK: false, Detail: fmt.Sprintf("missing %d/%d blocks", missed, window)}
-				}
-				return Check{OK: true, Detail: fmt.Sprintf("missed %d/%d", missed, window)}
-			})
-			run("jail status", "val.status", nil, func(r *toolkit.Result, err error) Check {
-				if err != nil {
-					return Check{Warn: true, Detail: "skipped: " + err.Error()}
-				}
-				j, _ := r.Data["jailed"].(bool)
-				if j {
-					return Check{OK: false, Detail: "JAILED — investigate + `cometcli val unjail`"}
-				}
-				return Check{OK: true, Detail: "not jailed"}
-			})
+			if signsBlocks(c.Profile) {
+				run("signing health", "val.signing", nil, func(r *toolkit.Result, err error) Check {
+					if err != nil {
+						return Check{Warn: true, Detail: "skipped: " + err.Error()}
+					}
+					missed := num(r.Data["missed"])
+					window := num(r.Data["window"])
+					tomb, _ := r.Data["tombstoned"].(bool)
+					if tomb {
+						return Check{OK: false, Detail: "TOMBSTONED — double-sign slashed"}
+					}
+					if window > 0 && missed > window/10 {
+						return Check{OK: false, Detail: fmt.Sprintf("missing %d/%d blocks", missed, window)}
+					}
+					return Check{OK: true, Detail: fmt.Sprintf("missed %d/%d", missed, window)}
+				})
+				run("jail status", "val.status", nil, func(r *toolkit.Result, err error) Check {
+					if err != nil {
+						return Check{Warn: true, Detail: "skipped: " + err.Error()}
+					}
+					j, _ := r.Data["jailed"].(bool)
+					if j {
+						return Check{OK: false, Detail: "JAILED — investigate + `cometcli val unjail`"}
+					}
+					return Check{OK: true, Detail: "not jailed"}
+				})
+			}
 			run("upgrade pending", "chain.upgrade-plan", nil, func(r *toolkit.Result, err error) Check {
 				if err != nil {
 					return Check{Warn: true, Detail: "skipped: " + err.Error()}
@@ -203,16 +224,7 @@ func DoctorCmd(reg *toolkit.Registry) *cobra.Command {
 			}
 			var b strings.Builder
 			for _, ch := range checks {
-				icon := "✓"
-				switch {
-				case !ch.OK && ch.Detail != "":
-					icon = "✗"
-				case ch.Warn:
-					icon = "!"
-				case !ch.OK:
-					icon = "✗"
-				}
-				fmt.Fprintf(&b, "%s  %-18s %s\n", icon, ch.Name, ch.Detail)
+				fmt.Fprintf(&b, "%s  %-18s %s\n", icon(ch), ch.Name, ch.Detail)
 			}
 			fmt.Fprintf(&b, "\n%d failures, %d warnings\n", fails, warns)
 			fmt.Fprint(c.Out, b.String())
