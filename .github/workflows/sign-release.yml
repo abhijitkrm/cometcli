@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   sign:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: sigstore/cosign-installer@v3
       - name: sign checksums.txt
