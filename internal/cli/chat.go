@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -132,6 +133,21 @@ func runChat(cmd *cobra.Command, reg *toolkit.Registry, p *config.Profile, args 
 	a, err := agent.New(c, reg)
 	if err != nil {
 		return err
+	}
+	// first run: no model anywhere (not even a deliberate "off") — offer
+	// to set one up before the chat opens
+	if !a.HasModel() && c.Cfg.AgentFor(p).Provider == "" {
+		ok, err := setupProvider(c.Cfg, bufio.NewReader(cmd.InOrStdin()), cmd.ErrOrStderr())
+		if err != nil {
+			a.Close()
+			return err
+		}
+		if ok {
+			a.Close()
+			if a, err = agent.New(c, reg); err != nil {
+				return err
+			}
+		}
 	}
 	defer a.Close()
 	note, err := configureChatAgent(cmd, a)

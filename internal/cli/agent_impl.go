@@ -7,12 +7,36 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/abhijitkrm/cometcli/internal/agent"
+	"github.com/abhijitkrm/cometcli/internal/config"
 	"github.com/abhijitkrm/cometcli/internal/toolkit"
 )
+
+// profileSelected reports whether --profile, COMETCLI_PROFILE or the
+// active profile names one (it may still not exist — that stays an error).
+func profileSelected(cfg *config.Config) bool {
+	return flagProfile != "" || os.Getenv("COMETCLI_PROFILE") != "" || cfg.Active != ""
+}
 
 // runAgentImpl builds the agent on a context and runs REPL (empty oneshot)
 // or a single turn.
 func runAgentImpl(cmd *cobra.Command, reg *toolkit.Registry, oneshot string) error {
+	// no profile chosen yet (a fresh install): the general chat, like
+	// plain `cometcli`, instead of an error
+	if cfg, err := config.Load(); err == nil && !profileSelected(cfg) {
+		fmt.Fprintln(cmd.ErrOrStderr(), "no profile yet — this is the general chat, same as `cometcli` (`cometcli init` sets up a node, `cometcli one <profile>` opens node mode)")
+		if oneshot != "" {
+			c, err := chatCtx(cmd, nil, true)
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+			if c.Audit != nil {
+				defer c.Audit.Close()
+			}
+			return runPrint(cmd, c, reg, oneshot)
+		}
+		return runChat(cmd, reg, nil, nil)
+	}
 	c, err := NewCtx(cmd, true)
 	if err != nil {
 		return err
