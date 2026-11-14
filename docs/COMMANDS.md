@@ -789,13 +789,14 @@ cometcli runbook run coordinated-upgrade
 ## Interfaces
 
 ```bash
-cometcli                               # bare command = chat TUI (when a profile exists)
+cometcli                               # bare command = chat TUI (no profile needed; asks for
+                                       # an AI provider + key on first run)
 cometcli ui                            # chat-first TUI: streamed answers,
                                        # /run tools, approval modals with diffs, txs broadcast
                                        # from the chat. Overview/fleet/logs/send panes on tabs
 cometcli serve --open                  # same agent in a local web chat (127.0.0.1 only,
                                        # token link printed at start; approvals as modals)
-cometcli agent                         # line-mode REPL (needs ANTHROPIC_API_KEY, Groq, or Ollama)
+cometcli agent                         # line-mode REPL on the active profile (no profile: the chat)
 cometcli agent --task "check fleet"    # headless one-shot task (cron/CI)
 cometcli agent --task "audit exposure" --mode readonly --budget 6 --max-iter 4
 cometcli ask "is my validator healthy" # one-shot agent question (streams)

@@ -110,13 +110,12 @@ case ":${PATH}:" in
       *)      rc="${HOME}/.profile" ;;
     esac
     line="export PATH=\"${dest}:\$PATH\"  # cometcli"
-    if [ -n "$rc" ] && ! grep -qF "$dest" "$rc" 2>/dev/null; then
+    if ! grep -qF "$dest" "$rc" 2>/dev/null; then
       printf '\n%s\n' "$line" >> "$rc"
       info "added ${dest} to PATH in ${rc}"
-      path_hint="run:  source ${rc}    # or open a new terminal"
-    else
-      path_hint="add ${dest} to your PATH"
-    fi ;;
+    fi
+    # an installer piped to bash can't change this terminal's PATH
+    path_hint="run this first:  source ${rc}    # or open a new terminal" ;;
 esac
 
 say ""
@@ -126,11 +125,10 @@ say ""
 say "get running in 60 seconds:"
 cat <<EOF
 
-  ${BIN} init                        # guided setup — probes your node,
-                                     # detects docker/systemd service
-  ${BIN} doctor                      # health checklist
-  ${BIN} mon watch                   # live dashboard
-  ${BIN} agent                       # AI copilot (optional)
+  ${BIN}                               # the chat — picks an AI model on first run
+  ${BIN} init                          # optional: set up a node profile
+  ${BIN} doctor                        # node health checklist
+  ${BIN} one <profile>                 # chat in node mode (validator tools)
 
 docs: https://github.com/${REPO}
 EOF
