@@ -13,15 +13,16 @@ import (
 
 func TestSetupProvider(t *testing.T) {
 	cases := []struct {
-		name, input, provider, keyEnv, key string
-		ok                                 bool
+		name, input, provider, model, keyEnv, key string
+		ok                                        bool
 	}{
-		{"skip", "\n", "", "", "", false},
-		{"by number", "1\nsk-test\n", "anthropic", "ANTHROPIC_API_KEY", "sk-test", true},
-		{"by name", "groq\ngsk-test\n", "groq", "GROQ_API_KEY", "gsk-test", true},
-		{"no key", "openai\n\n", "", "OPENAI_API_KEY", "", false},
-		{"unknown", "nope\n", "", "", "", false},
-		{"local", "6\n\n", "openai-compat", "", "", true},
+		{"skip", "\n", "", "", "", "", false},
+		{"default model", "1\nsk-test\n\n", "anthropic", "claude-opus-5-5", "ANTHROPIC_API_KEY", "sk-test", true},
+		{"model by number", "1\nsk-test\n2\n", "anthropic", "claude-sonnet-5-5", "ANTHROPIC_API_KEY", "sk-test", true},
+		{"model by name", "groq\ngsk-test\nllama-3.1-8b-instant\n", "groq", "llama-3.1-8b-instant", "GROQ_API_KEY", "gsk-test", true},
+		{"no key", "openai\n\n", "", "", "OPENAI_API_KEY", "", false},
+		{"unknown", "nope\n", "", "", "", "", false},
+		{"local", "6\n\n\n", "openai-compat", "qwen3:32b", "", "", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -48,6 +49,9 @@ func TestSetupProvider(t *testing.T) {
 			}
 			if saved.Agent.Provider != tc.provider {
 				t.Errorf("provider = %q, want %q", saved.Agent.Provider, tc.provider)
+			}
+			if saved.Agent.Model != tc.model {
+				t.Errorf("model = %q, want %q", saved.Agent.Model, tc.model)
 			}
 			if tc.provider == "openai-compat" && saved.Agent.BaseURL != "http://localhost:11434" {
 				t.Errorf("base_url = %q", saved.Agent.BaseURL)

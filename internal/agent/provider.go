@@ -245,6 +245,7 @@ func readSSE(r io.Reader, fn func(data string) error) error {
 }
 
 // apiError extracts {"error":{"message":…}} from a non-2xx response body.
+// A rejected API key comes back as an *AuthError.
 func apiError(prefix string, resp *http.Response) error {
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	var e struct {
@@ -253,13 +254,99 @@ func apiError(prefix string, resp *http.Response) error {
 		} `json:"error"`
 	}
 	if json.Unmarshal(raw, &e) == nil && e.Error != nil && e.Error.Message != "" {
+		if isAuthFailure(resp.StatusCode, e.Error.Message) {
+			return &AuthError{Provider: prefix, Status: resp.StatusCode, Msg: e.Error.Message}
+		}
 		return fmt.Errorf("%s: %s (HTTP %d)", prefix, e.Error.Message, resp.StatusCode)
 	}
 	msg := strings.TrimSpace(string(raw))
 	if len(msg) > 300 {
 		msg = msg[:300] + "…"
 	}
+	if isAuthFailure(resp.StatusCode, msg) {
+		return &AuthError{Provider: prefix, Status: resp.StatusCode, Msg: msg}
+	}
 	return fmt.Errorf("%s: HTTP %d %s", prefix, resp.StatusCode, msg)
+}
+
+// AuthError means the provider rejected the API key: expired, revoked or
+// wrong. The chat asks for a new one; scripts get the command to run.
+type AuthError struct {
+	Provider string
+	Status   int
+	Msg      string
+}
+
+// Reason is the alert line without the fix.
+func (e *AuthError) Reason() string {
+	r := fmt.Sprintf("%s rejected the API key — it may be expired or revoked (HTTP %d", e.Provider, e.Status)
+	if e.Msg != "" {
+		r += ": " + e.Msg
+	}
+	return r + ")"
+}
+
+func (e *AuthError) Error() string {
+	return e.Reason() + " — save a new one with `cometcli config set-key " + KeyEnvFor(e.Provider) + "`"
+}
+
+// isAuthFailure: 401/403, or Gemini's 400 "API key expired / not valid".
+func isAuthFailure(status int, msg string) bool {
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		return true
+	}
+	m := strings.ToLower(msg)
+	return status == http.StatusBadRequest && strings.Contains(m, "api key") &&
+		(strings.Contains(m, "expired") || strings.Contains(m, "not valid") || strings.Contains(m, "invalid"))
+}
+
+// KeyEnvFor is the variable a provider's API key is read from.
+func KeyEnvFor(provider string) string {
+	switch provider {
+	case "anthropic", "claude":
+		return "ANTHROPIC_API_KEY"
+	case "openai":
+		return "OPENAI_API_KEY"
+	case "groq":
+		return "GROQ_API_KEY"
+	case "openrouter":
+		return "OPENROUTER_API_KEY"
+	case "gemini", "google":
+		return "GEMINI_API_KEY"
+	}
+	return "OLLAMA_API_KEY"
+}
+
+// KeyEnv is the variable holding this agent's API key.
+func (a *Agent) KeyEnv() string {
+	if a.conf.APIKeyEnv != "" {
+		return a.conf.APIKeyEnv
+	}
+	return KeyEnvFor(a.Provider.Name())
+}
+
+// SetKey saves a new API key (~/.cometcli/credentials), exports it for this
+// process — the environment wins over the file, so a stale exported key
+// must be replaced too — and rebuilds the provider so the next turn uses it.
+func (a *Agent) SetKey(key string) error {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return errors.New("no key entered")
+	}
+	env := a.KeyEnv()
+	if err := config.SetCredential(env, key); err != nil {
+		return err
+	}
+	_ = os.Setenv(env, key)
+	if os.Getenv("COMETCLI_LLM_API_KEY") != "" {
+		_ = os.Setenv("COMETCLI_LLM_API_KEY", key)
+	}
+	p, err := NewProvider(a.conf)
+	if err != nil {
+		return err
+	}
+	a.Provider = p
+	return nil
 }
 
 // ErrNoProvider means no model is configured.

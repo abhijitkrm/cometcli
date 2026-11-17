@@ -58,6 +58,14 @@ func Run(o Options) error {
 // --- messages --------------------------------------------------------------
 
 type eventMsg struct{ e agent.Event }
+
+// keyMsg is the outcome of asking for a replacement API key.
+type keyMsg struct {
+	env     string
+	skipped bool
+	err     error
+}
+
 type doneMsg struct {
 	text string
 	err  error
@@ -198,7 +206,9 @@ func newModel(o Options) *model {
 	ta.KeyMap.InsertNewline.SetEnabled(false) // enter submits; ctrl+j / \⏎ add lines
 	ta.Focus()
 	sp := spinner.New()
-	sp.Spinner = spinner.Spinner{Frames: []string{"·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"}, FPS: 120 * time.Millisecond}
+	// a comet flying right with its tail of dust behind it (fixed width, so the
+	// text after it doesn't jitter)
+	sp.Spinner = spinner.Spinner{Frames: []string{"☄   ", "·☄  ", "··☄ ", "···☄", "··☄ ", "·☄  "}, FPS: 140 * time.Millisecond}
 	sp.Style = accentSt
 	// no terminal background query (its reply can leak into the input):
 	// dark unless COLORFGBG says the background is light
@@ -311,6 +321,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case secretMsg:
 		m.secretReq = v.p
 		return m, textinput.Blink
+	case keyMsg:
+		switch {
+		case v.skipped:
+			return m, m.print(result(dim.Render("skipped — save one later with `cometcli config set-key " + v.env + "`")))
+		case v.err != nil:
+			return m, m.print(result(errSt.Render("could not save the key: " + v.err.Error())))
+		}
+		return m, m.print(result(accentSt.Render("✓ new "+v.env+" saved") + dim.Render(" · send your message again")))
 	case doneMsg:
 		return m, m.onDone(v)
 	case jobDoneMsg:
@@ -773,8 +791,12 @@ func (m *model) onDone(v doneMsg) tea.Cmd {
 	m.live.Reset()
 	pending := m.a.TakeSteer() // typed mid-turn and not yet delivered
 	m.steering = false
+	var authErr *agent.AuthError
 	switch {
 	case v.err == nil:
+	case errors.As(v.err, &authErr):
+		// an expired or revoked key: say so and ask for a new one
+		cmds = append(cmds, m.print(result(errSt.Render("✗ "+authErr.Reason()))), m.askNewKey())
 	case errors.Is(v.err, context.Canceled):
 		if len(pending) > 0 {
 			cmds = append(cmds, m.print(result(errSt.Render("Interrupted")+dim.Render(" · sending your message"))))
@@ -915,6 +937,27 @@ func (m *model) secret(c *toolkit.Context, prompt string) (string, error) {
 	case <-c.Done():
 		return "", c.Err()
 	}
+}
+
+// askNewKey opens a masked prompt for a replacement API key and saves it
+// (and reloads the provider) when entered.
+func (m *model) askNewKey() tea.Cmd {
+	env := m.a.KeyEnv()
+	in := textinput.New()
+	in.EchoMode = textinput.EchoPassword
+	in.EchoCharacter = '•'
+	in.Prompt = ""
+	in.Focus()
+	p := &pendingSecret{prompt: "API key rejected — paste a new " + env, input: in, resp: make(chan secretResult, 1)}
+	m.secretReq = p
+	a := m.a
+	return tea.Batch(textinput.Blink, func() tea.Msg {
+		r := <-p.resp
+		if r.err != nil {
+			return keyMsg{env: env, skipped: true}
+		}
+		return keyMsg{env: env, err: a.SetKey(r.s)}
+	})
 }
 
 func (m *model) secretKey(k tea.KeyMsg) tea.Cmd {
@@ -1219,7 +1262,7 @@ func (m *model) banner() string {
 		p := m.a.Ctx.Profile
 		scope = fmt.Sprintf("node %s (%s)", p.Name, p.ChainID)
 	}
-	body := accentSt.Render("✻") + " Welcome to " + bold.Render("cometcli") + "!\n\n" +
+	body := accentSt.Render("☄") + " Welcome to " + bold.Render("cometcli") + "!\n\n" +
 		dim.Render(fit("  /help for help, /status for your current setup")) + "\n\n" +
 		dim.Render(fit("  cwd: "+cwd)) + "\n" +
 		dim.Render(fitEnd("  "+scope+" · "+m.a.Provider.Name()+"/"+m.a.Model))
@@ -1438,9 +1481,12 @@ func todoLines(ts []agent.Todo) string {
 	return strings.Join(out, "\n")
 }
 
-// verbs for the spinner, one picked per turn — comet-flavoured
-var verbs = []string{"Orbiting", "Charting", "Stargazing", "Tracing the tail", "Plotting a course", "Scanning the sky",
-	"Streaking", "Navigating", "Surveying", "Triangulating", "Observing", "Aligning", "Mapping the orbit", "Sweeping the sky"}
+// verbs for the spinner, one picked per turn — space and comet flavoured
+var verbs = []string{"Riding the solar wind", "Slingshotting past Jupiter", "Crossing the Oort cloud", "Skimming the corona",
+	"Rounding perihelion", "Igniting the coma", "Shedding ice and dust", "Aligning with Polaris", "Charting constellations",
+	"Drifting through the Kuiper belt", "Surfing the ion tail", "Catching starlight", "Tracking the ecliptic",
+	"Slipping past Saturn's rings", "Falling toward the sun", "Mapping the Milky Way", "Locking onto a pulsar",
+	"Threading the asteroid belt", "Reading the star charts", "Coasting through the void"}
 
 func lastLines(s string, n int) string {
 	lines := strings.Split(s, "\n")
